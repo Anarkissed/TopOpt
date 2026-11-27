@@ -194,7 +194,7 @@ public struct RunReportBlocks: Equatable, Sendable {
     public var latticeFile: LatticeFileStrength? = nil
     /// ★ his 11-21 ("show all the information associated to the final result"): that run's print file, strengthening and checks.
     public var printFile: LatticeFileFacts? = nil
-    /// ★ notes30 STRUCTURAL AUTO: how Auto strengthened this print file (its checks, the round kept), Results' "Strengthened by Auto". nil on
+    /// ★ notes30 SA1: how Auto strengthened this print file (its checks, the round kept), Results' "Strengthened by Auto". nil on
     /// every other run.
     public var structuralAuto: StructuralAuto.Record? = nil
 

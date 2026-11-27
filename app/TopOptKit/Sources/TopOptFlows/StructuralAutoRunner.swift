@@ -1,7 +1,8 @@
 // StructuralAutoRunner — ★ notes30 STRUCTURAL AUTO on the Mac (his rework, 11-27: "go for #2" — start from today's Auto and
 // thicken only the struts the Mac's first check shows are short, the add-only loop he approved for Organic). Check 1 is today's
-// print-file job with its strength check, unchanged. It passes: done. Short: the app thickens only the short cells
-// (StructuralAuto.thicken) and the Mac makes and checks the file again. The lightest file that passes is kept, else the
+// print-file job with its strength check, unchanged. It passes: done. Short: the app thickens only the cells holding a strut the
+// check judged short — its reading anchored to the check's own weakest strut (his cube fix) — and the Mac makes and checks
+// the file again. The lightest file that passes is kept, else the
 // stronger; the thickened stress is remembered so the drawing follows the file kept, and the result's report carries the record
 // (`structural_auto`) Results reads. Resume: each job is recorded for the version while it is on the Mac (LatticeJobRecorder);
 // the round not kept is ended once read.
@@ -24,7 +25,7 @@ extension LatticeFileButton {
     /// How long the chain waits for the preview's layout (the thickening's cells) before going on without it.
     static let layoutWaitSeconds: TimeInterval = 120
 
-    /// The Lattice press on Structural Auto. `layout`: the layout the first file was made from (the preview's own), with the
+    /// The Lattice press on Structural Auto. `layout`: the layout the first file was made from (the preview's own lay), with the
     /// check grid's lattice voxels (nil: not known — nothing is thickened; check 1's file stands). `onStep`: the card's steps.
     public static func structuralAutoRunner(config: RemoteRunnerConfig, job: LatticeFileJob.ForPart, ask: StructuralAutoAsk,
                                             projectName: String, strengthJob: Data?, densityGCm3: Double,
@@ -61,8 +62,9 @@ extension LatticeFileButton {
                 guard check < total else { break }
                 // ★ add-only: a check that passes ends it (nothing is ever thinned)
                 if rounds[check - 1].passed { onStep(.shortcut(passed: true)); break }
-                // thicken only the short struts, from this check's own lattice stress on the layout the file was made from
-                guard let c = StructuralAuto.CheckField.of(made.fields),
+                // thicken only the short struts, read on the layout the file was made from and anchored to the check's own
+                // weakest strut (his cube fix)
+                guard let c = StructuralAuto.CheckField.of(made),
                       let lay = wait(seconds: layoutWaitSeconds, { await layout(c) }),
                       let t = StructuralAuto.thicken(check: c, stage: ask.stage, layout: lay, settings: ask.settings, ask.inputs),
                       t.thickenedCells > 0 else {

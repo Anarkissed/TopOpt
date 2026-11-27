@@ -182,7 +182,7 @@ std::string strut_law_source(LatticeTopology topo);
 double strut_law_bulk_only_below(LatticeTopology topo);
 std::string strut_law_resolution_note(LatticeTopology topo);
 
-// ── ★ STRUCTURAL AUTO (notes30, his 11-24 vision: "work backwards from the amount the user wants to beat the load capacity
+// ── ★ notes30 SA1 (Structural Auto, REMOVE.md: this block to "notes30 SA1 end"; his 11-24 vision: "work backwards from the amount the user wants to beat the load capacity
 // and guess at the best possible settings for the least possible plastic"; his 11-26 D1: the target is the part's own Safety
 // margin, 150 % by default) — THE SAME LAW, TURNED ROUND ──────────────────────────────────────────────────────────────────
 // The strength check judges a credited strut cell by the law above: at one voxel, with the lattice's macro stress Sigma
@@ -240,6 +240,7 @@ struct StrutLawSizeSummary {
 StrutLawSizeSummary strut_size_field(LatticeTopology topo, const double* tensor, std::size_t tensor_count,
                                      const Vec3& build_dir, double yield_strength_mpa, double z_knockdown, double target,
                                      float* ratio_out, float* rho_out, unsigned char* short_out);
+// ★ notes30 SA1 end
 
 }  // namespace topopt
 

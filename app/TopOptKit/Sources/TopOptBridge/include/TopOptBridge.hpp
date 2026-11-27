@@ -1252,7 +1252,8 @@ double lattice_aesthetic_density_ceiling(const std::string& topology);
 double lattice_relative_density(const std::string& topology, double strut_radius_mm,
                                 double cell_size_mm);
 
-// ★ notes30 STRUCTURAL AUTO: the strut law TURNED ROUND, over a whole stress field (core's strut_size_field): per voxel
+// ★ notes30 SA1 (Structural Auto, REMOVE.md; structural_auto_bridge.cpp): the strut law TURNED ROUND, over a whole
+// stress field (core's strut_size_field): per voxel
 // of a Voigt stress tensor field (6 per voxel, core's stress_tensor_field order, MPa) the lightest strut / cell whose law
 // margin reaches `target` (the Safety margin he set, x the sizing cushion) — the law the strength check judges a cell by —
 // written into the caller's arrays (`ratio_out`, `rho_out`, `short_out`, each tensor_count / 6 long; null skips one).
@@ -1271,6 +1272,7 @@ StrutSizeFieldSummary lattice_strut_size_field(const std::string& topology, cons
 // The law's margin at one voxel and density (core's strut_law_margin_at, the check's formula). 0 with a refusal.
 double lattice_strut_law_margin(const std::string& topology, double rho, double vm, double pressure, double build_x,
                                 double build_y, double build_z, double yield_mpa, double z_knockdown);
+// ★ notes30 SA1 end
 
 // ★★ CORE'S LOCAL MEMBER THICKNESS, for the preview (task 2026-08-20).
 //

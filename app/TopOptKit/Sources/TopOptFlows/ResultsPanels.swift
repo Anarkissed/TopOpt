@@ -300,7 +300,7 @@ extension ResultsModel {
             let plastic = tab.map { $0.massLabel + ($0.savingsPercent > 0 ? " \u{00B7} \($0.savingsPercent)% less than solid" : "") }
             r += a.rows(loadKg: shownLoadKg, unit: loadUnit, infillPercent: infillPercent, plastic: plastic)
             if let f = reportBlocks?.printFile { r += f.rows(.strength) }   // "Strengthened"
-            if let auto = reportBlocks?.structuralAuto {   // ★ notes30 STRUCTURAL AUTO: how Auto strengthened it, its (i) the rounds
+            if let auto = reportBlocks?.structuralAuto {   // ★ notes30 SA1: how Auto strengthened it, its (i) the rounds
                 r.append(ResultsDetailRow(label: StructuralAutoCopy.strengthenedByAuto, value: StructuralAutoCopy.strengthenedValue(auto),
                                           info: StructuralAutoCopy.strengthenedInfo(auto)))
             }

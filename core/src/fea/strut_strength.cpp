@@ -1,6 +1,6 @@
 #include "topopt/strut_strength.hpp"
 
-#include <algorithm>
+#include <algorithm>   // ★ notes30 SA1 (REMOVE.md)
 #include <array>
 #include <cmath>
 #include <limits>
@@ -430,7 +430,7 @@ StrutStrengthReport evaluate_with(const LawTable& T,
 
 }  // namespace
 
-// ── ★ STRUCTURAL AUTO (notes30): the law turned round ───────────────────────────────────────────────────────────────────
+// ── ★ notes30 SA1 (Structural Auto, REMOVE.md: this block to "notes30 SA1 end"): the law turned round ─────────────────
 namespace {
 
 double cross_factor_of(const Vec3& build_dir, const char* who) {
@@ -641,5 +641,6 @@ StrutLawSizeSummary strut_size_field(LatticeTopology topo, const double* tensor,
   }
   return sum;
 }
+// ★ notes30 SA1 end
 
 }  // namespace topopt

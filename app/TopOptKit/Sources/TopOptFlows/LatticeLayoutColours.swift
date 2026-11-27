@@ -46,11 +46,8 @@ public enum LatticeLayoutColours {
             cellFrame = r.cellFrame; cellLo = r.cellLo; cellWallMM = r.cellWallMM
             floorCellMM = r.floorCellMM
             sheets = r.sheets; sheetSeams = r.sheetSeams   // ★ SHEETS
-            cellStrut = r.cellStrut   // ★ notes30 STRUCTURAL AUTO
             self.token = token
         }
-        /// ★ notes30 STRUCTURAL AUTO: 1 per cell, its strut width, mm (the thickening round reads what was laid).
-        public var cellStrut: [Float] = []
         public var barCount: Int { bars.count / 7 }
         public var cellCount: Int { cellInfo.count / 5 }
         public static func == (a: Laid, b: Laid) -> Bool { a.token == b.token && a.bars.count == b.bars.count }

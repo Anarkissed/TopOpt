@@ -191,7 +191,7 @@ public final class LatticeMacMake: ObservableObject {
     /// organic one"): the job's lattice kind, which picks the card's animation (Organic's vines, a cell lattice's hexagons).
     public enum Kind: Equatable, Sendable { case organic, cells }
     @Published public private(set) var kind: Kind = .organic
-    /// ★ notes30 STRUCTURAL AUTO: the steps of a Structural Auto press (nil: any other print file — its card as before). The card
+    /// ★ notes30 SA1: the steps of a Structural Auto press (nil: any other print file — its card as before). The card
     /// shows them in place of the animation (his 11-26: "no animation").
     @Published public private(set) var autoSteps: StructuralAutoSteps?
     private(set) var projectID: UUID?
@@ -227,7 +227,7 @@ public final class LatticeMacMake: ObservableObject {
     func begin(project id: UUID, path: String?, run: RunModel? = nil, fileOnly: Bool = false, kind: Kind = .organic,
                autoSteps: StructuralAutoSteps? = nil, onMac: Bool = true, cancel: @escaping () -> Void, now: Date = Date()) {
         events?.cancel(); events = nil
-        self.autoSteps = autoSteps   // ★ notes30 STRUCTURAL AUTO
+        self.autoSteps = autoSteps   // ★ notes30 SA1
         projectID = id; self.path = path; cancelAction = cancel
         started = now; stage = onMac ? LatticeMacMakeCopy.waiting : LatticeMacMakeCopy.makingFile; checking = false
         self.fileOnly = fileOnly
@@ -286,7 +286,7 @@ public final class LatticeMacMake: ObservableObject {
     /// The file arrived from the Mac: drawing it.
     func fileArrived() { if going { stage = LatticeMacMakeCopy.drawing } }
 
-    /// ★ notes30 STRUCTURAL AUTO: the runner's step (from its thread; applied here on the main thread).
+    /// ★ notes30 SA1: the runner's step (from its thread; applied here on the main thread).
     nonisolated func autoStep(_ e: StructuralAutoSteps.Event) {
         Task { @MainActor in self.applyAuto(e) }
     }
@@ -317,7 +317,7 @@ public final class LatticeMacMake: ObservableObject {
         runWatch?.cancel(); runWatch = nil; waitWatch?.cancel(); waitWatch = nil; run = nil
         going = false; inBackground = false; runOver = false; runSeen = false
         checking = false; fileOnly = false; cancelAction = nil; projectID = nil; request = nil   // (`kind` stays: each press sets it)
-        autoSteps = nil   // ★ notes30
+        autoSteps = nil   // ★ notes30 SA1
     }
 
     /// His Cancel on the card.
@@ -340,7 +340,7 @@ struct LatticeMacMakeModal: View {
 
     var body: some View {
         if make.shown, let steps = make.autoSteps, !StructuralAutoCard.controlAnimated {
-            // ★ notes30 STRUCTURAL AUTO (his 11-26: "no animation ... a pop-up with a progress bar and details saying exactly
+            // ★ notes30 SA1 (his 11-26: "no animation ... a pop-up with a progress bar and details saying exactly
             // what's happening in each step"): the steps card, centred, nothing moving but the bar at each step's real end
             ZStack {
                 Rectangle().fill(Color.black.opacity(0.35)).ignoresSafeArea()

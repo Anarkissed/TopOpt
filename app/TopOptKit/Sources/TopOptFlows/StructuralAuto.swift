@@ -13,14 +13,18 @@
 //   Round 0 = today's Structural Auto lay, unchanged (nothing here touches the preview's settings or its stress).
 //   Check 1 on the Mac: today's print-file job with its strength check. It passes: done, one check (the add-only rule: nothing
 //     is ever thinned).
-//   Short: the check's own lattice stress (fields.bin's composite von Mises; the stress's shape — its pressure share — from the
-//     stage solve, as fields.bin v1 carries no tensor), on the lattice voxels of the layout the file was made from, is read by
-//     the strut law the check judges by (core's strut_size_field, the law turned round): each cell with a voxel under the
-//     target x 1.05 gets the strut its own law says it needs there — never thinner anywhere, never past the quilt-off limit
-//     (where it would need more it stays at the limit and the pop-up names the fix). The next lay is today's lay again with the
-//     stress raised under those cells just enough that its own By stress ramp lays that strut there (no new job key: the Mac's
-//     engine is unchanged).
+//   Short: each cell of the layout the file was made from is read at its lattice voxels (the check's composite von Mises with
+//     the stage's stress shape, the law at the strut laid), and that reading is ANCHORED to the check's OWN weakest strut
+//     margin (its strength block — his cube fix, 11-27: on his cube the app's reading alone said 1.60x where the check said
+//     1.49x, so nothing was thickened). Each cell under the target x 1.05 gets the strut its own law says it needs — never
+//     thinner anywhere, never past the heaviest strut today's lay makes (held there; the pop-up names the fix). The next lay is today's lay again
+//     with the stress raised inside those cells just enough that its own By stress ramp lays that strut there (no new job key:
+//     the Mac's engine is unchanged).
 //   Check 2. The lightest file that passes is kept; neither: the stronger, and the pop-up says what fixes it.
+//
+// ★ HIS SWITCH (11-27, "easily removable if after my tests I don't think it's worth it"): Settings' "Structural Auto"
+// (StructuralAutoSwitch, on by default). Off: today's Structural Auto exactly — one check, nothing thickened. Every touch-point
+// outside the StructuralAuto*.swift files is marked "★ notes30 SA1" and listed in the plan's REMOVE.md.
 import Foundation
 import simd
 import TopOptKit
@@ -32,23 +36,27 @@ public enum StructuralAuto {
     public static let checksPerPress = 2
     /// ★ His rework (11-27): a strut is short when its margin is under the target x this; it is thickened to reach it.
     public static let thickenAbove = 1.05
-    /// RED CONTROL (tests): Structural Auto off — the press is today's one check, nothing thickened.
-    nonisolated(unsafe) public static var controlOff = false
     /// The strut types with a measured law (core's strut_law_measured, the 7 strut types; the sheets are Aesthetic only).
     public static let lawTypes: Set<String> = ["octet", "sc", "bcc", "fcc", "diamond", "kelvin", "rhombic"]
 
     // MARK: when
 
-    /// Whether the Lattice press strengthens this part: Structural, the Lattice page on Auto, a cell lattice of a strut type with
-    /// a law, graded By stress (today's Auto: the thickening is read through that ramp). Never Manual, Aesthetic, Organic, a sheet.
+    /// Whether this part is one Structural Auto works on: Structural, the Lattice page on Auto, a cell lattice of a strut type
+    /// with a law, graded By stress (today's Auto: the thickening is read through that ramp). Never Manual, Aesthetic, Organic, a
+    /// sheet. (The drawing follows a file a press kept for such a part; `thickens` says whether a press thickens.)
     @MainActor public static func applies(_ l: LatticeSettings, pageManual: Bool) -> Bool {
-        guard !controlOff, !pageManual, (l.stageMode ?? .structural) == .structural, !LatticeLayoutPreview.organic(l) else {
+        guard !pageManual, (l.stageMode ?? .structural) == .structural, !LatticeLayoutPreview.organic(l) else {
             return false
         }
         guard lawTypes.contains(l.topologyID.isEmpty ? "octet" : l.topologyID) else { return false }
         return LatticeLayoutPreview.settings(l).byStress
     }
     @MainActor public static func applies(_ p: ProjectModel) -> Bool { applies(p.lattice, pageManual: p.latticePageManual) }
+    /// ★ His switch: whether the Lattice press thickens short struts here — such a part, with Settings' "Structural Auto" on.
+    @MainActor public static func thickens(_ l: LatticeSettings, pageManual: Bool) -> Bool {
+        StructuralAutoSwitch.isOn && applies(l, pageManual: pageManual)
+    }
+    @MainActor public static func thickens(_ p: ProjectModel) -> Bool { thickens(p.lattice, pageManual: p.latticePageManual) }
 
     // MARK: the inputs
 
@@ -84,23 +92,27 @@ public enum StructuralAuto {
                       zKnockdown: zk, up: up, margin: p.force.safetyMarginValue)
     }
 
-    // MARK: what the check made and what was laid
+    // MARK: what the check judged and what was laid
 
-    /// The check's grid (fields.bin's), and its composite solve's von Mises per voxel.
+    /// The check's grid (fields.bin's) and its composite solve's von Mises per voxel; and the check's OWN weakest strut margin
+    /// (its strength block's `strut.margin_worst_case`) — his cube fix (11-27): the app's reading is anchored to it.
     public struct CheckField: Sendable, Equatable {
         public var vonMises: [Float]
         public var nx: Int, ny: Int, nz: Int
         public var origin: SIMD3<Double>
         public var spacingMM: Double
-        public init(vonMises: [Float], nx: Int, ny: Int, nz: Int, origin: SIMD3<Double>, spacingMM: Double) {
+        /// The check's own weakest strut margin (nil: the block does not say).
+        public var strutMargin: Double?
+        public init(vonMises: [Float], nx: Int, ny: Int, nz: Int, origin: SIMD3<Double>, spacingMM: Double, strutMargin: Double? = nil) {
             self.vonMises = vonMises; self.nx = nx; self.ny = ny; self.nz = nz; self.origin = origin; self.spacingMM = spacingMM
+            self.strutMargin = strutMargin
         }
-        /// From the check's fields.bin (its first block: the composite solve's).
-        static func of(_ fields: Data?) -> CheckField? {
-            guard let d = fields, let f = RemoteFieldsContainer.parse(d), let b = f.variants.first,
+        /// From a made file: its fields.bin (the first block: the composite solve's) and its strength block.
+        static func of(_ m: LatticeFileRun.Made) -> CheckField? {
+            guard let d = m.fields, let f = RemoteFieldsContainer.parse(d), let b = f.variants.first,
                   b.vonMises.count == f.gridNx * f.gridNy * f.gridNz, !b.vonMises.isEmpty else { return nil }
             return CheckField(vonMises: b.vonMises, nx: f.gridNx, ny: f.gridNy, nz: f.gridNz, origin: f.gridOrigin,
-                              spacingMM: f.spacing)
+                              spacingMM: f.spacing, strutMargin: m.report.strength?.strutMargin)
         }
     }
 
@@ -155,138 +167,81 @@ public enum StructuralAuto {
 
     // MARK: the thickening
 
-    /// One thickening round: the stress the next lay reads (the stage's, raised under the short cells), and what it did.
+    /// One thickening round: the stress the next lay reads (the stage's, raised inside the short cells), and what it did.
     public struct Thickened: Sendable, Equatable {
         public var field: LatticeDemandField
-        /// Cells with a lattice voxel under the target, those given a thicker strut, and those held at the quilt-off limit
-        /// (they need more than the densest open lattice: the pop-up names the fix).
+        /// Cells with a strut under the target, those given a thicker strut, and those held at the heaviest strut today's lay
+        /// makes (they need more than the densest open lattice: the pop-up names the fix).
         public var shortCells = 0, thickenedCells = 0, cappedCells = 0
-        /// The law's weakest margin over the short cells' voxels, as laid (its reading of check 1) and after thickening.
+        /// The weakest margin over the short cells (the check's own number), and the law's prediction for them after.
         public var weakestNow = 0.0, weakestPredicted = 0.0
+        /// The check's own weakest strut margin over the app's reading of the same check (1: not anchored).
+        public var anchor = 1.0
         public var key = 0
     }
 
-    /// Thicken only the cells check 1 shows are short — a lattice voxel whose margin by the check's own law, at the strut laid,
-    /// is under the target (add-only: never thinner anywhere; never past the quilt-off limit). nil:
-    /// nothing to read (no tensor, no layout, no ramp). `settings`: the lay's own (its ramp); `line`: the printer's line width.
+    /// One cell as the thickening reads it: its size, the strut it was laid with, its weakest margin (anchored to the check's
+    /// own), its box (the part's mm) and the stress at its weakest voxel.
+    struct CellReading {
+        var size: Double, strut: Double, margin: Double
+        var lo: SIMD3<Double>, hi: SIMD3<Double>
+        var tensor: [Double]
+    }
+
+    /// Thicken only the cells whose struts are short of the target, each just as far as its law says. Each cell's struts are
+    /// read at their lattice voxels (the check's composite von Mises with the stage's stress shape, the law at the strut laid),
+    /// and that reading is ANCHORED to the check's own weakest strut margin (his cube fix, 11-27: the check's number, never
+    /// the app's re-reading alone — on his cube it read 1.60x where the check said 1.49x). Add-only: never thinner anywhere;
+    /// never past the heaviest strut today's lay makes (held there, counted). nil: nothing to read (no ramp, no cells, no
+    /// stage tensor). `layout`: the preview's lay the first file was made from, and its lattice voxels on the check's grid.
     public static func thicken(check c: CheckField, stage f: LatticeDemandField, layout: Layout, settings s: LatticeLayoutSession.Settings,
                                _ inputs: Inputs) -> Thickened? {
-        let n = c.nx * c.ny * c.nz, fn = f.nx * f.ny * f.nz
-        let laid = layout.laid
-        let cells = laid.cellCount
-        guard n > 0, c.vonMises.count == n, layout.lattice.count == n, fn > 0, f.stressTensor.count == 6 * fn, f.vonMises.count == fn,
-              c.spacingMM > 0, f.spacingMM > 0, cells > 0, laid.cellStrut.count == cells, laid.cellLo.count == 3 * cells,
+        let n = c.nx * c.ny * c.nz, fn = f.nx * f.ny * f.nz, laid = layout.laid, cells = laid.cellCount
+        guard n > 0, c.vonMises.count == n, layout.lattice.count == n, fn > 0, f.stressTensor.count == 6 * fn,
+              f.vonMises.count == fn, c.spacingMM > 0, f.spacingMM > 0, cells > 0, laid.cellLo.count == 3 * cells,
               laid.cellFrame.count == cells else { return nil }
-        // 1. the lattice's own stress at each lattice voxel: the check's von Mises, the stage's shape (its pressure share)
-        var tensor = [Double](repeating: 0, count: 6 * n)
-        for k in 0..<c.nz {
-            for j in 0..<c.ny {
-                for i in 0..<c.nx {
-                    let e = i + c.nx * (j + c.ny * k)
-                    guard layout.lattice[e] else { continue }
-                    let vm1 = Double(c.vonMises[e])
-                    guard vm1 > 0, vm1.isFinite else { continue }
-                    let p = c.origin + SIMD3(Double(i) + 0.5, Double(j) + 0.5, Double(k) + 0.5) * c.spacingMM
-                    let q = (p - f.origin) / f.spacingMM
-                    let si = Int(q.x.rounded(.down)), sj = Int(q.y.rounded(.down)), sk = Int(q.z.rounded(.down))
-                    var vm0 = 0.0, s = -1
-                    if si >= 0, sj >= 0, sk >= 0, si < f.nx, sj < f.ny, sk < f.nz {
-                        s = si + f.nx * (sj + f.ny * sk)
-                        vm0 = f.stressTensor.withUnsafeBufferPointer { vonMises($0, at: 6 * s) }
-                    }
-                    if s >= 0, vm0 > 1e-12 {
-                        let scale = vm1 / vm0
-                        for c6 in 0..<6 { tensor[6 * e + c6] = f.stressTensor[6 * s + c6] * scale }
-                    } else {
-                        tensor[6 * e] = vm1   // no stage stress here: the check's, as a pull
-                    }
-                }
-            }
-        }
-        // 2. the lightest density that holds the target at each lattice voxel (the check's own law, turned round)
-        guard let need = TopOptKit.latticeStrutSizeField(topology: inputs.topology, tensor: tensor, buildUp: inputs.up,
-                                                         yieldMPa: inputs.yieldMPa, zKnockdown: inputs.zKnockdown,
-                                                         target: inputs.target) else { return nil }
         var partRef = 0.0
         for ci in 0..<cells { partRef = Swift.max(partRef, Double(laid.cellInfo[5 * ci])) }
-        guard let ramp = ramp(s, partRefMM: partRef, touch: need.touch, openLook: need.openLook) else { return nil }
-        // 3. each cell: its own voxels (a lattice voxel whose centre lies in its cube), short where the law needs more than laid
-        func frame(_ fi: Int) -> (o: SIMD3<Double>, a: [SIMD3<Double>])? {
-            guard fi >= 0, 12 * fi + 11 < laid.frames.count else { return nil }
-            let v = laid.frames[(12 * fi)..<(12 * fi + 12)].map(Double.init)
-            return (SIMD3(v[0], v[1], v[2]), [SIMD3(v[3], v[4], v[5]), SIMD3(v[6], v[7], v[8]), SIMD3(v[9], v[10], v[11])])
-        }
+        guard partRef > 0 else { return nil }
+        // 1. every cell's weakest strut, as the app reads it; then anchored to the check's own weakest
+        var read = readCells(c, f, layout, partRef: partRef, inputs)
         var out = Thickened(field: f)
+        let weakestRead = read.map(\.margin).min() ?? .infinity
+        if let w = c.strutMargin, w.isFinite, w > 0, weakestRead.isFinite, weakestRead > 0 { out.anchor = w / weakestRead }
+        for i in read.indices { read[i].margin *= out.anchor }
+        let shorts = read.filter { $0.margin < inputs.target }
+        out.shortCells = shorts.count
+        guard !shorts.isEmpty else { return out }
+        // 2. the stress each short cell's struts carry: its weakest voxel's, sized so the law at the laid strut gives the
+        // anchored margin (the law is linear in the stress)
+        var tensor: [Double] = []
+        var rhoNow: [Double] = []
+        for sc in shorts {
+            let rho = TopOptKit.latticeRelativeDensity(topology: inputs.topology, strutRadiusMM: sc.strut / 2, cellMM: sc.size)
+            let law = lawMargin(sc.tensor, rho: rho, inputs)
+            let k = law.isFinite && law > 0 ? law / Swift.max(sc.margin, 1e-3) : 1
+            tensor += sc.tensor.map { $0 * k }
+            rhoNow.append(rho)
+        }
+        // 3. the density that holds the target there (the check's own law, turned round), and the strut today's ramp lays it with
+        guard let need = TopOptKit.latticeStrutSizeField(topology: inputs.topology, tensor: tensor, buildUp: inputs.up,
+                                                         yieldMPa: inputs.yieldMPa, zKnockdown: inputs.zKnockdown,
+                                                         target: inputs.target),
+              let ramp = ramp(s, partRefMM: partRef, touch: need.touch, openLook: need.openLook) else { return nil }
         var raised = f.vonMises
         var weakestNow = Double.infinity, weakestAfter = Double.infinity
-        let line = s.beadMM
-        for ci in 0..<cells {
-            let size = Double(laid.cellInfo[5 * ci]), strut = Double(laid.cellStrut[ci])
-            guard size > 0, strut > 0, let fr = frame(Int(laid.cellFrame[ci])) else { continue }
-            let lo = SIMD3(Double(laid.cellLo[3 * ci]), Double(laid.cellLo[3 * ci + 1]), Double(laid.cellLo[3 * ci + 2]))
-            let corner = { (a: Double, b: Double, cc: Double) -> SIMD3<Double> in
-                fr.o + fr.a[0] * a + fr.a[1] * b + fr.a[2] * cc
-            }
-            var wlo = SIMD3<Double>(repeating: .infinity), whi = SIMD3<Double>(repeating: -.infinity)
-            for m in 0..<8 {
-                let w = corner(lo.x + ((m & 1) != 0 ? size : 0), lo.y + ((m & 2) != 0 ? size : 0), lo.z + ((m & 4) != 0 ? size : 0))
-                wlo = simd_min(wlo, w); whi = simd_max(whi, w)
-            }
-            // this cell's lattice voxels on the check's grid
-            let i0 = Swift.max(0, Int(((wlo.x - c.origin.x) / c.spacingMM).rounded(.down)))
-            let i1 = Swift.min(c.nx - 1, Int(((whi.x - c.origin.x) / c.spacingMM).rounded(.down)))
-            let j0 = Swift.max(0, Int(((wlo.y - c.origin.y) / c.spacingMM).rounded(.down)))
-            let j1 = Swift.min(c.ny - 1, Int(((whi.y - c.origin.y) / c.spacingMM).rounded(.down)))
-            let k0 = Swift.max(0, Int(((wlo.z - c.origin.z) / c.spacingMM).rounded(.down)))
-            let k1 = Swift.min(c.nz - 1, Int(((whi.z - c.origin.z) / c.spacingMM).rounded(.down)))
-            guard i0 <= i1, j0 <= j1, k0 <= k1 else { continue }
-            let rhoNow = TopOptKit.latticeRelativeDensity(topology: inputs.topology, strutRadiusMM: strut / 2, cellMM: size)
-            var neededRatio = 0.0
-            var shortVoxels: [Int] = []
-            var cellWeakest = Double.infinity
-            for k in k0...k1 {
-                for j in j0...j1 {
-                    for i in i0...i1 {
-                        let e = i + c.nx * (j + c.ny * k)
-                        guard layout.lattice[e], tensor[6 * e] != 0 || tensor[6 * e + 1] != 0 || tensor[6 * e + 2] != 0
-                                || tensor[6 * e + 3] != 0 || tensor[6 * e + 4] != 0 || tensor[6 * e + 5] != 0 else { continue }
-                        let p = c.origin + SIMD3(Double(i) + 0.5, Double(j) + 0.5, Double(k) + 0.5) * c.spacingMM - fr.o
-                        let a = SIMD3(simd_dot(p, fr.a[0]), simd_dot(p, fr.a[1]), simd_dot(p, fr.a[2])) - lo
-                        guard a.x >= -1e-9, a.y >= -1e-9, a.z >= -1e-9, a.x <= size + 1e-9, a.y <= size + 1e-9, a.z <= size + 1e-9
-                        else { continue }
-                        // short: the check's own law, at the strut laid, under the target
-                        let t6 = Array(tensor[(6 * e)..<(6 * e + 6)])
-                        let vm = t6.withUnsafeBufferPointer { vonMises($0, at: 0) }, pr = (t6[0] + t6[1] + t6[2]) / 3
-                        let m = TopOptKit.latticeStrutLawMargin(topology: inputs.topology, rho: rhoNow, vonMisesMPa: vm,
-                                                                pressureMPa: pr, buildUp: inputs.up, yieldMPa: inputs.yieldMPa,
-                                                                zKnockdown: inputs.zKnockdown)
-                        if m < inputs.target {
-                            shortVoxels.append(e)
-                            cellWeakest = Swift.min(cellWeakest, m)
-                            neededRatio = Swift.max(neededRatio, Double(need.ratio[e]))
-                        }
-                    }
-                }
-            }
-            guard !shortVoxels.isEmpty else { continue }
-            out.shortCells += 1
-            let nowRatio = strut / size
-            // never past the quilt-off limit, nor past what the ramp can lay
-            let cap = Swift.min(quiltOffRatio(touch: need.touch, cellMM: size, lineMM: line), ramp.rHeavy)
-            var newRatio = Swift.max(nowRatio, neededRatio)
+        for (k, sc) in shorts.enumerated() {
+            let nowRatio = sc.strut / sc.size
+            let cap = Swift.min(quiltOffRatio(touch: need.touch, cellMM: sc.size, lineMM: s.beadMM), ramp.rHeavy)
+            var newRatio = Swift.max(nowRatio, Double(need.ratio[k]))
             if newRatio > cap + 1e-12 { newRatio = Swift.max(nowRatio, cap); out.cappedCells += 1 }
-            let rhoAfter = TopOptKit.latticeRelativeDensity(topology: inputs.topology, strutRadiusMM: newRatio * size / 2, cellMM: size)
-            weakestNow = Swift.min(weakestNow, cellWeakest)
-            for e in shortVoxels {
-                let t = Array(tensor[(6 * e)..<(6 * e + 6)])
-                let vm = t.withUnsafeBufferPointer { vonMises($0, at: 0) }, pr = (t[0] + t[1] + t[2]) / 3
-                weakestAfter = Swift.min(weakestAfter, TopOptKit.latticeStrutLawMargin(
-                    topology: inputs.topology, rho: rhoAfter, vonMisesMPa: vm, pressureMPa: pr, buildUp: inputs.up,
-                    yieldMPa: inputs.yieldMPa, zKnockdown: inputs.zKnockdown))
-            }
+            let rhoAfter = TopOptKit.latticeRelativeDensity(topology: inputs.topology, strutRadiusMM: newRatio * sc.size / 2,
+                                                            cellMM: sc.size)
+            weakestNow = Swift.min(weakestNow, sc.margin)
+            weakestAfter = Swift.min(weakestAfter, lawMargin(Array(tensor[(6 * k)..<(6 * k + 6)]),
+                                                             rho: Swift.max(rhoAfter, rhoNow[k]), inputs))
             guard newRatio > nowRatio + 1e-9, let d = ramp.stress(forRatio: newRatio) else { continue }
-            out.thickenedCells += 1
-            // 4. the stress raised under this cell, so today's ramp lays this strut here; never lowered anywhere. Core reads a
+            // 4. the stress raised inside this cell, so today's ramp lays this strut here; never lowered anywhere. Core reads a
             // cell's stress as the highest over the stage voxels sharing volume with its box (R16); the voxels WHOLLY inside it
             // are raised (a neighbour's box never reaches them, so only this cell thickens), else, along an axis with none,
             // the ones sharing volume
@@ -296,10 +251,11 @@ public enum StructuralAuto {
                 if first > last { first = Int(a.rounded(.down)); last = Int(b.rounded(.up)) - 1 }
                 return (Swift.max(0, first), Swift.min(n - 1, last))
             }
-            let (a0, a1) = span(wlo.x, whi.x, f.origin.x, f.nx)
-            let (b0, b1) = span(wlo.y, whi.y, f.origin.y, f.ny)
-            let (c0, c1) = span(wlo.z, whi.z, f.origin.z, f.nz)
+            let (a0, a1) = span(sc.lo.x, sc.hi.x, f.origin.x, f.nx)
+            let (b0, b1) = span(sc.lo.y, sc.hi.y, f.origin.y, f.ny)
+            let (c0, c1) = span(sc.lo.z, sc.hi.z, f.origin.z, f.nz)
             guard a0 <= a1, b0 <= b1, c0 <= c1 else { continue }
+            out.thickenedCells += 1
             // a hair over, so float rounding never lays it a hair thinner
             let df = Float(d * (1 + 1e-6))
             for z in c0...c1 { for y in b0...b1 { for x in a0...a1 {
@@ -317,6 +273,89 @@ public enum StructuralAuto {
         for i in stride(from: 0, to: raised.count, by: step) { h.combine(raised[i]) }
         out.key = h.finalize()
         return out
+    }
+
+    /// Every cell's weakest strut as the app reads the check: at each lattice voxel in the cell's cube, the check's composite
+    /// von Mises with the stage's stress shape there (its pressure share; fields.bin carries no tensor), the law at the strut
+    /// the cell was laid with (its fill struts in the preview's lay). Cells with no loaded lattice voxel are left out.
+    static func readCells(_ c: CheckField, _ f: LatticeDemandField, _ layout: Layout, partRef: Double, _ inputs: Inputs) -> [CellReading] {
+        let laid = layout.laid
+        func middle(_ i: Int) -> SIMD3<Double> {
+            let b = laid.bars
+            return (SIMD3(Double(b[7 * i]), Double(b[7 * i + 1]), Double(b[7 * i + 2]))
+                    + SIMD3(Double(b[7 * i + 3]), Double(b[7 * i + 4]), Double(b[7 * i + 5]))) / 2
+        }
+        func bucket(_ p: SIMD3<Double>) -> SIMD3<Int32> { SIMD3<Int32>((p / partRef).rounded(.down)) }
+        var fill: [SIMD3<Int32>: [Int]] = [:]
+        for i in 0..<laid.barCount where i >= laid.barFlags.count || !LatticeLayoutColours.isSkin(laid.barFlags[i]) {
+            fill[bucket(middle(i)), default: []].append(i)
+        }
+        var out: [CellReading] = []
+        for ci in 0..<laid.cellCount {
+            let size = Double(laid.cellInfo[5 * ci]), fi = Int(laid.cellFrame[ci])
+            guard size > 0, fi >= 0, 12 * fi + 11 < laid.frames.count else { continue }
+            let v = laid.frames[(12 * fi)..<(12 * fi + 12)].map(Double.init)
+            let o = SIMD3(v[0], v[1], v[2])
+            let ax = [SIMD3(v[3], v[4], v[5]), SIMD3(v[6], v[7], v[8]), SIMD3(v[9], v[10], v[11])]
+            let lo = SIMD3(Double(laid.cellLo[3 * ci]), Double(laid.cellLo[3 * ci + 1]), Double(laid.cellLo[3 * ci + 2]))
+            var wlo = SIMD3<Double>(repeating: .infinity), whi = SIMD3<Double>(repeating: -.infinity)
+            for m in 0..<8 {
+                let a = lo + SIMD3((m & 1) != 0 ? size : 0, (m & 2) != 0 ? size : 0, (m & 4) != 0 ? size : 0)
+                let w = o + ax[0] * a.x + ax[1] * a.y + ax[2] * a.z
+                wlo = simd_min(wlo, w); whi = simd_max(whi, w)
+            }
+            func inside(_ p: SIMD3<Double>) -> Bool {
+                let d = p - o
+                let q = SIMD3(simd_dot(d, ax[0]), simd_dot(d, ax[1]), simd_dot(d, ax[2])) - lo
+                let tol = 1e-4
+                return q.x >= -tol && q.y >= -tol && q.z >= -tol && q.x <= size + tol && q.y <= size + tol && q.z <= size + tol
+            }
+            // the strut it was laid with: its fill struts' width
+            var strut = 0.0
+            let b0 = bucket(wlo) &- 1, b1 = bucket(whi) &+ 1
+            for z in b0.z...b1.z { for y in b0.y...b1.y { for x in b0.x...b1.x {
+                for i in fill[SIMD3(x, y, z)] ?? [] where inside(middle(i)) { strut = Swift.max(strut, Double(laid.bars[7 * i + 6])) }
+            } } }
+            guard strut > 0 else { continue }
+            let rho = TopOptKit.latticeRelativeDensity(topology: inputs.topology, strutRadiusMM: strut / 2, cellMM: size)
+            // its lattice voxels on the check's grid
+            let i0 = Swift.max(0, Int(((wlo.x - c.origin.x) / c.spacingMM).rounded(.down)))
+            let i1 = Swift.min(c.nx - 1, Int(((whi.x - c.origin.x) / c.spacingMM).rounded(.down)))
+            let j0 = Swift.max(0, Int(((wlo.y - c.origin.y) / c.spacingMM).rounded(.down)))
+            let j1 = Swift.min(c.ny - 1, Int(((whi.y - c.origin.y) / c.spacingMM).rounded(.down)))
+            let k0 = Swift.max(0, Int(((wlo.z - c.origin.z) / c.spacingMM).rounded(.down)))
+            let k1 = Swift.min(c.nz - 1, Int(((whi.z - c.origin.z) / c.spacingMM).rounded(.down)))
+            guard i0 <= i1, j0 <= j1, k0 <= k1 else { continue }
+            var weakest = Double.infinity, at: [Double] = []
+            for k in k0...k1 { for j in j0...j1 { for i in i0...i1 {
+                let e = i + c.nx * (j + c.ny * k)
+                let vm1 = Double(c.vonMises[e])
+                guard layout.lattice[e], vm1 > 0, vm1.isFinite else { continue }
+                let p = c.origin + SIMD3(Double(i) + 0.5, Double(j) + 0.5, Double(k) + 0.5) * c.spacingMM
+                guard inside(p) else { continue }
+                // the stage's stress shape here, sized to the check's von Mises (a pull where the stage has none)
+                var t6: [Double] = [vm1, 0, 0, 0, 0, 0]
+                let q = (p - f.origin) / f.spacingMM
+                let si = Int(q.x.rounded(.down)), sj = Int(q.y.rounded(.down)), sk = Int(q.z.rounded(.down))
+                if si >= 0, sj >= 0, sk >= 0, si < f.nx, sj < f.ny, sk < f.nz {
+                    let sv = si + f.nx * (sj + f.ny * sk)
+                    let vm0 = f.stressTensor.withUnsafeBufferPointer { vonMises($0, at: 6 * sv) }
+                    if vm0 > 1e-12 { t6 = f.stressTensor[(6 * sv)..<(6 * sv + 6)].map { $0 * vm1 / vm0 } }
+                }
+                let m = lawMargin(t6, rho: rho, inputs)
+                if m < weakest { weakest = m; at = t6 }
+            } } }
+            guard weakest.isFinite, !at.isEmpty else { continue }
+            out.append(CellReading(size: size, strut: strut, margin: weakest, lo: wlo, hi: whi, tensor: at))
+        }
+        return out
+    }
+
+    /// The law's margin for a Voigt stress at a density (core's strut_law_margin_at, through the bridge).
+    static func lawMargin(_ t: [Double], rho: Double, _ i: Inputs) -> Double {
+        let vm = t.withUnsafeBufferPointer { vonMises($0, at: 0) }, p = (t[0] + t[1] + t[2]) / 3
+        return TopOptKit.latticeStrutLawMargin(topology: i.topology, rho: rho, vonMisesMPa: vm, pressureMPa: p, buildUp: i.up,
+                                               yieldMPa: i.yieldMPa, zKnockdown: i.zKnockdown)
     }
 
     /// Von Mises of the Voigt tensor at `o` (TRUE shear, core's order).
@@ -445,6 +484,11 @@ public final class StructuralAutoStore: @unchecked Sendable {
         guard let k = kept[id], k.baseKey == baseKey else { return nil }
         return k
     }
+    /// Whether a press kept a thickened file for this part (for any inputs).
+    public func has(_ id: UUID) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return kept[id] != nil
+    }
     public func keep(_ id: UUID, _ k: Kept?) {
         lock.lock(); defer { lock.unlock() }
         kept[id] = k
@@ -471,5 +515,28 @@ extension StructuralAuto {
                                          store: StructuralAutoStore = .shared) -> LatticeLayoutPreview.Stress {
         guard let bk = baseKey(p, base: base, model: model), let k = store.kept(p.id, baseKey: bk) else { return base }
         return .init(key: k.key, field: k.field, referenceMPa: base.referenceMPa)
+    }
+}
+
+// MARK: - his switch
+
+/// ★ His switch (11-27, "easily removable if after my tests I don't think it's worth it"): Settings' "Structural Auto", on by
+/// default, remembered on this device. Off: today's Structural Auto exactly — one check, nothing thickened.
+@MainActor
+public final class StructuralAutoSwitch: ObservableObject {
+    public static let shared = StructuralAutoSwitch()
+    nonisolated static let key = "topopt.settings.structuralAuto.v1"
+    private let defaults: UserDefaults
+    @Published public var on: Bool {
+        didSet {
+            defaults.set(on, forKey: Self.key)
+            if self === Self.shared { Self.isOn = on }
+        }
+    }
+    /// The app's one choice, readable anywhere (tests set it directly).
+    nonisolated(unsafe) public static var isOn: Bool = (UserDefaults.standard.object(forKey: key) as? Bool) ?? true
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        on = (defaults.object(forKey: Self.key) as? Bool) ?? true
     }
 }

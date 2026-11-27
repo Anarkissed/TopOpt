@@ -68,7 +68,6 @@ extern "C" __attribute__((used)) const char* const topopt_bridge_vendored_core =
 #include "topopt/stepped_plan.hpp"
 #include "topopt/lattice_sample.hpp"
 #include "topopt/stl.hpp"
-#include "topopt/strut_strength.hpp"
 #include "topopt/version.hpp"
 #include "topopt/voxel.hpp"
 
@@ -3359,46 +3358,6 @@ double lattice_relative_density(const std::string& topology, double strut_radius
       // radius fills the cell": an ANSWER (solid), not a refusal.
       return 1.0;
     }
-  });
-}
-
-StrutSizeFieldSummary lattice_strut_size_field(const std::string& topology, const double* tensor, std::size_t tensor_count,
-                                               double build_x, double build_y, double build_z, double yield_mpa,
-                                               double z_knockdown, double target, float* ratio_out, float* rho_out,
-                                               std::uint8_t* short_out) {
-  return guarded("lattice_strut_size_field", [&]() -> StrutSizeFieldSummary {
-    const topopt::LatticeTopology topo = topopt::lattice_topology_from_id(topology);
-    const topopt::StrutLawSizeSummary s = topopt::strut_size_field(
-        topo, tensor, tensor_count, topopt::Vec3{build_x, build_y, build_z}, yield_mpa, z_knockdown, target, ratio_out,
-        rho_out, short_out);
-    StrutSizeFieldSummary o;
-    o.ok = true;
-    o.voxels = s.voxels;
-    o.loaded = s.loaded;
-    o.at_floor = s.at_floor;
-    o.short_of_target = s.short_of_target;
-    o.rho_floor = s.rho_floor;
-    o.rho_ceiling = s.rho_ceiling;
-    o.ratio_floor = s.ratio_floor;
-    o.ratio_ceiling = s.ratio_ceiling;
-    o.highest_ratio = s.highest_ratio;
-    o.rho_sum = s.rho_sum;
-    const topopt::LatticeWidthBounds b = topopt::lattice_width_bounds(topo);
-    o.touch = b.touch;
-    o.open_look = b.open_look;
-    return o;
-  }, [](const std::string& why) -> StrutSizeFieldSummary {
-    StrutSizeFieldSummary o;
-    o.reason = why;
-    return o;
-  });
-}
-
-double lattice_strut_law_margin(const std::string& topology, double rho, double vm, double pressure, double build_x,
-                                double build_y, double build_z, double yield_mpa, double z_knockdown) {
-  return guarded_empty("lattice_strut_law_margin", [&]() -> double {
-    return topopt::strut_law_margin_at(topopt::lattice_topology_from_id(topology), rho, vm, pressure,
-                                       topopt::Vec3{build_x, build_y, build_z}, yield_mpa, z_knockdown);
   });
 }
 

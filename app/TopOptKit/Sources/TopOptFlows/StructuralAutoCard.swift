@@ -232,3 +232,42 @@ struct StructuralAutoCard: View {
         .background(CornerPairStyle.publish("structuralAutoCard"))
     }
 }
+
+// MARK: - his switch's row in Settings
+
+/// ★ notes30 SA1 (his 11-27): Settings' "Structural Auto" — its caption (five words at most) under it, the detail in its (i),
+/// the switch at the trailing end (a 44 pt target). The same build as "Skip all animations".
+struct StructuralAutoSettingsRow: View {
+    @ObservedObject var toggle: StructuralAutoSwitch = .shared
+    static let title = "Structural Auto"
+    static let caption = "Thickens short struts automatically"
+    static let info = "On: when Auto makes a Structural lattice's print file, your Mac checks its strength. If any strut holds "
+        + "less than your Safety margin, only those struts get thicker and your Mac checks once more. Off: the print file is "
+        + "made with one check, as before."
+
+    var body: some View {
+        HStack(spacing: DS.Space.s) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(Self.title).dsStyle(DS.TypeScale.caption).fontWeight(.bold)
+                    .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
+                Text(Self.caption).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
+                    .lineLimit(1).said(Self.caption)
+            }
+            InfoTip(key: "appSettingsStructuralAuto", text: Self.info, label: "About Structural Auto")
+            Spacer(minLength: DS.Space.m)
+            Toggle(Self.title, isOn: $toggle.on)
+                .labelsHidden()
+                .tint(DS.Color.accent.color)
+                .frame(minWidth: 44, minHeight: 44)
+                .accessibilityIdentifier("app-settings-structural-auto")
+                .background(Self.publish("appSettingsStructuralAuto"))
+        }
+        .frame(minHeight: 44)
+        .background(Self.publish("appSettingsRow-" + Self.title))
+    }
+
+    static func publish(_ key: String) -> some View {
+        GeometryReader { g in Color.clear.preference(key: ChromeKeepOutKey.self, value: [key: g.frame(in: .global)]) }
+            .allowsHitTesting(false)
+    }
+}

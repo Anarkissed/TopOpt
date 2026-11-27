@@ -2362,7 +2362,7 @@ extension LatticeLayoutPreview {
     /// Tests: whether a watch is reading now.
     var growthWatching: Bool { growthWatch?.running ?? false }
 
-    // MARK: ★ notes30 STRUCTURAL AUTO
+    // MARK: ★ notes30 SA1
 
     /// His 11-26 ("once it's done, give the short animation"): the finished lattice on screen built again by its timelapse —
     /// the existing entry point (LatticeBuildShow: the site closed, the walls off, floor by floor). Live preview and Skip all
@@ -2379,28 +2379,24 @@ extension LatticeLayoutPreview {
         !live && !skipping && !laying && drawn && !organic
     }
 
-    /// The thickening round's view of the layout on screen — what the first print file was made from, once it is laid from
-    /// `stressKey` (a lay still going is waited for, up to `waitS`; nil past it, or when another stress is on screen): its cells
-    /// (frames, corners, sizes, struts) and which voxels of the check's grid are lattice (core's own map, `whereAt`).
+    /// ★ notes30 SA1 (REMOVE.md): the thickening round's view of the layout on screen — what the first print file was made from,
+    /// once it is laid from `stressKey` (a lay still going is waited for, up to `waitS`; nil past it, or when another stress is
+    /// on screen): its cells and struts, and which voxels of the check's grid are lattice (core's own map, `whereAt`).
     public func structuralAutoLayout(_ c: StructuralAuto.CheckField, stressKey: Int, waitS: Double = 60) async -> StructuralAuto.Layout? {
         var waited = 0.0
         while laying || bars == nil, waited < waitS {
             try? await Task.sleep(nanoseconds: 500_000_000)
             waited += 0.5
         }
-        guard !laying, stress.key == stressKey, bars != nil, let session, let laid, !laid.cellStrut.isEmpty else { return nil }
+        guard !laying, stress.key == stressKey, bars != nil, let session, let laid, laid.cellCount > 0 else { return nil }
         let n = c.nx * c.ny * c.nz
         guard n > 0 else { return nil }
         var pts = [SIMD3<Float>]()
         pts.reserveCapacity(n)
-        for k in 0..<c.nz {
-            for j in 0..<c.ny {
-                for i in 0..<c.nx {
-                    let p = c.origin + SIMD3(Double(i) + 0.5, Double(j) + 0.5, Double(k) + 0.5) * c.spacingMM
-                    pts.append(SIMD3<Float>(Float(p.x), Float(p.y), Float(p.z)))
-                }
-            }
-        }
+        for k in 0..<c.nz { for j in 0..<c.ny { for i in 0..<c.nx {
+            let p = c.origin + SIMD3(Double(i) + 0.5, Double(j) + 0.5, Double(k) + 0.5) * c.spacingMM
+            pts.append(SIMD3<Float>(Float(p.x), Float(p.y), Float(p.z)))
+        } } }
         guard let w = try? await session.whereAt(pts), w.count == n else { return nil }
         return StructuralAuto.Layout(laid: laid, lattice: w.map { $0.why == .lattice })
     }

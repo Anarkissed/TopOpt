@@ -344,7 +344,6 @@ void fill(LatticeLayoutResult& o, const ll::Outcome& out) {
       }
       o.cell_wall_mm.push_back(static_cast<float>(w));
     }
-    o.cell_strut.push_back(static_cast<float>(c.strut));   // ★ notes30 STRUCTURAL AUTO
     for (double v : c.lo) o.cell_lo.push_back(static_cast<float>(v));
   }
   o.solid_pieces = static_cast<int32_t>(L.solid.size());

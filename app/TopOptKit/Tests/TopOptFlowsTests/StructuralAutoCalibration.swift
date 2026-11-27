@@ -4,10 +4,11 @@
 // Per part and Safety margin, the press's whole chain on this Mac's core, in process (LatticeFileButton.runHere, core's
 // run_file_job with its strength check, exactly the Mac's): the stage solve; CHECK 1 = today's Structural Auto, unchanged (it is
 // also the baseline: today's Auto on the same part); short: the preview's own lay of today's settings, its cells and its
-// lattice voxels on the check's grid, StructuralAuto.thicken from check 1's own lattice stress, CHECK 2 of the thickened lay; the
+// struts and lattice voxels, StructuralAuto.thicken anchored to check 1's own weakest strut, CHECK 2 of the thickened lay; the
 // file kept (the lightest that passes, else the stronger). Every part's loaded face carries a Protect skin at least two check
 // voxels deep (his fix: the load never sits on open lattice the check cannot resolve). One line per part and margin, written to
-// <dir>/calibration[_<parts>].md; nothing is asserted — the stop rule is read off the table.
+// <dir>/calibration[_<parts>].md; nothing is asserted — the stop rule is read off the table. ★ His cube fix (11-27): the
+// app's reading is anchored to the check's OWN weakest strut margin, as the app's chain does.
 #if canImport(AppKit)
 import XCTest
 import simd
@@ -38,7 +39,7 @@ final class StructuralAutoCalibration: XCTestCase {
     ]
 
     /// The layout the first file was made from, as the app reads it (the preview's own lay of today's settings on the stage's
-    /// stress): its cells and core's map at the check grid's voxel centres. nil when any step fails.
+    /// stress): its cells and struts, and core's map at the check grid's voxel centres. nil when any step fails.
     func layout(_ path: String, _ s: LatticeLayoutSession.Settings, _ stage: LatticeDemandField,
                 _ c: StructuralAuto.CheckField) async -> StructuralAuto.Layout? {
         guard let session = try? await LatticeLayoutSession.open(path: path) else { return nil }
@@ -46,6 +47,7 @@ final class StructuralAutoCalibration: XCTestCase {
         guard (try? await session.setDemand(mpa: stage.vonMises, nx: stage.nx, ny: stage.ny, nz: stage.nz, origin: stage.origin,
                                             spacingMM: stage.spacingMM)) != nil,
               let r = try? await session.lay(s) else { return nil }
+        let laid = LatticeLayoutColours.Laid(r, token: 1)
         var pts: [SIMD3<Float>] = []
         pts.reserveCapacity(c.nx * c.ny * c.nz)
         for k in 0..<c.nz { for j in 0..<c.ny { for i in 0..<c.nx {
@@ -54,8 +56,7 @@ final class StructuralAutoCalibration: XCTestCase {
         } } }
         guard let w = try? await session.whereAt(pts), w.count == pts.count else { return nil }
         let m = w.map { $0.why == .lattice }
-        let laid = LatticeLayoutColours.Laid(r, token: 1)
-        print("SA-CAL layout: \(laid.cellCount) cells; \(m.filter { $0 }.count) of \(m.count) check voxels are lattice")
+        print("SA-CAL layout: \(laid.cellCount) cells, \(laid.barCount) struts; \(m.filter { $0 }.count) of \(m.count) check voxels are lattice")
         return StructuralAuto.Layout(laid: laid, lattice: m)
     }
 
@@ -183,8 +184,9 @@ final class StructuralAutoCalibration: XCTestCase {
                 var t: StructuralAuto.Thickened?
                 var why = ""
                 if let m0, !LatticeFileButton.round(of: m0).passed {
-                    if let c = StructuralAuto.CheckField.of(m0.fields), let lay = await layout(model.path, today, stage, c) {
+                    if let c = StructuralAuto.CheckField.of(m0), let lay = await layout(model.path, today, stage, c) {
                         t = StructuralAuto.thicken(check: c, stage: stage, layout: lay, settings: today, inputs)
+                        if let t { print("SA-CAL anchor: the check's own weakest over the app's reading = \(String(format: "%.3f", t.anchor))") }
                         if let t, t.thickenedCells > 0 { m1 = check(today, t.field) }   // CHECK 2
                         else { why = t == nil ? "nothing to read" : "nothing to thicken" }
                     } else { why = "no layout" }

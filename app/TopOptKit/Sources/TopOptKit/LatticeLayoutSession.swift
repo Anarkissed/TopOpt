@@ -241,7 +241,6 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         public var cellFrame: [Int32] = []
         public var cellLo: [Float] = []
         public var cellWallMM: [Float] = []    // 1 per cell: its wall's width, mm; 0 = the space no wall holds
-        public var cellStrut: [Float] = []     // ★ notes30 STRUCTURAL AUTO: 1 per cell: its strut width, mm
         public var solidFrame: [Int32] = []
         public var solidRegion: [Int32] = []
         public var solidWhy: [UInt8] = []      // a Why per solid piece
@@ -684,7 +683,6 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         o.cellInfo = Array(r.cell_info)
         o.cellRegion = Array(r.cell_region); o.cellWall = Array(r.cell_wall)   // ★ Install 3
         o.cellFrame = Array(r.cell_frame); o.cellLo = Array(r.cell_lo); o.cellWallMM = Array(r.cell_wall_mm)
-        o.cellStrut = Array(r.cell_strut)   // ★ notes30
         o.solidFrame = Array(r.solid_frame)
         o.solidRegion = Array(r.solid_region)
         o.solidWhy = Array(r.solid_why)

@@ -3098,7 +3098,7 @@ public struct LatticeSetupWizard: View {
         rebuild()
     }
 
-    /// ★ notes30 STRUCTURAL AUTO (his D1, 11-26: "use the existing safety margin. Put the default at 150%"; his rework 11-27):
+    /// ★ notes30 SA1 (his D1, 11-26: "use the existing safety margin. Put the default at 150%"; his rework 11-27):
     /// "Strengthened to 150 %" with its (i); the tap is the Safety margin's own menu (150 / 200 / 300, and Custom in steps of 25: 175 is there). The
     /// one number, one place: it is the part's Safety margin, as the loads screen shows it.
     private var structuralAutoRow: some View {
@@ -3144,8 +3144,8 @@ public struct LatticeSetupWizard: View {
         return AnyView(Group {
         if area == nil {
             AnyView(settingControl(.type, titled: true))
-            // ★ notes30 STRUCTURAL AUTO: what Auto strengthens the struts to (his Safety margin, D1), under the type
-            if !latticeManual, StructuralAuto.applies(project.lattice, pageManual: false) { AnyView(structuralAutoRow) }
+            // ★ notes30 SA1: what Auto strengthens the struts to (his Safety margin, D1), under the type
+            if !latticeManual, StructuralAuto.thickens(project.lattice, pageManual: false) { AnyView(structuralAutoRow) }
             if latticeManual, !Self.controlHideSimulateStresses, !(organic && project.importedFile != nil) {
                 AnyView(simulateStressesSwitch)
             }
