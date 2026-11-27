@@ -163,6 +163,20 @@ WAITING ON OTHERS: the reviewer's ruling on which reference a reading over a len
 
 ## Ideas beyond the plan, in discussion with the maintainer (NOT acted on)
 
+**2026-11-27, 15:45 EST: GRADED VOXELS, STEP 0 MEASURED (his "Yes, run it"; no new code; the 15 mm sample bracket, `analyze`, drawn-face loads, today's reading, one thread, outside the lock; `agent-scratch/toreview/opt22/step0`).**
+
+| case | res 48 (voxel 0.31 mm) | res 96 (voxel 0.16 mm) | change |
+|---|---|---|---|
+| the part AS DRAWN: largest movement | 0.00815 mm | 0.00982 mm | +20 % |
+| as drawn: peak stress / the 99.9th percentile | 2.98 / 2.55 MPa | 4.50 / 3.03 MPa | +51 % / +19 % |
+| as drawn: margin shown | 6.53 | 4.33 | -34 % |
+| the LIGHTEST CARVED version (26 % kept; the file made at res 48): largest movement | 0.01396 mm | 0.01679 mm | +20 % |
+| carved: peak / 99.9th percentile | 4.58 / 4.01 MPa | 8.48 / 5.66 MPa | +85 % / +41 % |
+| carved: margin shown | 4.24 | 2.29 | -46 % |
+| carved: grams of the voxel model of the SAME file | 0.430 | 0.341 | -21 % |
+
+READING IT: the GLOBAL answer moves: the part is 20 % more flexible at double resolution, as drawn and carved alike, so a one-way zoom (which trusts the coarse movement) would read low; by the report's own test the two-way form is the one worth building. Two cautions: (1) the peak at a stair-stepped surface keeps rising with resolution by itself (the 99.9th percentile is the steadier figure: +19 % and +41 %); (2) the SAME finished file weighs 21 % less as a res-96 voxel model than as a res-48 one: at res 48 the all-or-nothing voxels fatten the thin members, and that alone explains much of the stiffness and stress gap. So part of what a finer box buys is simply the file's true shape, which exact fills (one judge) also buy without any refinement. FIRST ATTEMPT FAILED and is itself a finding: the res-48 file re-checked at res 96 as it stands put the load on empty space (its surface sits inside the drawn loaded face at the finer grid); it ran with the loaded cap restored (`--smooth 0.05`). A fine box cannot reuse the coarse grid's loads or tags: they are re-made at the fine resolution. Time and memory of the two runs were not captured (my script's fault). Nothing built; the next step waits on his word.
+
 **2026-11-27, 15:40 EST: GRADED VOXELS, the desk research he ordered ("Yes, definitely" deep research; "add to the solver, rather than completely re-write it"), DELIVERED: `reports/Graded voxels for existing solver.md` (local, not in git; five note files beside it, one a study of our own solver with file:line). RESEARCH ONLY; nothing built; awaiting his word on any step.**
 Its answer: his nested-grid idea is one published method under three names (local defect correction, FAC, non-intrusive global-local coupling): the global solve unchanged, the same solver on a 2x or 4x finer box with the coarse answer on its edge, correction loads fed back, repeated; at convergence it equals a model with the fine box in place, so it corrects a too-stiff thin wall globally. The code study says the solver already has every hook (any voxel size, non-zero Dirichlet values, extra nodal loads, a warm start, reactions via `fea_matfree_apply`, a separate `SolverRunState`): NO solver change, a driver beside it. Staged route it proposes: step 0 (no code): one thin-wall case at 1x and 2x to see whether the global answer moves; step 1 one-way zoom; step 2 the two-way loop with Aitken acceleration, at export only; optional the enhanced-strain cube (parked by the reviewer as TOSolver's ground). Set aside: an octree (the rewrite he does not want), condensed super-voxels, multiresolution density. Gaps: none of this is published on voxel models or in topology optimisation; no peak-stress numbers; convergence rates are from 2D Poisson; the "5 to 15 global solves" is a guess; it can diverge where the fine box is the stiffer one. Papers to fetch: `agent-scratch/toreview/papers/LIST-graded-voxels.md` (ten).
 
