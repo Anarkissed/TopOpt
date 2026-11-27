@@ -35,8 +35,12 @@ Also ruled the same hour (stage 5): the connection-rule test on the hook PASSES;
 3. scenario_weights: no flip on a base with an unexplained change of results. SETTLED since (TOSolver's fix on my tip, checked).
 4. The memory guard amended for everyone (the swapouts clause only when free is also under 30 %).
 
+**KNOWN LIMIT, STATED (the reviewer's ruling 2026-11-27 07:38Z: "the most important line in your report"):** TODAY'S SHIPPED one-voxel reading, on a member only 2 to 4 voxels thick in BENDING, reads 0.33 to 0.68 of the true surface stress (measured on a beam in pure bending: 0.33 with 2 voxels through the member, 0.68 with 4, 0.85 with 8, 0.93 with 16). It is the grid: a few linear elements cannot carry a bending gradient. It is in the shipped check with or without this stage, so a thin bending member can pass today with a margin up to three times too good. Stage 2 does not fix it (its size form falls back to that same reading on thin members, as ruled). It is carried to STAGE 4: the smallest member is stated in voxels THROUGH as well as in mm, the number set by measurement on the beam at 2, 3, 4, 6 and 8 voxels through, and the automatic resolution must honour it; a candidate to measure there is stress recovered at the surface from its neighbours (superconvergent patch recovery, Zienkiewicz and Zhu 1992, DOI 10.1002/nme.1620330702). Ledger: A-06.
+
+**THE REVIEWER'S RULING of 2026-11-27 07:38Z:** (a) YES to the surface-node ball and the corner-aware width, on the beam and the three shapes, then the switch point again, then the 15 mm part restated. (b) the limit above, in the stage file and the ledger now, and in stage 4. (c) scenario_weights check (c): give it a margin the physics supports or state what it guards; low priority.
+
 **Owed, in order:**
-- THE THIN-MEMBER RULE (ruling item 2) and its beam test; then the 15 mm part again.
+- The surface-node ball and the corner-aware width in the engine (behind the switch), re-measured on the beam, the three shapes and the switch point; then the 15 mm part again.
 - ONE JUDGE: k by measurement (or the finding that it has no answer for the one-voxel form), evidence (a) to (e).
 - The step-back (the optimiser's loop is in `plsm.cpp`, TOSurface's file: to agree who edits it).
 - Conditions (b) to (e) again on his full-resolution parts with the size form (`b5_stage2.sh`, lock).
@@ -573,3 +577,13 @@ FOUR THINGS IT SHOWS THAT ARE NOT COMFORTABLE, for the reviewer:
 4. So "fall back to today's form" on thin members is the ruled choice and is in, but on a member 2 to 4 voxels thick neither form is within 30 % in bending.
 
 FINDING 1 TESTED (02:30, a measuring arm inside the test, not in the engine): the same ball average with the ball centred ON the top face's nodes, not on voxel centres, against the reading's own true value: 2 x the size -4.9 % (voxel-centred: -11.2 %); 4 x -1.7 % (was -4.7 %); 1 x -15.3 % (was -25.8 %; it falls back anyway). So the cause is the one reasoned: on a flat, grid-aligned face the ball could not sit on the surface. With surface-centred balls the size reading is inside the 5 % bar on this beam from 2 times the size, which is exactly where the ruled thin-member threshold hands over to it. To put into the engine (awaiting the reviewer's word): `stress_over_size` also evaluates balls centred on the nodes of the part's surface.
+
+### B5 complete (2026-11-27 02:37): the stand at FULL resolution (res 128, check voxel 0.99 mm, PA12, drawn faces, automatic pad)
+
+| run | what the job says | shown margin | printed grams |
+|---|---|---|---|
+| switch off | (today) | 2.587 -> 2.597 | 87.99 g (solid) |
+| `size` | "no published stress-reading length for PA12: this material keeps today's strength reading (one voxel)" | 2.587 -> 2.597 | 84.88 g of 87.99 solid |
+| `size`, forced to 3.6 mm | "the stress is read over 3.60 mm ... on real stiffness" | 4.101 -> 4.093 | 84.88 g |
+
+The part as drawn prints at 100.13 g of 114.98 g solid, so the version really saves 15.2 % of printed weight (the solid figures say 23.5 %). With the switch on and his material the STRENGTH NUMBER DOES NOT MOVE (2.597 both ways): PA12 has no published length, as ruled. Forced to 3.6 mm the margin would read 58 % higher (4.09): shown only to say what an averaged reading would do on this part; it is not what ships for PA12, and that run was made on a build from BEFORE the thin-member rule. Runs 526 / 458 / 516 s: the switch costs no time on this job. The bracket's forced run: see the folder `opt11/sample_a/size36`.
