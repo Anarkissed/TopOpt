@@ -758,7 +758,8 @@ public final class LibraryModel: ObservableObject {
                                                                                isDirectory: true)
         Self.queue.async {
             let written = Result {
-                try ChosenExport.write(lines, format: format, title: title, into: dir) {
+                try ChosenExport.write(lines, format: format, title: title, into: dir,
+                                       params: { store.snapshot(id: $0.folder)?.printParams }) {   // ★ notes30
                     ChosenExport.mesh($0, store: store, original: original)
                 }
             }

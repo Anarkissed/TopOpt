@@ -658,7 +658,8 @@ JobDescription parse_job(const std::string& json_text, double safety_margin_floo
              "safety_margin",
              "wall_loops",
              "layer_height_mm",
-             "wall_line_width_mm", "wall_line_width_outer_mm"},
+             "wall_line_width_mm", "wall_line_width_outer_mm",
+             "top_solid_layers", "bottom_solid_layers", "top_solid_mm", "bottom_solid_mm"},
         "loads");
     job.loads.present = true;
 
@@ -1122,6 +1123,25 @@ JobDescription parse_job(const std::string& json_text, double safety_margin_floo
       if (!(job.loads.wall_line_width_outer_mm > 0.0) ||
           job.loads.wall_line_width_outer_mm > 100.0)
         schema_fail("\"loads.wall_line_width_outer_mm\" must be in (0, 100]");
+    }
+    // ★ notes30: the solid top and bottom skins the user set (JobLoads::top_solid_layers ...). Absent => -1 (not stated).
+    for (const auto& [key, out] : {std::pair<const char*, int*>{"top_solid_layers", &job.loads.top_solid_layers},
+                                   std::pair<const char*, int*>{"bottom_solid_layers", &job.loads.bottom_solid_layers}}) {
+      if (const JsonValue* v = find_key(lv, key)) {
+        const double n = require_number(*v, std::string("loads.") + key);
+        if (n < 0.0 || n != std::floor(n) || n > 1000.0)
+          schema_fail(std::string("\"loads.") + key + "\" must be a non-negative integer <= 1000");
+        *out = static_cast<int>(n);
+      }
+    }
+    for (const auto& [key, out] : {std::pair<const char*, double*>{"top_solid_mm", &job.loads.top_solid_mm},
+                                   std::pair<const char*, double*>{"bottom_solid_mm", &job.loads.bottom_solid_mm}}) {
+      if (const JsonValue* v = find_key(lv, key)) {
+        const double mm = require_number(*v, std::string("loads.") + key);
+        if (!(mm >= 0.0) || mm > 1000.0)
+          schema_fail(std::string("\"loads.") + key + "\" must be in [0, 1000] mm");
+        *out = mm;
+      }
     }
   } else {
     // Self-weight mode: fixture_faces (required, non-empty geometric selectors).
