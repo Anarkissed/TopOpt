@@ -434,3 +434,16 @@ The sample bracket at 15 % size (15 mm long, loads scaled with the area), res 48
 | 0.26 | 2.09 -> 4.24, 0.333 g | 3.68 -> 5.97, 0.329 g |
 
 Read plainly. (1) It switches on by itself and runs clean (rc 0, four versions both ways, 631 s and 495 s). (2) On a part this small the averaged reading lifts every margin by 33 to 41 % (the shown 4.24 becomes 5.97 on the lightest): a 1.2 mm region is large against features of 1 to 3 mm, which is what the critical-distance method says about small notched parts, but it is a big step and it rests on a published length halved by his rule, not on a print of his. To be said in the stage report as it is, and worth one printed check when the rig is ready. (3) The grams hardly move (a part this small is nearly all wall, so printed grams are close to solid grams). (4) The two judges still part on the lightest version in both columns (2.09 against 4.24; 3.68 against 5.97): that is "one judge", next.
+
+### ONE JUDGE in a job, first numbers (2026-11-26 20:05 to 21:05, build of 5392695a plus the switch; k = 8 still running)
+
+The made sample bracket, res 64, drawn faces, automatic pad, one thread. The loop's certificate, then the number SHOWN (the file re-check) with `TOPOPT_RECHECK` unset and at k sub-samples along each voxel edge:
+
+| version | certificate | shown today | k = 2 | k = 4 | k = 8 |
+|---|---|---|---|---|---|
+| 0.68 | 5.283 | 5.285 | 5.346 | 5.289 | (running) |
+| 0.52 | 5.105 | 5.293 | 5.317 | 5.191 | |
+| 0.38 | 4.152 | 4.851 | 4.474 | 4.265 | |
+| 0.26 | 1.799 | 3.661 | 2.511 | 2.162 | |
+
+Same designs and grams in every column (the switch only changes how the finished file is judged). The lightest version's shown margin comes down from 3.66 to 2.16 at k = 4, against the certificate's 1.80; it is still moving with k (2.51 to 2.16 is 14 %), so k is not chosen yet. The file is the FINISHED surface (stair-steps smoothed, thin spots fixed), not the loop's design, so the two need not meet exactly: the textbook test (a) is where "within 1 %" is judged. Cost on this job: the whole run 1072 s unset, 1015 s at k = 2, 991 s at k = 4 (no slower); peak memory 375 MB unset, 369 MB, 397 MB (+6 % at k = 4). About 8,000 to 10,000 cut voxels per version, 750 to 1,300 of them with their centre outside the file (the ones all-or-nothing drops altogether).
