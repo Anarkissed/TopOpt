@@ -449,3 +449,18 @@ The made sample bracket, res 64, drawn faces, automatic pad, one thread. The loo
 Same designs and grams in every column (the switch only changes how the finished file is judged). The lightest version's shown margin comes down from 3.66 to 2.16 at k = 4, against the certificate's 1.80; it is still moving with k (2.51 to 2.16 is 14 %), so k is not chosen yet. The file is the FINISHED surface (stair-steps smoothed, thin spots fixed), not the loop's design, so the two need not meet exactly: the textbook test (a) is where "within 1 %" is judged. Cost on this job: the whole run 1072 s unset, 1015 s at k = 2, 991 s at k = 4 (no slower); peak memory 375 MB unset, 369 MB, 397 MB (+6 % at k = 4). About 8,000 to 10,000 cut voxels per version, 750 to 1,300 of them with their centre outside the file (the ones all-or-nothing drops altogether).
 
 k = 8 (21:13): from k = 4 to 8 the three heavier versions move 0.4 / 0.7 / 1.4 %; the lightest moves the OTHER way, 2.162 to 2.293 (+6 %), so it is not settling smoothly: its deciding stress sits in a few nearly empty cut voxels, and E x fill^3 makes their stiffness swing with small changes of fill. Not within the ruled 0.5 % at any pair yet. Peak memory at k = 8: 450 MB (+20 % on this job), which is the whole fine grid held at once: `file_fill.hpp` is being rewritten to work one layer of voxels at a time (memory nx * ny * k^3 bytes whatever the height); its check and a run at k = 16 are queued (`slab_check.sh`). If the lightest version still wanders at 16, that goes to the reviewer as it is: the rule "k where the shown margin moves under 0.5 %" may not have an answer for a version decided by a few sliver voxels, and the honest options are a floor on the fill a voxel must have to be judged, or the reading over a size where one applies.
+
+### ONE JUDGE, evidence (a), first run (2026-11-26 21:22, build 872863aa): what it shows, and why it is not yet evidence
+
+Test `to_recheck_fill`: a closed mesh of each textbook shape taken through the file's fills, peak stress against the certificate's (exact fills, E x fill^3, one voxel), percent, at b (or inner radius) = 3 / 4 / 5 / 6 voxels.
+
+| shape | all-or-nothing (today's re-check) | k = 2 | k = 4 | k = 8 |
+|---|---|---|---|---|
+| round hole | -35.8 / -27.2 / -16.1 / -22.4 | -13.8 / -9.6 / -4.2 / -10.3 | -9.2 / -8.7 / -1.0 / -11.7 | 0.0 / 0.0 / 0.0 / 0.0 |
+| ellipse a / b = 2 | -43.7 / -20.4 / -23.2 / -27.2 | -18.7 / +13.7 / -13.8 / -11.2 | -5.2 / -1.3 / +8.3 / +6.1 | 0.0 / 0.0 / -2.8 / 0.0 |
+| thick ring | -46.7 / -42.1 / -33.9 / -38.5 | -26.6 / -13.8 / -18.7 / -12.8 | -13.6 / -17.7 / -2.5 / -4.3 | 0.0 / 0.0 / 0.0 / 0.0 |
+
+1. TODAY'S RE-CHECK against the certificate, on textbook shapes: its peak stress is 16 to 47 % lower, so the margin it shows is 19 to 88 % higher than the loop's for the same shape. The two judges, on shapes with known answers.
+2. k = 1 reproduces all-or-nothing exactly, as built.
+3. k = 8 matching to 0.0 % PROVES NOTHING: the test's "exact" fills were themselves sampled 8 x 8 per voxel, the same points. My slip in the test, corrected: the reference is now sampled 32 x 32 and k = 16 is added (re-run queued).
+4. What is real in it: from k = 4 to k = 8 the peak still moves by up to 18 %. The one-voxel peak under E x fill^3 is very sensitive to the exact fill of a few sliver voxels, which is also why the bracket's lightest version wanders (2.51 / 2.16 / 2.29). That sensitivity is in the CERTIFICATE too (its fills come from the optimiser's own sampling), not only in the re-check. If k = 16 against the finer reference does not settle, the finding for the reviewer is that "one judge" needs the judges to share not just a form but the same treatment of sliver voxels.
