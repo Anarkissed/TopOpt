@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <unordered_map>
 #include <cmath>
 #include <cstddef>
@@ -45,7 +46,9 @@ namespace topopt::lattice_layout {
 // the domain and the cells only (not on the struts, nor on which of them are left out), so
 // whoever makes the mesh more than once reads it once.
 struct OpenSpace {
-  struct Box { int frame = 0; double lo[3] = {0, 0, 0}, hi[3] = {0, 0, 0}; };
+  // `region`: the region of the cell (or weave cube) the box was read from (SHEETS: each sheet field is cut to its own
+  // region's boxes only, as the strength check credits a voxel by its own cell's field). Not read by the carving.
+  struct Box { int frame = 0; double lo[3] = {0, 0, 0}, hi[3] = {0, 0, 0}; int region = 0; };
   std::vector<Box> boxes;   // in cell order: the same for any number of threads
   double pitch_mm = 0.0;
   double ms = 0.0;
@@ -66,6 +69,7 @@ OpenSpace read_open_space(const Domain& domain, const Layout& layout, double pit
                           int threads = 0, const std::atomic<bool>* stop = nullptr, bool merge = true,
                           bool keep_edge = true);
 
+struct SeamBand;   // SHEETS, the blend band (below)
 struct MeshSpec {
   int bar_sides = 12;         // a round strut is a bar of this many flat sides, of the same area
   double block_mm = 12.0;     // struts are joined block by block (memory stays flat), then the blocks
@@ -167,6 +171,37 @@ struct MeshSpec {
   // OF4: every piece of the solid is kept (the tubes route: pieces the unmerged tubes tie together are not loose).
   // false: the mesh as before.
   bool keep_pieces = false;
+  // SHEETS (SPEC section 4): the sheet fields to mesh in place of bars, and their seams (Outcome::sheets,
+  // sheet_seams). Null or empty: no sheet (every strut mesh as before, byte for byte). Per field, block by block
+  // (`block_mm`): generate_tpms over the block's cells in the region's frame, wall sheet_wall_at, simplified to
+  // `sheet_deviation_mm` with the bead guard; turned into the part's coordinates; intersected with that region's open
+  // boxes grown by the run-on (strut_run_on_mm); unioned with the carved solid. A Blend seam's band is its own block
+  // (mesh_sheet_seam_band, E's); a seam whose band cannot be made falls back to the solid wall.
+  const std::vector<SheetField>* sheets = nullptr;
+  const std::vector<SheetSeamBand>* sheet_seams = nullptr;
+  double sheet_deviation_mm = 0.02;   // kSheetMaxDeviationMm (tpms_gen.hpp), the old run's bound; 0: as contoured
+  // E (SHEETS CONTRACT CHANGE (E)): the blend bands, ONE per seam of `sheet_seams` in its order, made once by the file's
+  // make_file_mesh (mesh_sheet_seam_band) and read here, never made again: one call, one decision, the same in the
+  // file, the result and the credit. Null (a direct caller): build_mesh makes each Blend seam's band itself, once.
+  // Each region's own sheet stops a sheet block's overlap inside its side of a band that was made (the band runs as far
+  // past its edges), so the two join with no seam and no double wall.
+  const std::vector<SeamBand>* sheet_bands = nullptr;
+  // E, the band's raise (mesh_sheet_seam_band): false, the band is made as blended, never raised and never refused (the
+  // tests' RED, "the blend with no thickening"); the most it may be raised, mm (< 0: up to the touch).
+  bool sheet_seam_raise = true;
+  double sheet_seam_raise_cap_mm = -1.0;
+  // PRINT RESOLUTION (2026-11-25, lattice_layout_file.hpp PrintResolution): the sheets' contouring cell, the thinnest
+  // wall over `sheet_dc_wall_share` and never coarser than the cell over `sheet_dc_cell_share` (3 and 24: the file as
+  // before, byte for byte).
+  double sheet_dc_wall_share = 3.0;
+  double sheet_dc_cell_share = 24.0;
+  // PRINT RESOLUTION: 0 (the writer's own default, and Full's): every round strut and its joint balls `bar_sides` sides,
+  // the mesh as before. Above 0: a round strut of radius r (and the ball at its joints) gets 8 sides when its corners
+  // then lie no more than this outside the true round, its flat sides never nearer the centre than Full's (the
+  // `bar_sides` bar of the same area: so no strut prints thinner than at Full, two lines stay two lines); else
+  // `bar_sides`, as at Full. A bridge's square bar, a joint written fine (kFineSides), a weave's tubes and a post are
+  // never changed.
+  double strut_facet_mm = 0.0;
   // Set, the work is given up between its steps and LayCancelled is thrown.
   const std::atomic<bool>* stop = nullptr;
 };
@@ -217,6 +252,14 @@ struct MeshReport {
   std::size_t triangles = 0;       // of the mesh returned
   double mm3 = 0.0;                // of the mesh returned
   double ms_struts = 0.0, ms_solid = 0.0, ms_finish = 0.0;
+  // SHEETS: the sheet blocks meshed, their triangles as contoured and simplified (before the cut and the union), the
+  // material they add once joined, the deviation the simplifier measured, the time; the seams made as a blend band and
+  // those that fell back to the solid wall (their places: SheetSeamBand::fell_back in the file's result).
+  std::size_t sheet_blocks = 0, sheet_triangles = 0;
+  std::size_t sheet_places = 0;    // the cell places the blocks contoured (each block's laid cells' box; not its ring)
+  double sheet_contoured_mm3 = 0.0; // the volume the blocks' sheets were contoured over (each box with its overlap)
+  double sheet_mm3 = 0.0, sheet_deviation_mm = 0.0, ms_sheets = 0.0, ms_sheet_union = 0.0;
+  std::size_t seams_blended = 0, seams_fell_back = 0;
 };
 
 bool mesh_available();
@@ -470,6 +513,37 @@ void weave_bar_shells(const Domain& domain, const Layout& layout, const Bars& ba
                       std::vector<std::size_t>& first_tri, MeshReport& rep);
 // build_mesh's run-on past a strut's end (MeshSpec::strut_reach_mm, its default read from the carving).
 double strut_run_on_mm(const Carved& carved, const MeshSpec& spec);
+
+// ── SHEETS: THE BLEND BAND'S HOOK (builder E; SPEC 1.5) ────────────────────────────────────────────────────────
+// The file's make_file_mesh asks this ONCE for every seam of the outcome that is not a solid wall, before anything is
+// carved (its answer decides whether the seam needs the membrane), and hands the bands to build_mesh
+// (MeshSpec::sheet_bands); build_mesh asks it itself only when it was given none (a direct caller), once per make.
+// E's: the band (one cell wide, centred on the seam: SheetSeamBand::across) meshed with lattice_dc.hpp on the blended
+// field (sheet_blend_distance_at's form, each side at its print wall as make_sheets contours each region's sheet),
+// simplified to the same bound (out by it, in by half of it); its TRUE wall measured first (the tpms_probe march: points
+// of the blended mid-surface in either region's lattice within the band, the wall along the field's normal both ways)
+// and the band raised in its middle (`raise_mm`, sheet_seam_bump) until it is two lines everywhere with the
+// simplifier's inward bound to spare, up to the touch. ok false (with `why`, ONE plain line): the seam falls back to
+// the solid wall (the membrane, and the file's result says so). build_mesh cuts the band to the two regions' open space
+// (each box grown by the run-on) and the part; the two regions' own sheets stop where their side of the band begins
+// (`keep_a`, `keep_b`: a point of the region is meshed by its own sheet only where it says true; null: everywhere).
+struct SeamBand {
+  bool ok = false;
+  std::string why;
+  TriangleMesh mesh;                // closed, in the part's coordinates (empty when not ok; E's band is in `blocks`)
+  // E: the band in blocks (30 mm a side at most, each contoured and simplified on its own thread, each closed, each
+  // running a little past its own box into its neighbours: build_mesh joins them by their union). Empty: see `mesh`.
+  std::vector<TriangleMesh> blocks;
+  std::size_t triangles = 0;        // over `blocks` and `mesh`
+  double raise_mm = 0.0;            // what the band's loop raised the wall by
+  double thinnest_mm = 0.0;         // the band's true wall as measured, its thinnest
+  std::function<bool(const Vec3&)> keep_a, keep_b;
+  std::size_t samples = 0;          // the mid-surface points its wall was measured at
+  std::size_t retries = 0;          // blocks contoured again on a moved grid (a pinch left them not closed)
+  double ms = 0.0;
+};
+SeamBand mesh_sheet_seam_band(const Domain& domain, const Layout& layout, const std::vector<SheetField>& sheets,
+                              const SheetSeamBand& seam, const MeshSpec& spec);
 // Per piece of the carved solid: 1 when build_mesh leaves it out for `drop_at` (a small piece starting at one of them).
 std::vector<char> solid_slivers_left_out(const Carved& carved, const std::vector<Vec3>& drop_at);
 // K1 (his rule, 2026-11-24): the carved solid itself (the part less the open space, every piece), as a mesh, so the

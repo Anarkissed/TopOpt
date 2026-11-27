@@ -34,7 +34,7 @@ private func latticeSetup(_ size: CGSize, _ name: String, _ test: XCTestCase, th
     try h.pickFromMenu("capsuleMenu", "Structural", what: "\(name): the stage menu")
     h.pump(1.5)
     if h.frames.all["view-Lattice preview-on"] == nil { try h.tap("view-Lattice preview", "\(name): the lattice preview", settle: 1.5) }
-    if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleSetup", "\(name): the page's Save", settle: 1.5) }
+    if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleLattice", "\(name): the page's Save", settle: 1.5) }
     XCTAssertNil(h.frames.all["latticeSettingsPanel"], "\(name): premise: on Lattice Setup")
     return (h, p)
 }
@@ -98,6 +98,14 @@ final class NewEngineStackPlacementHostedTests: XCTestCase {
 // MARK: (a)
 
 final class AppAsksThinWallPopUpHostedTests: XCTestCase {
+
+    /// ★ notes30 (builders L1 and R1 found it both): this part's lay (its Switch to Aesthetic lays again) raises the new
+    /// engine's solid pop-up ("Some of the lattice stays solid") on the app's SHARED AppPopups; closed here, so it never covers
+    /// the next class's page (release 21's shard 2: AppSettingsHostedTests' clicks).
+    override func tearDown() {
+        MainActor.assumeIsolated { AppPopups.shared.current = nil }
+        super.tearDown()
+    }
 
     /// ★ (a) The pop-up's own frame is centred on the window (within 1 pt), wholly on it, at the six windows; Continue and
     /// Switch still work.

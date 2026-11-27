@@ -270,7 +270,7 @@ final class FlexibleRound7DesignEvidenceProbe: XCTestCase {
         press(h, "info-c-" + r3.key, what: "Face 3's (i) on the chip"); pump(1)
         log.append("  D09 (i) \(String(describing: s.faceStats(r3, group: c, project: p)?.rows.map { "\($0.label) \($0.value)" }))")
         frames(h, s, "D09"); shot(h, "D09_chipM_info")
-        s.faceUI.info = nil
+        AppPopups.shared.current = nil   // ★ notes30: the (i) opens the centred notification
 
         s.tapFace(p, face: 2, point: nil, mesh: mesh); pump(1.5)
         frames(h, s, "D10"); shot(h, "D10_chipN_filled_join")

@@ -76,6 +76,21 @@ public enum LatticeThinWallPrompt {
     /// Fit, where the app sizes it.
     public static func cellSetByHand(_ l: LatticeSettings) -> Bool { l.cellSizeMode == .fixed || l.cellSizeMode == .swept }
 
+    /// ★ notes30 X2 (cell advice): the cell line under the reasons — the hint only where a smaller cell can lay (a Swept range
+    /// whose smallest is above the smallest cell the lay may use: core divides a wall down to that, whatever cell is typed);
+    /// where none can, the "This needs … cells" pop-up's own fix where it lays here (Allow quilt); else none. `cells`: the
+    /// smallest cell laid and what the walls hold (the solid reason's depth ask; nil: release 21's rule).
+    public static func cellLine(_ l: LatticeSettings, cells: SolidReason.Depth?) -> String? {
+        guard let d = cells, !SolidReason.controlSmallerCellsAlways else { return cellSetByHand(l) ? manualHint : nil }
+        if l.cellSizeMode == .swept, l.cellMinMM > d.floorCellMM * (1 + 1e-6) { return manualHint }
+        if d.depthMM > 0, d.quiltHelps { return quiltHint(d) }
+        return nil
+    }
+    /// The pop-up's Allow quilt, said where it lays these walls.
+    public static func quiltHint(_ d: SolidReason.Depth) -> String {
+        "With Allow quilt on (Manual), cells go down to \(SolidPopUp.mm(d.quiltFloorCellMM)), small enough for these walls."
+    }
+
     /// The link to the page (at most 5 words, his help rule), and the page.
     public static let learnMore = "Learn more"
     public static let pageTitle = "Structural or Aesthetic"

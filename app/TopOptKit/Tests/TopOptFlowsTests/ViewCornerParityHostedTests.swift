@@ -47,9 +47,9 @@ final class ViewCornerParityHostedTests: XCTestCase {
         try h.pickFromMenu("capsuleMenu", "Structural", what: "the stage menu")
         h.pump(1)
         out.append(("Lattice Setup", Self.views(h)))
-        try h.tap("capsuleLattice", "the Lattice page", settle: 1.5)
+        try h.tap("capsuleSetup", "Setup, the settings", settle: 1.5)
         out.append(("Lattice page", Self.views(h)))
-        try h.tap("capsuleSetup", "back to Setup", settle: 1.5)
+        try h.tap("capsuleLattice", "back to the Lattice view", settle: 1.5)
         try h.tap("capsuleScissors", "Cut", settle: 1.5)
         out.append(("Cut", Self.views(h)))
         return out

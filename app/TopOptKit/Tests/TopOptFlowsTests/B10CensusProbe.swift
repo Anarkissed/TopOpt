@@ -79,10 +79,10 @@ final class B10CensusProbe: XCTestCase {
                 _ = try h.pickFromMenu("capsuleMenu", "Structural", what: "the stage menu")
                 h.pump(1.5)
                 record(h, "RO-lattice-stage", win)
-                try h.tap("capsuleLattice", "the Lattice page", settle: 2)
+                try h.tap("capsuleSetup", "Setup, the settings", settle: 2)
                 record(h, "RO-lattice-page", win)
-                // Cut last (UniformChromeHostedTests' route: from the Lattice page, Setup, then the scissors)
-                try h.tap("capsuleSetup", "back to Setup", settle: 1.5)
+                // Cut last (UniformChromeHostedTests' route: from the settings, Lattice, then the scissors)
+                try h.tap("capsuleLattice", "back to the Lattice view", settle: 1.5)
                 try h.tap("capsuleScissors", "Edit faces", settle: 2)
                 record(h, "cut", win)
             } catch { miss("workspace", win, "\(error)") }

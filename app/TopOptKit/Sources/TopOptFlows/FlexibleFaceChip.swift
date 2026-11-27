@@ -251,7 +251,6 @@ struct FlexibleFaceChip: View {
         let reading = Self.roleReading(project, g.id, ui: ui)
         let word = reading.word, symbol = reading.symbol, tint = reading.tint
         return Button {
-            ui.info = nil
             ui.roleOpen = ui.roleOpen == g.id ? nil : g.id
         } label: {
             HStack(spacing: 4) {

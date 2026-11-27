@@ -186,6 +186,17 @@ struct LatticeBuildTimelapse: Equatable {
         let bay = Swift.min(Float(bays - 1), Swift.max(0, ((mid - f.acrossLow) / f.acrossW * Float(bays)).rounded(.down)))
         return Int(fl) * perFloor + 1 + Int(bay)
     }
+
+    /// ★ notes30 M1 (the sheets on release 21's timelapse): a sheet has no struts, so it rises as its walls: the snap a place
+    /// `p` of a sheet comes in is its floor (by its own height along up), then its bay across — a floor of a sheet goes up bay
+    /// by bay, left to right, each all at once, after its floor's first beat (a sheet has no columns to stand first). The
+    /// sheet pass's shader (`sheet_build_hidden`) is this, mirrored.
+    static func sheetStep(_ p: SIMD3<Float>, _ f: Frame) -> Int {
+        let fl = Swift.min(Float(f.floors - 1), Swift.max(0, ((simd_dot(f.up, p) - f.low) / f.floorH + 1e-3).rounded(.down)))
+        let x = simd_dot(f.across, p)
+        let bay = Swift.min(Float(bays - 1), Swift.max(0, ((x - f.acrossLow) / f.acrossW * Float(bays)).rounded(.down)))
+        return Int(fl) * perFloor + 1 + Int(bay)
+    }
 }
 
 /// The timelapse of the lay on screen, as the 3D view draws it: the page (or the sample) says when a lay is asked for and when

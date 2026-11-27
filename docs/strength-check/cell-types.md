@@ -75,6 +75,69 @@ as a bridge, which must stay within 5 mm.
 | Auto's cap | none | 14.1 mm | none |
 | Special axis | its z (the columns) is laid along the frame axis nearest up, so the columns stand up on any face (`cell_struts`) | as bccz | as bccz (its waists' axis) |
 
+## The sheets (gyroid, Schwarz-D)
+
+On the new engine since notes28 (agent-scratch/organic1/notes28/sheets/SPEC.md, revision 3). A sheet has no struts:
+each region carries one field (tpms.hpp, the wall the laws were measured on) and a wall-thickness field over its cells
+(`sheet_wall_at`: the cells' walls at their centres, blended trilinearly). Every "strut" number of the tables above
+is, for a sheet, its true wall. The strength check credits a sheet **by place** (core/src/lattice_layout/strength.cpp,
+`lattice_credit`), not by cell; the rules are below the table. Builder B (claude/notes28-sheets-strength) keeps this
+section; the matrix test `lattice_sheets_strength` prints the derived numbers on every run.
+
+**In the app the sheets are Aesthetic only for now** (the reviewer's ruling 2026-11-26, item 3(b): "NO Structural sheet
+credit until (a); Aesthetic may ship"; (a) is the laws' envelope, claude/notes30-sheet-laws). The Lattice stage's picker
+greys both sheets on Structural ("Aesthetic only for now", LatticeTypeCatalog.layoutEntries; notes30 M1), so no Structural
+job with a sheet is sent. The credit below is core's, unchanged, waiting for those laws and the reviewer's yes.
+
+| | gyroid | Schwarz-D |
+|---|---|---|
+| Measured band (density) | 0.1501 - 0.6007 | 0.2004 - 0.6001 |
+| Wall over cell across the band | 0.0487 - 0.2066 | 0.0524 - 0.1665 |
+| Stiffness at the band's ends, C11 / C12 / C44 (MPa) | 257/130/71.6 - 1537/650/507 | 388/158/88.6 - 1588/641/507 |
+| Wall law at the band's ends, Kd / Kv | 59.6/25.1 - 9.45/6.40 | 36.7/18.9 - 9.24/6.47 |
+| Interlayer law at the ends, Kild / Kilv | 26.8/16.7 - 4.92/3.36 | 17.1/10.2 - 3.87/3.32 |
+| The open look (wall over cell, "Allow quilt" off) | 0.2066 | 0.1665 |
+| Touch (the channels close: "Allow quilt" on) | sqrt 3 / 4 = 0.4330 | 0.3507 |
+| The smallest cell (two lines over the open look) | 4.36 mm | 5.41 mm |
+| Auto's wall (SPEC 1.3, `sheet_auto_wall_mm`) | two lines up to a 9.8 mm cell, then 0.0918 x cell (about 28 % solid) | two lines up to 12.2 mm, then 0.0740 x cell |
+| Two-line wall credited up to | 18.5 mm cell | 17.2 mm cell |
+| Cells across a member, the law valid from (the floor) | 10 | 9 |
+| Auto's cap | 31.3 mm (the widest near-level patch, 0.32 cell, held from both sides) | 41.7 mm (0.24 cell) |
+| Structural | yes; a member under 10 cells across is solid at the lay and uncredited in the check | yes; under 9 |
+
+Sources: the band and the stiffness, core/src/fea/lattice.cpp (`kGyroid`, `kSchwarzD`: tpms_probe `rows` on the production
+wall, evidence docs/handoffs/evidence/2026-11-01-lattice-types-k1/); the laws, core/src/fea/strut_strength.cpp
+(`kGyroidStrutLaw`, `kSchwarzDStrutLaw`; evidence/2026-11-09-lattice-type-strut-laws/{gyroid,schwarz_d}/kfit.csv, S1 to
+S6 pass); the floor, the bending study (`tpms_probe bend`, lattice.cpp `kGyroidCurve`, `kSchwarzDCurve`: within 2.4 % of
+the averaged member only from 10 and 9 cells across, at one density, 0.40). All **measured** on each sheet's own cell.
+
+How a sheet is credited (rule V4 for sheets; SPEC 1.4, 1.5, 3.3):
+
+- **By place.** A voxel of the check's grid whose centre is lattice of a laid cell has the density of the wall at its
+  own centre, `lattice_density_from_strut(type, the cell, half of sheet_wall_at)`, and the band is tested per voxel. With
+  one wall in a region this is the cell's own density; By stress grades it smoothly, with no step at a cell face.
+- **No credit**: a cut cell (until builder D's cut-layer rows and the reviewer's ruling: `kSheetCutCellsCredited`); a
+  cell whose member holds fewer than the floor of cells across (read by `room_through` at the cell's own lattice); a
+  voxel out of the band; a voxel inside a blend band (where two regions' sheets are mixed, "Where regions meet: Blend":
+  the laws do not cover it). Each is void in the check's solve, as a cut strut cell is.
+- **Solid**: the two-line wall between two regions ("Where regions meet: Solid wall"), as everything no cell holds.
+- **sheet_cells.bin** (beside strength.json; the block's key `"sheet_cells"`): per laid cell its frame, corner, size,
+  wall, cells across, flags (credited, cut, out of the band, under the floor, in a blend band, by the solid wall) and
+  the check's margin there, its worst credited voxel's by the sheet's own law: the K4 colours on Results. The block's
+  `"sheet_credit"` counts the cells by flag and the voxels credited, in a blend band and in the solid wall.
+
+Caveats (SPEC 3.4):
+
+- The lowest row of each law had 4 wall voxels: a lower bound. A two-line wall only reaches those rows in 17 to 18 mm
+  cells.
+- The interlayer factor 0.55 is assumed (above), and the interlayer law was measured with the build direction on a cube
+  axis; a face frame tilted to the bed is outside that (the strut types have the same gap).
+- The floor (10 / 9) was measured at one density. Builder D (claude/notes28-sheet-laws) re-measures the laws and the
+  stiffness per member width, 2 to 8 cells across; until its tables are in core the floor stays 10 / 9 and cut cells get
+  no credit, so a thin member is solid and a sheet in a part under about 44 mm (gyroid) or 49 mm (Schwarz-D) across is
+  credited nowhere.
+- Neither sheet is print-tested (his rule, "Not print-tested").
+
 ## Measured or assumed, in one list
 
 - Measured on each type's own cell: the density band, the stiffness tensor, the strut law and the interlayer law

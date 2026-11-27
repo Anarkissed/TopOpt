@@ -42,6 +42,9 @@ extension ResultsModel {
                                   title: projectName.isEmpty ? name : projectName)
     }
 
+    /// ★ his 11-25: the print file's three resolutions, as its report gives them (nil: not a print file, or none given).
+    public var printResolutions: PrintResolutionFacts? { reportBlocks?.printFile?.resolutions }
+
     /// The print file this result was made as: its name and size, as its report gives them (nil: not a print file's).
     public var printFileIdentity: PrintFileKeep.Identity? {
         guard let f = reportBlocks?.printFile, f.fileBytes > 0 else { return nil }

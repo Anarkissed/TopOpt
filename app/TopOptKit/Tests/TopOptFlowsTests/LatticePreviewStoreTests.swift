@@ -194,10 +194,15 @@ final class LatticePreviewStoreTests: XCTestCase {
         // (11: + fileMesh, 362's Mac print-accurate file — NOT kept here: the version's result holds that file)
         // ★ RE-PINNED (notes29 H3: 12, + printUp, the up a CELL lay stood along — its bridges and timelapse floors; NOT kept
         // here: this store keeps Organic lattices only, whose drawn bars never carry it, as a fresh Organic lay's do not)
-        XCTAssertEqual(n(LatticeLayoutBarsInputs(token: 0, bars: [])), 12, "what is drawn")
-        XCTAssertEqual(n(LatticeLayoutSolidGrid(token: 0, origin: .zero, voxel: 1, dims: .zero, rg: [])), 6)
+        // ★ RE-PINNED 12 -> 13 (notes28 sheets, builder C; merged notes30 M1): + sheets, a sheet layout's fields — NOT kept
+        // here: the store keeps finished Organic lattices only, and a sheet is never Organic
+        XCTAssertEqual(n(LatticeLayoutBarsInputs(token: 0, bars: [])), 13, "what is drawn")
+        // ★ RE-PINNED 6 -> 8 (notes28 sheets, builder E; merged notes30 M1): + sheetSeam, sheetSeamMM, the Blend band's seam
+        // channels — filled for a sheet's map only, so an Organic lattice's kept map never carries them: NOT kept here
+        XCTAssertEqual(n(LatticeLayoutSolidGrid(token: 0, origin: .zero, voxel: 1, dims: .zero, rg: [])), 8)
         // ★ RE-PINNED (362 11-24: notes25 D10 added floorCellMM; the store now keeps it, format 2, and still reads 1)
-        XCTAssertEqual(n(LatticeLayoutColours.Laid()), 13)
+        // ★ RE-PINNED 13 -> 15 (notes28 sheets, builder C): + sheets, sheetSeams — never an Organic lattice's, so not kept
+        XCTAssertEqual(n(LatticeLayoutColours.Laid()), 15)
         XCTAssertEqual(n(LatticeLayoutPreview.Timing(openMS: 0, readMS: 0, cellsMS: 0, barsMS: 0, bars: 0)), 7)
         XCTAssertEqual(n(LatticeOrganicLook.Limits(strutLowerMM: 0, strutUpperMM: 0, strutAutoMM: 0, cellLowerMM: 0, cellUpperMM: 0,
                                                    cellAutoMM: 0)), 8)

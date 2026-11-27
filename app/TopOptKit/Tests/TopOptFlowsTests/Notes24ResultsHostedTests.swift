@@ -17,8 +17,12 @@ final class Notes24ResultsHostedTests: XCTestCase {
     private var root: URL!
     override func setUpWithError() throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("topopt-notes24h-\(UUID().uuidString)", isDirectory: true)
+        AppBuildHost.drainResultsQueue()   // ★ notes30 (R1): nothing an earlier test left on the results queue ahead of ours
     }
-    override func tearDownWithError() throws { try? FileManager.default.removeItem(at: root) }
+    override func tearDownWithError() throws {
+        AppBuildHost.drainResultsQueue()
+        try? FileManager.default.removeItem(at: root)
+    }
 
     static let sizes: [(String, CGSize)] = [("13″ landscape", AppBuildHost.landscape13), ("portrait", CGSize(width: 820, height: 1180))]
 
@@ -122,7 +126,7 @@ final class Notes24ResultsHostedTests: XCTestCase {
                 let mini = try h.probe("library-mini-v2a", "\(name): v2's picture")
                 h.click(CGPoint(x: mini.midX, y: mini.midY), settle: 2)
                 assertResultsInTheLatticeStage(h, "\(name)")
-                try h.tap("capsuleSetup", "\(name): ★ the Lattice stage's Setup, over Results", settle: 1.5)
+                try h.tap("capsuleLattice", "\(name): ★ the Lattice stage's Lattice view, over Results", settle: 1.5)
                 XCTAssertNil(h.frames.all["resultsExport"], "\(name): ★ back to editing in the Lattice stage")
                 _ = try h.onScreen("latticeSplit", "\(name): the Lattice stage's corner")
                 if passes {
@@ -167,19 +171,39 @@ final class Notes24ResultsHostedTests: XCTestCase {
 
     /// ★ The Results screen never MOUNTS while the app is not in front (its big mesh behind Sidecar ended his app): asked to
     /// open then, it opens as the app comes back. RED CONTROL: in front, it opens at once.
+    /// ★ notes30 (builder R1): v2's saved result is read on the app's one results queue (`AppModel.resultsQueue`) after any
+    /// work already there. Read late (release 21's suite, three shards side by side), the page had opened first, on this
+    /// lookalike's "Which way is down?" step — where the run watchers were not mounted, so the result arriving never opened
+    /// Results ("it opens as the app comes back" failed at the first size; alone the read is quick and it passed). The first
+    /// size now reads it late on purpose (work queued ahead of it); a third pass is the RED CONTROL: without the watchers in
+    /// the gravity step (`controlNoCardsHostInGravitySetup`), Results never opens.
     func testResultsNeverMountBehindTheAppAndOpenWhenItComesBack() throws {
-        for (name, size) in Self.sizes {
-            let (app, _) = try part("behind-\(Int(size.width))")
+        defer { WorkspacePlaceholder.controlNoCardsHostInGravitySetup = false }
+        let passes = [(Self.sizes[0], true, false), (Self.sizes[1], false, false), (Self.sizes[0], true, true)]
+        for ((size0, size), late, control) in passes {
+            let name = control ? "RED CONTROL" : size0
+            WorkspacePlaceholder.controlNoCardsHostInGravitySetup = control
+            let (app, f) = try part("behind-\(Int(size.width))-\(control)")
             let h = AppBuildHost(AppBuildRoot(model: app), size: size, test: self)
             h.pump(3)
             app.sceneChanged(active: false)
+            if late { AppModel.resultsQueue.async { Thread.sleep(forTimeInterval: 3) } }   // work ahead of v2's read
             let mini = try h.probe("library-mini-v2a", "\(name): v2's picture")
-            h.click(CGPoint(x: mini.midX, y: mini.midY), settle: 2)
+            h.click(CGPoint(x: mini.midX, y: mini.midY), settle: 1)
             XCTAssertEqual(app.screen, .workspace, "\(name): the version opened")
+            XCTAssertEqual(app.project?.id, f["2"], "\(name): v2")
+            if late { XCTAssertNil(app.project?.run.outcome(lattice: true), "\(name): premise: the page opened before its result") }
+            var waited = 0.0
+            while app.project?.run.outcome(lattice: true) == nil, waited < 60 { h.pump(0.25); waited += 0.25 }
+            XCTAssertNotNil(app.project?.run.outcome(lattice: true), "\(name): premise: v2's print file result has landed")
             h.pump(1)
             XCTAssertNil(h.frames.all["resultsExport"], "\(name): ★ Results not mounted behind the app")
             app.sceneChanged(active: true)
-            XCTAssertNotNil(waitFor(h, "resultsExport"), "\(name): ★ it opens as the app comes back")
+            if control {
+                XCTAssertNil(waitFor(h, "resultsExport", seconds: 5), "RED CONTROL: no watchers in the gravity step: never opens")
+            } else {
+                XCTAssertNotNil(waitFor(h, "resultsExport"), "\(name): ★ it opens as the app comes back")
+            }
         }
     }
 }

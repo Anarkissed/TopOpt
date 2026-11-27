@@ -27,6 +27,7 @@ extern "C" __attribute__((used)) const char* const topopt_bridge_vendored_core =
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <mutex>
 #include <cstdio>
 #include <exception>
 #include <functional>
@@ -81,7 +82,19 @@ namespace {
 // per-step counts (loads/anchors/grid dims/bbox) capture the exact load case the
 // solver was handed on device. Cheap: a handful of lines per run, not per
 // iteration. Prefix is greppable in a noisy device log.
+//
+// ★★ notes30 (his crash, 2026-11-26 12:50, 0x8BADF00D): a log line is NOT cheap. Run from Xcode (▶), every os_log
+// line goes through the debugger's log redirect, which takes one lock and writes to a pipe; when that pipe stopped
+// draining, the thread writing one of thousands of "lattice_strut_diameter_mm: refused" lines (the Settings sample
+// asked once per strut, for a type core does not call live) blocked inside the lock, the main thread blocked on the
+// same lock asking `lattice_limits` from a SwiftUI getter, and the app was killed for not answering. So this is
+// the ONLY place a line is written, every line is counted (`bridge_log_line_count`, the tests' sink), and the
+// guard below never writes one for a lookup's refusal: a lookup's "no" is an answer, carried in last_refusal().
+std::atomic<long long> g_log_lines{0};
+std::atomic<bool> g_control_log_every_refusal{false};
+
 void bridge_log(const std::string& msg) {
+  g_log_lines.fetch_add(1, std::memory_order_relaxed);
 #if defined(__APPLE__)
   os_log(OS_LOG_DEFAULT, "[TopOptBridge] %{public}s", msg.c_str());
 #else
@@ -112,11 +125,37 @@ std::string& last_refusal() {
   return why;
 }
 
+// ★★ notes30: what a refusal writes to the log.
+//   - `lookup` (the default: every per-type number, limit, readiness, outline, schema probe — asked per render, per
+//     cell, per strut): NOTHING for core's own refusal (a std::exception: its words are the answer, in
+//     last_refusal() and the result); a foreign exception (not a std::exception: never expected) once per process
+//     per function.
+//   - `job` (an import, a run, a lay, a file: one per press): each DIFFERENT refusal once per process (where + why),
+//     at most `kRefusalKeysMost` of them; the same refusal again writes nothing.
+enum class RefusalLog { lookup, job };
+constexpr std::size_t kRefusalKeysMost = 256;
+
+// True the first time `key` is seen this process (and while fewer than kRefusalKeysMost keys are kept).
+bool refusal_first_time(const std::string& key) {
+  static std::mutex m;
+  static std::set<std::string> seen;
+  std::lock_guard<std::mutex> lock(m);
+  if (seen.size() >= kRefusalKeysMost) return false;
+  return seen.insert(key).second;
+}
+
+bool refusal_logs(RefusalLog policy, const char* where, const std::string& why, bool foreign) {
+  if (g_control_log_every_refusal.load(std::memory_order_relaxed)) return true;   // RED CONTROL: before notes30
+  if (policy == RefusalLog::job) return refusal_first_time(std::string("J|") + where + "|" + why);
+  return foreign && refusal_first_time(std::string("L|") + where);
+}
+
 template <class Body, class Fail>
-auto guarded(const char* where, Body&& body, Fail&& fail) noexcept
-    -> decltype(body()) {
+auto guarded(const char* where, Body&& body, Fail&& fail,
+             RefusalLog policy = RefusalLog::lookup) noexcept -> decltype(body()) {
   using R = decltype(body());
   std::string why;
+  bool foreign = false;
   try {
     if constexpr (std::is_void_v<R>) {
       body();
@@ -130,12 +169,13 @@ auto guarded(const char* where, Body&& body, Fail&& fail) noexcept
   } catch (const std::exception& e) {
     why = e.what();
   } catch (...) {
+    foreign = true;
     why = std::string(where) +
           ": core stopped with an exception that is not a std::exception";
   }
   if (why.empty()) why = std::string(where) + ": core refused without a reason";
   last_refusal() = why;
-  bridge_log(std::string(where) + ": refused: " + why);
+  if (refusal_logs(policy, where, why, foreign)) bridge_log(std::string(where) + ": refused: " + why);
   return fail(why);
 }
 
@@ -149,7 +189,7 @@ auto guarded_err(const char* where, BridgeError& err, Body&& body) noexcept
     err.ok = false;
     err.message = why;
     if constexpr (!std::is_void_v<R>) return R{};
-  });
+  }, RefusalLog::job);   // ★ notes30: a press's refusal, each different one logged once
 }
 
 // The other common shape: the result has no reason field, so it is the type's empty
@@ -2253,6 +2293,18 @@ std::string core_version() {
 
 std::string bridge_last_refusal() { return last_refusal(); }
 
+// ★ notes30: the counting sink (every line bridge_log wrote this process) and the guard's RED CONTROL (every refusal
+// logged, as before notes30). Tests only; nothing in the app reads or sets them.
+long long bridge_log_line_count() {
+  return guarded_empty("bridge_log_line_count",
+                       [&]() -> long long { return g_log_lines.load(std::memory_order_relaxed); });
+}
+void bridge_set_control_log_every_refusal(bool on) {
+  guarded("bridge_set_control_log_every_refusal",
+          [&]() { g_control_log_every_refusal.store(on, std::memory_order_relaxed); },
+          [](const std::string&) {});
+}
+
 std::string bridge_guard_self_test(int kind) {
   // Exercises the one guard's three exits for its own test (BridgeGuardTests): 0 = a
   // normal return, 1 = a std::exception, 2 = an exception that is not one. Returns the
@@ -3957,7 +4009,7 @@ namespace topoptbridge {
 
 std::string bridge_guard_run(const char* where, const std::function<void()>& body) noexcept {
   return guarded(where, [&]() -> std::string { body(); return std::string(); },
-                 [](const std::string& why) { return why; });
+                 [](const std::string& why) { return why; }, RefusalLog::job);   // ★ notes30: one per lay
 }
 
 }  // namespace topoptbridge

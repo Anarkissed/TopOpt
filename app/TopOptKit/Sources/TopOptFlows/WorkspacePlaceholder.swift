@@ -355,8 +355,6 @@ public struct WorkspacePlaceholder: View {
     @State private var cadFacesDrawerOpen = false
     // The expand handle currently being dragged (nil = none).
     @State private var draggingExpandPlane: String?
-    /// ★ §3(b) — which group's (i) pop-up is open. One at a time, PER UNION.
-    @State private var diagnosisPopoverGroup: UUID?
     /// ★ §5 — which DEPTH field has the numeric keypad open. Keyed by the row's
     /// identifier so a group row and a selectable row cannot share one pad.
     @State private var depthPadKey: String?
@@ -1369,7 +1367,7 @@ public struct WorkspacePlaceholder: View {
                 .overlay { if newEngineDrawn { LatticeRefreshingCard(progress: newEngine.refresh) } }   // ★ notes29: Skip all animations — the centred card
                 .onChange(of: newEngineOn) { on in
                     if on, latticeSim.field == nil, LatticeLayoutPreview.needsStress(project.lattice) { latticeSim.adoptSaved(for: model.makeLatticeSimContexts()) }   // ★ his 11-23
-                    newEngine.update(project: project, on: on, solid: !surfaceXrayOn, stress: newEngineStress)
+                    newEngine.update(project: project, on: on, solid: !surfaceXrayOn, stress: newEngineStress, live: latticeLiveHere)   // ★ notes30
                     // ★ Install 3: under the new engine the old picture goes (memory, and no stale key or card); leaving it (the
                     // lattice page, a variant, Organic) bakes it again
                 }
@@ -1405,7 +1403,7 @@ public struct WorkspacePlaceholder: View {
                     // ★ Install 3: the drawer's walls and cells are the new engine's — re-derive the cards when its layout lands
                     if newEngineDrawn, Self.perRegionCellAlgorithms.contains(project.lattice.algorithm) { refreshLatticeFaceCards() }
                 }
-                .onChange(of: surfaceXrayOn) { x in if newEngineOn { newEngine.update(project: project, on: true, solid: !x, stress: newEngineStress) } }
+                .onChange(of: surfaceXrayOn) { x in if newEngineOn { newEngine.update(project: project, on: true, solid: !x, stress: newEngineStress, live: latticeLiveHere) } }
                 .onChange(of: project.lattice, perform: { _ in if newEngineOn { newEngineSettingsChanged(); fileExport.settingsChanged() } })   // ★ 11-16: Live waits, Click to refresh holds   // (the rebake's lattice trigger stays the page's first: OrganicPreviewBakeInputsTests)
                 .onChange(of: newEngine.organicWallVerdicts) { v in   // ★ E5: core's word on each wall (Selections' foci row)
                     if !v.isEmpty { project.recordLatticeWallVerdicts(v) }
@@ -1534,6 +1532,9 @@ public struct WorkspacePlaceholder: View {
             })   // Flexible (PR #362) H58
             AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
             if force.phase == .setup, !fullScreenPageUp {
+                // ★ notes30 (builder R1): the run cards and run watchers here too — while "Which way is down?" shows, a result
+                // read after the page opened (a Library tap on it), or a run landing, was never heard and Results never opened
+                if !Self.controlNoCardsHostInGravitySetup { workspaceCardsHost }
                 gravityBanner
                 // Point which way is down — the reliable route that doesn't depend on a
                 // clean single face. The tip SNAPS to the part's own face normals (item 1);
@@ -1837,6 +1838,7 @@ public struct WorkspacePlaceholder: View {
                               loadUnit: force.unit,
                               infillPercent: project.printParams.infillPercent,
                               infillPattern: project.printParams.infillPattern,
+                              solidWallMM: project.printParams.wallRingMM,   // ★ 362 (11-26): the bare-vines fixes offered
                               // Handoff 070 load-path FLOW: the load-group centroids are
                               // where each comet arrow starts (app-side data, like the
                               // applied load). Empty → the results screen falls back to
@@ -2202,7 +2204,7 @@ public struct WorkspacePlaceholder: View {
         return PrintCheckLay.Preview(
             inputs: { try await preview.organicMacInputs(project: p, stress: newEngineStress) },
             stressReady: { try await stressReadyForCheck(isCancelled: isCancelled, said: said) },
-            lay: { preview.update(project: p, on: true, solid: false, stress: newEngineStress, checkNozzle: false, exact: true) },
+            lay: { preview.update(project: p, on: true, solid: false, stress: newEngineStress, live: latticeLiveHere, checkNozzle: false, exact: true) },
             busy: { preview.laying || preview.opening },
             problem: { preview.problem },
             stop: { if !newEngineOn { preview.clear() } })
@@ -2238,6 +2240,52 @@ public struct WorkspacePlaceholder: View {
         run.replaceOutcome(outcome, lattice: lattice)
         if let a = artifacts, project.relatticeArtifacts == nil { project.relatticeArtifacts = a }
         model.persistCurrentProject()
+    }
+
+    /// ★ his 11-25 ("Offer print resolutions when exporting"): another resolution of this version's print file — its job made
+    /// again at that level and format, standing as the made file stands, with no strength check (the lattice is the same: its
+    /// check is the result's), on the Mac, or on this iPad when he chose it (PrintResolutionFlow).
+    private func printResolutionHost() -> PrintResolutionHost {
+        let comp = compute
+        return PrintResolutionHost(macReady: { comp.activeRemote != nil },
+                                   make: { level, format, up, onMac, cancelled, said in
+                                       try await makePrintResolution(level: level, format: format, up: up, onMac: onMac,
+                                                                     isCancelled: cancelled, said: said)
+                                   })
+    }
+
+    @MainActor
+    private func makePrintResolution(level: String, format: String, up: SIMD3<Double>?, onMac: Bool,
+                                     isCancelled: @escaping @Sendable () -> Bool,
+                                     said: @escaping @Sendable (String) -> Void) async throws -> (file: Data, report: [String: Any]) {
+        guard let request = model.makeLatticeRunRequest() else {
+            throw LatticeFileRun.Failure("Import a part and set a lattice region first.")
+        }
+        try await stressReadyForCheck(isCancelled: isCancelled, said: said)   // a lattice graded By stress reads its field
+        let job: LatticeFileJob.ForPart
+        switch LatticeFileJob.forPart(project, stress: newEngineStress, strengthJob: nil, printUp: up) {
+        case .success(let j): job = j
+        case .failure(let why): throw LatticeFileRun.Failure(why.line)
+        }
+        guard let json = PrintResolutionJob.retarget(job.json, level: level, format: format, up: up) else {
+            throw LatticeFileRun.Failure("The job could not be written")
+        }
+        let one = LatticeFileJob.ForPart(json: json, modelPath: job.modelPath, demand: job.demand)
+        let name = project.name
+        let config = onMac ? compute.activeRemote : nil
+        if onMac, config == nil { throw LatticeFileRun.Failure("The Mac did not answer (none chosen)", transient: true) }
+        let made: LatticeFileRun.Made = try await Task.detached {
+            if let config {
+                return try LatticeFileRun.drive(config: config, modelPath: one.modelPath, jobJSON: one.json, projectName: name,
+                                                demand: one.demand, isCancelled: isCancelled,
+                                                onState: { state, _ in
+                                                    said(state == "running" ? PrintResolutionCopy.makingFile : PrintResolutionCopy.waiting)
+                                                })
+            }
+            return try LatticeFileButton.runHere(job: one, strengthJob: nil, materialsPath: request.materialsPath,
+                                                 rulesPath: request.rulesPath)
+        }.value
+        return (made.stl, (try? JSONSerialization.jsonObject(with: made.reportJSON)) as? [String: Any] ?? [:])
     }
 
     /// The print file's run, started: on the chosen Mac, else this iPad (a regular lattice only: Organic needs a Mac).
@@ -3757,7 +3805,7 @@ public struct WorkspacePlaceholder: View {
         .onChange(of: latticeStressFieldKey) { _ in
             refreshLatticeStressPeak()
             if showStrutPreview, project.lattice.enabled { buildStrutScene() }
-            if newEngineOn { newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress) }   // ★ Install 2: the field landed
+            if newEngineOn { newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress, live: latticeLiveHere) }   // ★ Install 2: the field landed
         }
         .onChange(of: latticeSim.phase) { phase in   // ★ Install 3: a Lattice press that started the stress check goes on
             guard let waiting = latticeAfterStress else { return }
@@ -3871,7 +3919,10 @@ public struct WorkspacePlaceholder: View {
             // ★ his 11-22 · ★ notes25 (A5): the print file's chain ends with its run — a stop ends in the centred pop-up
             let saidInAPopUp = latticeChainEnded(ph)
             // ★ notes28 (builder D's "cannot_lattice"): a print file whose check emptied a region says so in the centred pop-up
-            if ph == .succeeded, run.outcomeIsPrintFile { LatticeCannotLattice.sayEmptied(report: run.outcome?.reportJSON, in: project) }
+            // ★ SHEETS (notes28 sheets SPEC 1.5): else a blend that fell back to the solid wall says which regions, in the same pop-up
+            if ph == .succeeded, run.outcomeIsPrintFile, !LatticeCannotLattice.sayEmptied(report: run.outcome?.reportJSON, in: project) {
+                LatticeSheets.sayFellBack(report: run.outcome?.reportJSON, in: project)
+            }
             GenerationTimingLog.shared.printFileRunMoved(ph, outcome: run.outcome, failure: run.failure.map { "\($0)" })   // ★ 11-22
             // ★ Organic cut 2 (his certify wizard): an Organic part that does not certify opens on Results, where it is walked through
             // ★ his 11-21 ("have it spit out an actual result in the app - because NOTHING happens in app"): every Lattice run
@@ -5224,7 +5275,8 @@ public struct WorkspacePlaceholder: View {
     /// change; Click to refresh marks the preview out of date (the Lattice button reads Refresh Lattice).
     private func newEngineSettingsChanged() {
         if latticeLiveHere {
-            newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress, delay: LatticePreviewMode.liveWait)
+            newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress, delay: LatticePreviewMode.liveWait,
+                             live: true)   // ★ notes30 (his 11-26): Live preview — no animation, no progress; it just changes
         } else if newEngine.isCurrent(project: project, stress: newEngineStress) {
             latticePreviewStale = false   // ★ 11-21: back to the settings on screen (his undo of a zone delete): nothing to lay
         } else {
@@ -5255,7 +5307,7 @@ public struct WorkspacePlaceholder: View {
         }
         if newEngineOn {
             if LatticeLayoutPreview.needsStress(project.lattice) { runNewEngineStressCheck() }   // only what these settings read
-            newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress, checkNozzle: checkNozzle,
+            newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress, live: latticeLiveHere, checkNozzle: checkNozzle,
                              exact: exact)   // ★ 11-21: the print file asks the exact lattice whatever the preview shows
         }
     }
@@ -6339,6 +6391,8 @@ public struct WorkspacePlaceholder: View {
     }
     /// RED CONTROL (tests): the lattice view starts off on the Lattice stage (before notes28).
     nonisolated(unsafe) static var controlLatticeViewStartsOff = false
+    /// RED CONTROL (tests, notes30): no run cards or run watchers while the gravity step shows (before notes30).
+    nonisolated(unsafe) static var controlNoCardsHostInGravitySetup = false
 
     /// The lattice view on, when it is wanted and the lattice is set up (a type chosen, lattice on). The new engine lays it from
     /// the part's own settings at once; the old engine's bake (a variant's page) still waits for the session's Save, as the
@@ -8335,7 +8389,7 @@ public struct WorkspacePlaceholder: View {
         if newEngineDrawn {   // ★ Install 3: the new engine's lattice is the layer, its bars what there is to draw
             return LatticePreviewBodyAlpha.latticeOnlyShowing(viewOn: latticeOnlyViewOn, layerDrawn: true,
                                                               simRunning: latticeSimIsRunning,
-                                                              nothingToDraw: (newEngine.laid?.barCount ?? 0) == 0)
+                                                              nothingToDraw: newEngine.laid.map { $0.barCount == 0 && $0.sheets.isEmpty } ?? true)   // ★ SHEETS: a sheet is drawn too
         }
         return LatticePreviewBodyAlpha.latticeOnlyShowing(viewOn: latticeOnlyViewOn,
                                                    layerDrawn: latticeLayerIsDrawn,
@@ -9800,7 +9854,8 @@ public struct WorkspacePlaceholder: View {
                     .foregroundStyle(DS.Color.textPrimary.color)
                     .fixedSize(horizontal: false, vertical: true)
                 // ★ notes25 (D8, his 11-23): why, in three short reasons with their (i)s, what Aesthetic does, and Learn more
-                LatticeThinWallReasons(finding: thin, lattice: project.lattice, oldBakeCells: strutScene?.minCellsPerMember)
+                LatticeThinWallReasons(finding: thin, lattice: project.lattice, oldBakeCells: strutScene?.minCellsPerMember,
+                                       cells: newEngine.solidReason?.depth ?? LatticeLayoutPreview.cellFloor(project))
                 HStack(spacing: DS.Space.s) {
                     Button {
                         project.switchLatticeStageMode(to: .aesthetic)
@@ -11705,12 +11760,15 @@ public struct WorkspacePlaceholder: View {
     }
 
     /// ★ his 11-22 ("NOTHING cuts into the modal"): the diagnosis as one warning glyph (a 44 pt target) in the Role row; a
-    /// tap opens the same pop-up with every failure and its fix. Never in Aesthetic (his 08-25 ruling, as the badge).
+    /// tap opens every failure and its fix. Never in Aesthetic (his 08-25 ruling, as the badge).
+    /// ★ notes30 X2 (his yes, 11-26): the tap opens the app's one centred card, like every (i) ("Tap anywhere to continue"):
+    /// every failure, the fix first, then its numbers; the fixes that name a Lattice page setting are its buttons, each going
+    /// to that setting lit with what to try (the popover N1 kept is gone).
     @ViewBuilder private func latticeDiagnosisGlyph(_ g: SelectionGroup) -> some View {
         let d = (project.lattice.stageMode ?? .structural) == .aesthetic
             ? LatticeFaceDiagnosis.merged([]) : latticeDiagnosis(g)
         if let badge = d.badge {
-            Button { diagnosisPopoverGroup = g.id } label: {
+            Button { openLatticeDiagnosisCard(d) } label: {
                 Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 13, weight: .bold))
                     .foregroundStyle(latticeVerdictTint(d.severity).color)
                     .frame(width: 44, height: 44).contentShape(Rectangle())
@@ -11719,42 +11777,21 @@ public struct WorkspacePlaceholder: View {
             .accessibilityLabel(badge + ". How to fix this")
             .accessibilityIdentifier("lattice-diagnosis-info-\(g.id.uuidString)")
             .background(DSParts.publish("lattice-diagnosis-\(g.id.uuidString)"))
-            .popover(isPresented: Binding(
-                get: { diagnosisPopoverGroup == g.id },
-                set: { if !$0 { diagnosisPopoverGroup = nil } })) {
-                latticeDiagnosisPopover(d)
-            }
         }
     }
 
-    /// ★ §3(b)/§3(e) — THE POP-UP: every failure, and it LEADS WITH THE FIX.
-    private func latticeDiagnosisPopover(_ d: LatticeFaceDiagnosis) -> some View {
-        VStack(alignment: .leading, spacing: DS.Space.m) {
-            ForEach(Array(d.problems.enumerated()), id: \.offset) { _, p in
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(p.what)
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                    ForEach(p.fixes, id: \.self) { fix in
-                        HStack(alignment: .top, spacing: DS.Space.xs) {
-                            Image(systemName: "wrench.and.screwdriver.fill")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(DS.Color.accent.color)
-                            Text(fix)
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(DS.Color.textPrimary.color)
-                        }
-                    }
-                    Text(p.measured)
-                        .font(.system(size: 11, weight: .semibold)).monospacedDigit()
-                        .foregroundStyle(DS.Color.textTertiary.color)
-                }
-            }
+    /// ★ notes30 X2: the warning glyph's card — the centred card with every failure (`LatticeDiagnosisCard`), its setting fixes
+    /// as buttons through the app's one way to a setting (`openSettingToChange`).
+    private func openLatticeDiagnosisCard(_ d: LatticeFaceDiagnosis) {
+        guard !Self.controlDiagnosisNoCard else { return }
+        LatticeDiagnosisCard.open(d) { c in
+            // ★ notes30 X2 (cell advice): where no smaller cell lays, the "This needs … cells" pop-up's fixes, taken as it takes them
+            if let f = c.offer { SolidReason.take(f, on: project) }
+            else { openSettingToChange(.init(page: .lattice, field: c.field.rawValue, tryText: c.tryText)) }
         }
-        .padding(DS.Space.ml)
-        .frame(maxWidth: 320, alignment: .leading)
-        .accessibilityIdentifier("lattice-diagnosis-popover")
     }
+    /// RED CONTROL (tests): release 21's wiring — the glyph's tap raised no centred card (it opened a popover beside it).
+    nonisolated(unsafe) static var controlDiagnosisNoCard = false
 
     /// The diagnosis for one group, from its card plus core's own two floors.
     /// ★ THE GROUP'S BADGE, FROM ITS FACES (maintainer, 2026-08-17). It was built
@@ -11779,11 +11816,12 @@ public struct WorkspacePlaceholder: View {
             .regionCellsPerMemberFloor(topology: project.lattice.topologyID,
                                        boundaryFinishWritten: project.lattice.singleCellMembers,
                                        algorithm: project.lattice.resolvedAlgorithm)
+        let cells = LatticeLayoutPreview.cellFloor(project)   // ★ notes30 X2: no fix names a cell under the smallest laid
         let each = latticedSelectableCards(g).map {
             LatticeFaceDiagnosis.of(card: $0,
                                     cellsPerMemberFloor: floor > 0
                                         ? floor : limits.minCellsPerMember,
-                                    nozzleWidthMM: nozzle)
+                                    nozzleWidthMM: nozzle, cells: cells)
         }
         return LatticeFaceDiagnosis.merged(each)
     }
@@ -15001,7 +15039,8 @@ extension WorkspacePlaceholder {
         let refresh = LatticePreviewMode.showsRefresh(live: latticeLiveHere, previewUp: showStrutPreview,
                                                       stale: latticePreviewStale, running: runs)
         // ★ his pick 11-21: an Organic preview laying wears its ring and count-down on the button (never a bottom line)
-        let laying = refresh || runs ? nil : newEngine.layProgress.map(LatticePreviewMode.buttonProgress)
+        // ★ notes30 (his 11-26): a Live preview lay wears none (`ringProgress`)
+        let laying = refresh || runs ? nil : newEngine.ringProgress.map(LatticePreviewMode.buttonProgress)
         // ★ his 11-22 (img 47): his press for the print file reads "Making the print file", then "Approved" · "Tap to export"
         // (LatticePrintFlow; only that button follows it)
         // ★ his 11-22 ("Lattice print accurate ... to indicate that there would be another step in between"): with an Organic
@@ -15878,17 +15917,16 @@ extension WorkspacePlaceholder {
         }
         // ★ his notes 11-23: over its Results too, Setup and Lattice each close Results — the way back to editing
         // ★ notes25 (his 11-23, Img 4): Results is the third tab, lit while it is up (hidden with no lattice result yet)
-        let page: StageCapsule.Page = latticeResultsPageUp ? .tertiary
-            : LatticeStagePage.current(cellsUp: showLatticeWizard) == .cells ? .secondary : .primary
+        let page: StageCapsule.Page = latticeResultsPageUp ? .tertiary : latticeCapsuleLit
         HStack(spacing: DS.Space.s) {
             StageCapsule(project: project, title: LatticeStageMenu.title(typeInUse: mode),
                          accent: mode.map { LatticeStageModeStyle.accent($0) } ?? DS.Color.textSecondary.color,
-                         primaryTitle: LatticeStagePage.regions.title, secondaryTitle: LatticeStagePage.cells.title,
+                         primaryTitle: latticeOrder.primary.capsuleTitle, secondaryTitle: latticeOrder.secondary.capsuleTitle,
                          idPrefix: "lattice",
                          page: page,
                          go: { dest in leaveLatticeCells(); goToStage(dest) },
-                         primary: { leaveLatticeCells(); viewOriginal = true },
-                         secondary: { viewOriginal = true; showLatticeWizard = true },
+                         primary: { showLatticeStagePage(latticeOrder.primary) },
+                         secondary: { showLatticeStagePage(latticeOrder.secondary) },
                          about: { showLatticeModeSheet = true },
                          tertiaryTitle: LatticeResultsTab.title, tertiary: { leaveLatticeCells(); viewOriginal = false },
                          greyed: mode == nil ? [.primary, .secondary] : [],
@@ -15909,6 +15947,22 @@ extension WorkspacePlaceholder {
     /// Leave the Cells page through its own Save (the page commits; today's onExit bakes and persists).
     private func leaveLatticeCells() {
         if showLatticeWizard { cellsCloseToken += 1 }
+    }
+
+    /// ★ notes30 (his 11-26: "'Lattice' and 'Settings' have switched places"): the capsule's Setup opens the settings, its
+    /// Lattice the laid lattice (LatticeStagePage.capsuleOrder), and the lit segment is the page up.
+    private var latticeOrder: (primary: LatticeStagePage, secondary: LatticeStagePage) { LatticeStagePage.capsuleOrder }
+    private var latticeCapsuleLit: StageCapsule.Page {
+        LatticeStagePage.current(cellsUp: showLatticeWizard) == latticeOrder.primary ? .primary : .secondary
+    }
+
+    /// ★ notes30: a capsule segment's page — the settings (Cells), or the laid lattice (Regions: the settings left through
+    /// their own Save). Either closes the stage's Results.
+    private func showLatticeStagePage(_ p: LatticeStagePage) {
+        switch p {
+        case .cells: viewOriginal = true; showLatticeWizard = true
+        case .regions: leaveLatticeCells(); viewOriginal = true
+        }
     }
 
     /// ★ B3 (his answer 11-03, via #362 20:22Z): "Change lattice type…" with NOTHING latticed just switches — the type clears and the
@@ -16195,6 +16249,14 @@ extension WorkspacePlaceholder {
     /// Results).
     func certifySolve(_ issue: OrganicCertify.Issue) {
         guard let solve = issue.solve else { return }
+        if solve == .coverLoadedFace {   // ★ notes30: the centred pop-up offers the loaded face a Protect skin (first) or a Solid finish
+            // ★ notes30 depth (LatticeReview's rule): the Protect skin at the depth that clears it, Solid only when its wall does
+            let o = OrganicBareVines.offers(depthNeededMM: issue.depthNeededMM, wallMM: project.printParams.wallRingMM)
+            let solid: (() -> Void)? = o.solid ? { certifyCover { _ = $0.giveLoadedFaceSolidFinish(near: issue.at) } } : nil
+            OrganicBareVines.offer(skin: { certifyCover { _ = $0.giveLoadedFaceProtectSkin(near: issue.at, depthMM: o.skinDepthMM) } },
+                                   solid: solid)
+            return
+        }
         model.certifyWalk?.markSolved()
         if case .infill(let to) = solve {
             let from = project.printParams.infillPercent
@@ -16214,6 +16276,15 @@ extension WorkspacePlaceholder {
         }
         viewOriginal = true
         goToLatticeType()
+    }
+
+    /// ★ notes30: an offer taken — the loaded face covered (saved as infill's Solve is: a version with results writes the next
+    /// version), the pop-up solved, the walk on (after the last, the re-check question where Lattice is).
+    func certifyCover(_ change: (ProjectModel) -> Void) {
+        change(project)
+        model.persistCurrentProject()
+        model.certifyWalk?.markSolved()
+        certifyAdvance()
     }
 
     /// His re-check question in the Lattice button's place: Check again runs Lattice as the button does (a version with
@@ -16663,6 +16734,7 @@ extension WorkspacePlaceholder {
             guard let project, let library else { return nil }
             return (project.id, library.store)
         }
+        PrintResolutionFlow.shared.host = printResolutionHost()   // ★ his 11-25: another resolution of this version's print file
         // once per open: the host reappears in the same visit (a full-screen page closing) and must change nothing then
         guard VersionViewOpen.shared.takeOpened(project.id) else { return }
         VersionViewOpen.shared.clear()
@@ -16684,10 +16756,29 @@ extension WorkspacePlaceholder {
             VersionViewOpen.shared.waitForResult(project.id, saved: saved)
             settleResultStage()
         } else if let v = saved, let st = v.stage.flatMap(WorkspaceStage.init(rawValue:)) {
+            if st == .lattice { reopenOnTheLattice(savedPage: v.page) }   // ★ notes30: before the stage moves (its entry reads it)
             if st != stage { goToStage(st) }
-            if st == .lattice, v.page == VersionViewState.pageCells, project.lattice.stageMode != nil { showLatticeWizard = true }
+            if VersionViewOpen.controlReopensSettings, st == .lattice, v.page == VersionViewState.pageCells,
+               project.lattice.stageMode != nil { showLatticeWizard = true }
             VersionViewOpen.settled[project.id] = st.rawValue
         }
+    }
+
+    /// ★★ notes30 (his 11-26, release 21: opening his part from Home's most recent brought him to the settings — "Even if my
+    /// last view was in the settings, I should always go back to the 'Lattice' view with the last lattice generated already
+    /// visible"). Every reopen that lands on the lattice stage (Home's most recent, Library, Continue, a version's Open — all go
+    /// through AppModel.open) lands on its Lattice view: never the settings, whatever page was kept; a lattice already set up
+    /// counts as saved for this visit, so entering the stage opens no settings first (openLatticeSettingsIfUnconfigured), and
+    /// the lattice view comes on as the stage opens (latticeViewOnEntering) and draws the version's lattice from its own saved
+    /// settings (Organic's read back from the version's folder, LatticePreviewStore). The stage itself is still the one he left
+    /// (his release 19 rule); only the page within it is the Lattice view. A lattice with no type yet opens its settings.
+    func reopenOnTheLattice(savedPage: String?) {
+        guard !VersionViewOpen.controlReopensSettings else { return }
+        showLatticeWizard = false
+        if project.lattice.enabled, project.lattice.stageMode != nil, project.lattice.flexible == nil {
+            latticeSettingsSavedThisSession = true
+        }
+        VersionViewOpen.reopenedOnLattice[project.id] = savedPage ?? VersionViewState.pageSetup
     }
 
     /// A version with a result, its result now in: the stage that result belongs to (the Lattice stage for a print file's),
@@ -16697,9 +16788,10 @@ extension WorkspacePlaceholder {
         let (_, saved) = VersionViewOpen.shared.take(project.id)
         guard libraryExportVariant == nil else { return }
         let home: WorkspaceStage = LatticeSavedResult.opensInLattice(run.outcome) ? .lattice : .topology
+        if home == .lattice { reopenOnTheLattice(savedPage: saved?.page) }   // ★ notes30: the Lattice view, never the settings
         if stage != home { goToStage(home) }
-        if home == .lattice, saved?.stage == WorkspaceStage.lattice.rawValue, saved?.page == VersionViewState.pageCells,
-           project.lattice.stageMode != nil { showLatticeWizard = true }
+        if VersionViewOpen.controlReopensSettings, home == .lattice, saved?.stage == WorkspaceStage.lattice.rawValue,
+           saved?.page == VersionViewState.pageCells, project.lattice.stageMode != nil { showLatticeWizard = true }
         VersionViewOpen.settled[project.id] = home.rawValue
     }
 }

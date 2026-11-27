@@ -32,6 +32,8 @@ public struct LatticeSetupWizard: View {
     @State private var model: LatticeWizardModel
     /// ★ notes25 B6: the setting "Change settings" or the fix wizard's Solve asked for (lit and scrolled to the middle).
     @ObservedObject private var settingAsk = SettingToChange.shared
+    /// ★ SHEETS: the sheet seams the last lay laid ("Where regions meet" shows only when two sheet regions touch).
+    @ObservedObject private var sheetsLaid = LatticeSheetsLaid.shared
     /// ★ §5 — which numeric field has the keypad open. One at a time, keyed by the
     /// field's id, so every number on this page types as well as drags.
     @State private var numberPadField: String?
@@ -170,6 +172,9 @@ public struct LatticeSetupWizard: View {
         // ★ notes29 (his 11-25): the page follows a Structural ⇄ Aesthetic switch made while it is open (single-cell members
         // are Aesthetic's alone: on Structural they never lock the Finish)
         .onChange(of: project.lattice.stageMode) { m in model.setStage(aesthetic: (m ?? .structural) == .aesthetic) }
+        // ★ notes30 X2 (his answer, 11-26): the pop-up's "Turn Allow quilt on" made while it is open — the page's own switch
+        // follows, so its Save keeps it on
+        .onChange(of: project.lattice.allowQuilt) { on in if model.allowQuilt != on { model.allowQuilt = on; rebuild() } }
         .onAppear { if openedLattice == nil { openedLattice = project.lattice } }
     }
     /// the settings as they were when the page opened — "Exit" until they differ
@@ -362,7 +367,10 @@ public struct LatticeSetupWizard: View {
             HStack(spacing: 4) {
                 ForEach([LatticeGradingMode.full, .fitShape, .stressOnly],
                         id: \.rawValue) { m in
+                    // ★ SHEETS: Grade to shape greyed (the two shape grades); a sheet grades its walls by the stress alone
+                    let off = m != .stressOnly && LatticeSheets.greyed(model.topologyID).contains(.gradeToShape)
                     Button {
+                        guard !off else { return }
                         model.gradingMode = m
                         rebuild()
                     } label: {
@@ -378,10 +386,13 @@ public struct LatticeSetupWizard: View {
                             .foregroundStyle((model.gradingMode == m ? DS.Color.textPrimary : DS.Color.textTertiary).color)
                     }
                     .buttonStyle(.plain)
+                    .disabled(off)
+                    .opacity(off ? 0.35 : 1)
                     .latticeID("wizard-grade-type-\(m.rawValue)")
                 }
             }
             .modifier(LatticeSegmentTrack())
+            if LatticeSheets.greyed(model.topologyID).contains(.gradeToShape) { sheetGreyedCaption(.gradeToShape) }   // ★ SHEETS
             captionLine(model.gradingMode == .full ? Self.gradeFullLine
                         : model.gradingMode == .fitShape ? Self.gradeShapeLine : Self.gradeStressLine,
                         info: "grade-type",
@@ -524,7 +535,8 @@ public struct LatticeSetupWizard: View {
                 .foregroundStyle(DS.Color.textTertiary.color)
             HStack(spacing: DS.Space.xs) {
                 ForEach(Self.cellTransitions, id: \.rawValue) { t in
-                    let off = t.unavailableReason != nil
+                    // ★ SHEETS: Doubled / Stepped greyed — one cell size per region
+                    let off = t.unavailableReason != nil || LatticeSheets.greyed(model.topologyID).contains(.doubledStepped)
                     Button {
                         guard !off else { return }
                         model.cellTransition = t
@@ -547,7 +559,9 @@ public struct LatticeSetupWizard: View {
                     .latticeID("wizard-cell-transition-\(t.rawValue)")
                 }
             }
-            if let blocked = LatticeStructuralSteppedGate.refusal(
+            if LatticeSheets.greyed(model.topologyID).contains(.doubledStepped) {
+                sheetGreyedCaption(.doubledStepped)   // ★ SHEETS
+            } else if let blocked = LatticeStructuralSteppedGate.refusal(
                 latticeEnabled: true, algorithm: model.cellTransition.coreAlgorithm,
                 stageMode: project.lattice.stageMode) {
                 // ★★ STRUCTURAL STEPPED IS BLOCKED (reviewer, 2026-10-08): the gate's line, and the
@@ -1804,11 +1818,15 @@ public struct LatticeSetupWizard: View {
             // walls only, never past the type's fusing point (builder N2b makes the engine side so: core's
             // CellSpec::small_in_thin_walls, one printed line short of touching); only when Allow quilt is on does it have
             // nothing left to add (11-13).
-            .disabled(model.allowQuilt)
+            .disabled(model.allowQuilt || LatticeSheets.greyed(model.topologyID).contains(.smallCellsInThinWalls))
             // ★ notes29 (his 11-25): five words; the rest in the (i) (★ notes29b: the engine's own rule, LatticeSetupWizard.smallCellsInfo)
-            captionLine(model.allowQuilt ? Self.smallCellsQuiltLine
-                        : model.smallCellsInThinWalls ? Self.smallCellsOnLine : Self.smallCellsOffLine,
-                        info: "small-cells", Self.smallCellsInfo)   // (its last sentence says what Allow quilt on does)
+            if LatticeSheets.greyed(model.topologyID).contains(.smallCellsInThinWalls) {   // ★ notes30 M1: a sheet, one cell
+                sheetGreyedCaption(.smallCellsInThinWalls)
+            } else {
+                captionLine(model.allowQuilt ? Self.smallCellsQuiltLine
+                            : model.smallCellsInThinWalls ? Self.smallCellsOnLine : Self.smallCellsOffLine,
+                            info: "small-cells", Self.smallCellsInfo)   // (its last sentence says what Allow quilt on does)
+            }
         }
     }
     static let smallCellsQuiltLine = "Allow quilt already does this."
@@ -1935,7 +1953,8 @@ public struct LatticeSetupWizard: View {
                                              titled: Bool) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             if titled {
-                Text(s.title)
+                // ★ SHEETS: the dial's row reads "Wall thickness" for a sheet
+                Text(s == .thickness ? LatticeSheets.dialTitle(model.topologyID, strut: s.title) : s.title)
                     .font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)   // ★ B7: the panel's overline (DSPanelSection)
                     .foregroundStyle(DS.Color.textTertiary.color)
             }
@@ -1999,11 +2018,18 @@ public struct LatticeSetupWizard: View {
                         model.touched(.thickness)
                         rebuild()
                     }
-                    captionLine("Thinnest strut: \(mmText(range.lowerBound)).", info: "thickness-floor",
-                                "One extrusion is \(mmText(range.lowerBound)) — the thinnest "
-                                + "strut this printer can lay at a \(mmText(model.cellMM)) cell.",
-                                tint: DS.Color.textQuaternary.color)
-                        .latticeID("wizard-thickness-floor-note")
+                    if LatticeSheets.isSheet(model.topologyID) {   // ★ SHEETS: "Thinnest is two lines", its (i)
+                        captionLine(LatticeSheets.thinnestCaption, info: "sheet-wall",
+                                    LatticeSheets.wallInfo(model.topologyID, cellMM: model.cellMM,
+                                                           lineWidthMM: project.printParams.strutLineWidthMM))
+                            .latticeID("wizard-sheet-wall-caption")
+                    } else {
+                        captionLine("Thinnest strut: \(mmText(range.lowerBound)).", info: "thickness-floor",
+                                    "One extrusion is \(mmText(range.lowerBound)) — the thinnest "
+                                    + "strut this printer can lay at a \(mmText(model.cellMM)) cell.",
+                                    tint: DS.Color.textQuaternary.color)
+                            .latticeID("wizard-thickness-floor-note")
+                    }
                 }
             case .cellSize:
                 // ★ "cell size could be auto or swept or manually input"
@@ -2022,16 +2048,22 @@ public struct LatticeSetupWizard: View {
                 // so with the permission off it is not offered, exactly as the
                 // sweep is not. Manual and Fit stand alone. See
                 // `LatticeSettings.resolvedCellPlan` for what each one emits.
+                // ★ SHEETS: cell size by stress (Auto · Sim, Swept · Sim) greyed — one cell size per region
                 segmentRow(model.simulateStresses
                            ? ["Auto · Sim", "Swept · Sim", "Manual", "Fit"]
                            : ["Manual", "Fit"],
-                           selected: cellModeIndex) { i in
+                           selected: cellModeIndex,
+                           greyed: model.simulateStresses && LatticeSheets.greyed(model.topologyID).contains(.cellSizeByStress)
+                                ? [0, 1] : []) { i in
                     let modes: [LatticeCellSizeMode] = model.simulateStresses
                         ? [.auto, .swept, .fixed, .fit]
                         : [.fixed, .fit]
                     model.setCellSizeMode(modes[i])
                 }
-                if model.simulateStresses, model.cellSizeMode == .auto {
+                if model.simulateStresses, LatticeSheets.greyed(model.topologyID).contains(.cellSizeByStress) {
+                    sheetGreyedCaption(.cellSizeByStress)
+                }
+                if model.simulateStresses, model.cellSizeMode == .auto, !LatticeSheets.isSheet(model.topologyID) {
                     captionLine(Self.autoCellLine, info: "auto-cell",
                                 autoCellNote, tint: DS.Color.textQuaternary.color)
                         .latticeID("wizard-auto-cell-note")
@@ -2113,7 +2145,8 @@ public struct LatticeSetupWizard: View {
             case .finish:
                 // ★ FOUR NOW — "Covered" is the solid outer shell.
                 segmentRow(["None", "Rim", "Skin", "Covered"],
-                           selected: boundaryIndex, greyed: Self.rimNeedsEngineWork ? [1] : []) { i in
+                           selected: boundaryIndex, greyed: (Self.rimNeedsEngineWork ? [1] : Set<Int>())
+                            .union(LatticeSheets.greyed(model.topologyID).contains(.finishSkin) ? [2] : [])) { i in   // ★ SHEETS
                     // ★ LOCKED TO SKIN while single-cell members is on: the tap is
                     // refused and the pop-up says how to unlock it (his 2026-09-18).
                     // ★ notes29: the centred pop-up (it was a popover on the row); never on Structural, which has no
@@ -2124,6 +2157,7 @@ public struct LatticeSetupWizard: View {
                 }
                 .opacity(model.finishLockedBySingleCell ? 0.55 : 1)
                 .latticeID("wizard-finish-row")
+                if LatticeSheets.greyed(model.topologyID).contains(.finishSkin) { sheetGreyedCaption(.finishSkin) }   // ★ SHEETS
                 if model.finishLockedBySingleCell {
                     captionLine(Self.finishLockedLine,
                                 info: "finish-locked",
@@ -2259,7 +2293,7 @@ public struct LatticeSetupWizard: View {
     /// Structural, a type whose measured strength law does not cover the engine's struts yet, a type the engine can't lay
     /// yet) — greyed with its caption and (i). Only a type whose batch has not shipped is hidden (the sheets).
     static func typeShownGreyed(_ e: LatticeTypeEntry) -> Bool {
-        !e.offered && e.reason != LatticeTypeCatalog.appBatchPending && LatticeTypeCatalog.batchShipped(e.id)
+        !e.offered && e.reason != LatticeTypeCatalog.appBatchPending && LatticeTypeCatalog.newEngineShipped(e.id)
     }
 
     /// The saved type's refusal on this stage, in the picker's own sentence (nil: it can run).
@@ -2296,6 +2330,12 @@ public struct LatticeSetupWizard: View {
                 + "that point. On, the manual density methods may pass it; simulated ones never do."
         }
         func pct(_ v: Double) -> String { "\(Int((v * 100).rounded())) %" }
+        if f.isSheet {   // ★ SHEETS: a wall, not struts (core's touch: the channels close); ★ notes30 M1: notes29b's limit
+            return "\(name)'s wall closes its channels once it is \(pct(f.touch)) of the cell. Off, walls stop one printed "
+                + "line short of that, so every channel prints open; on their own they stay near \(pct(f.openLook)) of the "
+                + "cell, and only a density you ask for goes past that. On, the manual methods may reach it; simulated ones "
+                + "never do."
+        }
         return "\(name) struts touch and fuse into a quilt once a strut is \(pct(f.touch)) of the cell. Off, struts stop "
             + "one printed line short of touching, so every gap prints open; on their own they stay near \(pct(f.openLook)) "
             + "of the cell, and only a density you ask for goes past that. On, the manual density methods may reach the "
@@ -2728,8 +2768,24 @@ public struct LatticeSetupWizard: View {
     static let manualAreaHeader = "This area's own"
     /// ★ The reviewer's words (ruling (2), 2026-11-06), under the shape grade until core's band is real.
     static let shapeGradeRunLine = "The run's shape grade is a solid outline; the band and Strength are preview only."
-    /// Where an area's grade differs from the part's: the preview draws one grade, the run grades this area its own way.
-    static let latticeAreaPreviewLine = "The preview draws one grade for the whole part; the run grades this area as set here."
+    /// ★ notes30 (F1, 362): where the open group's grade changes what the preview lays (`groupGradeShows`), its (i). It said
+    /// "The preview draws one grade for the whole part; …" — untrue since Install 2's `areaOwn` and the sample laid per tab.
+    static let latticeAreaPreviewLine = "The preview draws this group's own grade, set on this tab. The Part tab's grade is for the groups with none of their own."
+
+    /// ★ notes30 (F1, 362: "show it only where it is true"): the open group's grade is what the preview draws, apart from the
+    /// Part tab's — this tab's settings (`page`, the group's grade on them) lay differently from the same settings with the Part
+    /// tab's grade, band and Strength. The page's sample lays exactly this (`LatticeSampleLay.page`), and his part's preview the
+    /// group's own the same way (`LatticeLayoutPreview.areaOwn`). False where the two grades lay alike (no stress to follow, no
+    /// shape grade on this algorithm, or the same grade). It was shown wherever the grade or band differed, two groups or more.
+    @MainActor static func groupGradeShows(_ page: LatticeSettings, partGrade part: LatticeAreaGrading, lineWidthMM: Double,
+                                           wallRingMM: Double) -> Bool {
+        var asPart = page
+        if let m = part.gradingMode { asPart.gradingMode = m }
+        if let b = part.shapeFitBandMM { asPart.shapeFitBandMM = b }
+        if let st = part.shapeGradeStrength { asPart.shapeFitGradeStrength = st }
+        return LatticeSampleLay.page(page, lineWidthMM: lineWidthMM, wallRingMM: wallRingMM).settings
+            != LatticeSampleLay.page(asPart, lineWidthMM: lineWidthMM, wallRingMM: wallRingMM).settings
+    }
 
     /// The open area's lattice group, nil on Part (the tabs are `ProjectModel.latticeAreaGroups`, in order).
     private func latticeAreaGroupID(_ c: CellsPageContext) -> UUID? {
@@ -3079,9 +3135,11 @@ public struct LatticeSetupWizard: View {
                       organic && project.importedFile != nil
                       ? (project.lattice.wholePart ? Self.organicAreaLine : Self.organicGroupLine) : Self.latticeAreaOwnLine)
                 .latticeID("lattice-page-area-own-note")
-            if let part = latticePartGrade, c.regions.count > 1,
-               part.gradingMode != model.gradingMode
-                || (model.gradingMode.fitsShape && part.shapeFitBandMM != model.shapeFitBandMM) {
+            // ★ notes30 (F1, 362): "Preview shows this group's grade." only where it is so — the group's grade lays apart from
+            // the Part tab's (`groupGradeShows`); never on Organic, which has no grade here
+            if !organic, let part = latticePartGrade,
+               Self.groupGradeShows(model.applied(to: project.lattice), partGrade: part,
+                                    lineWidthMM: project.printParams.strutLineWidthMM, wallRingMM: project.printParams.wallRingMM) {
                 shortNote(Self.latticeAreaPreviewBrief, info: "area-preview", Self.latticeAreaPreviewLine)   // ★ notes29
                     .latticeID("lattice-page-area-preview-note")
             }
@@ -3203,6 +3261,7 @@ public struct LatticeSetupWizard: View {
             else { AnyView(settingControl(.finish, titled: true)) }
             AnyView(gradeToggleRow)
             if model.gradingMode != LatticeGradingMode.none { AnyView(gradeTypeRow) }
+            if zone == nil, LatticeSheets.isSheet(model.topologyID) { sheetRows }   // ★ SHEETS
         }
         if latticeManual, !newOrganic {   // ★ (his 11-18: no "Manual · this area" with nothing below it)
             Text(Self.latticeManualSection.uppercased()).font(.system(size: 10.5, weight: .bold)).tracking(0.8)
@@ -3365,7 +3424,8 @@ public struct LatticeSetupWizard: View {
                                 model.minRelativeDensity = Swift.max(0, Swift.min(rho, model.relativeDensity - 0.02))
                                 rebuild()
                             }
-                            Text("density").dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
+                            Text(LatticeSheets.gradeUnit(model.topologyID))   // ★ SHEETS: wall thicknesses for a sheet
+                                .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
                         }
                     case .strength:
                         // ★ notes29 (his 11-25): five words; the sentence in the (i)
@@ -3405,6 +3465,46 @@ public struct LatticeSetupWizard: View {
                 write(v / 100)
             }
             .latticeID(key)
+    }
+
+    // MARK: ★ SHEETS (notes28 sheets SPEC 5)
+
+    /// A control greyed for a sheet: its caption (at most five words) and its (i).
+    private func sheetGreyedCaption(_ g: LatticeSheets.Greyed) -> some View {
+        captionLine(g.caption, info: "sheet-greyed-\(g.rawValue)", g.info, tint: DS.Color.textQuaternary.color)
+            .latticeID("wizard-sheet-greyed-\(g.rawValue)")
+    }
+
+    /// A sheet's own rows on the Part tab: on Auto, the wall's row (its caption and (i): Auto picks by the cell); "Where
+    /// regions meet" when two sheet regions touch (the last lay's seams), Blend in Aesthetic and Solid wall in Structural.
+    private var sheetRows: AnyView {
+        let id = model.topologyID
+        let structural = (project.lattice.stageMode ?? .structural) == .structural
+        let seams = sheetsLaid.seams(for: project.importedFile?.path)
+        return AnyView(VStack(alignment: .leading, spacing: DS.Space.s) {
+            if !latticeManual {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(LatticeSheets.wallRowTitle).font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)
+                        .foregroundStyle(DS.Color.textTertiary.color)
+                    captionLine(LatticeSheets.thinnestCaption, info: "sheet-wall-auto",
+                                LatticeSheets.wallInfo(id, cellMM: model.cellMM, lineWidthMM: project.printParams.strutLineWidthMM))
+                        .latticeID("wizard-sheet-wall-auto")
+                }
+            }
+            if LatticeSheets.seamRowShown(id, seams: seams) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(LatticeSheets.seamTitle).font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)
+                        .foregroundStyle(DS.Color.textTertiary.color)
+                    segmentRow(LatticeSheets.seamChoices, selected: LatticeSheets.seamIndex(project.lattice)) { i in
+                        project.lattice.sheetSeam = i == 0 ? LatticeSheets.blend : LatticeSheets.solidWall
+                        rebuild()
+                    }
+                    .latticeID("wizard-sheet-seam")
+                    captionLine(LatticeSheets.seamCaption, info: "sheet-seam", LatticeSheets.seamInfo(structural: structural))
+                        .latticeID("wizard-sheet-seam-caption")
+                }
+            }
+        })
     }
 
     // MARK: the moves
@@ -3634,8 +3734,10 @@ extension LatticeSetupWizard {
                 else { model.strutFromMM = a; model.strutToMM = b; rebuild() }
             }
             return AnyView(VStack(alignment: .leading, spacing: 5) {
-                sectionTitle("Strut width", info: "manual-strut-width",
-                             "The thinnest strut, where the stress is nothing, and the thickest, at the target stress, in mm. "
+                sectionTitle(LatticeSheets.isSheet(model.topologyID) ? LatticeSheets.rangeTitle : "Strut width",   // ★ SHEETS
+                             info: "manual-strut-width",
+                             LatticeSheets.isSheet(model.topologyID) ? LatticeSheets.rangeInfo
+                             : "The thinnest strut, where the stress is nothing, and the thickest, at the target stress, in mm. "
                              + "Auto takes them from Grade to and Grade from. Tap Set, then drag or tap a number to type it.")
                 segmentRow([area ? "Part's" : "Auto", "Set"], selected: from != nil && to != nil ? 1 : 0) { i in
                     if i == 0 { write(nil, nil); return }

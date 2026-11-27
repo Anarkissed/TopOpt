@@ -114,7 +114,7 @@ private func armedLatticeSetup(_ size: CGSize, _ test: XCTestCase) throws -> (Ap
     try h.pickFromMenu("capsuleMenu", "Structural", what: "the stage menu")
     h.pump(1.5)
     if h.frames.all["view-Lattice preview-on"] == nil { try h.tap("view-Lattice preview", "the lattice preview", settle: 1.5) }
-    if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleSetup", "the page's Save", settle: 1.5) }
+    if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleLattice", "the page's Save", settle: 1.5) }
     XCTAssertNil(h.frames.all["latticeSettingsPanel"], "premise: on Lattice Setup")
     return (h, p)
 }

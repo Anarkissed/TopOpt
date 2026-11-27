@@ -23,6 +23,18 @@ import simd
 /// ray–capsule intersections. Every capsule a ray reaches first must be HIT before the
 /// ray leaves it — including capsules whose span-INDEX stamp range excludes the cell the
 /// ray is sampled from, which is exactly the case the index re-pin gave up exactness on.
+/// The march's ray sample: SplitMix64 from a fixed seed (notes30), so the same rays every run.
+private struct SeededRays: RandomNumberGenerator {
+    var state: UInt64
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
+    }
+}
+
 final class OrganicRenderMarchTests: XCTestCase {
 
     // MARK: fixture — the run-2 replay's 1240 emitted spans (evidence, committed)
@@ -229,7 +241,13 @@ final class OrganicRenderMarchTests: XCTestCase {
         let lo = g.origin, hi = g.origin + SIMD3<Float>(Float(g.nx - 1), Float(g.ny - 1), Float(g.nz - 1)) * g.spacing
         let centre = (lo + hi) * 0.5, radius = simd_length(hi - lo) * 0.6
 
-        var rng = SystemRandomNumberGenerator()
+        // ★ notes30 (builder R1): the rays come from a FIXED seed, so every run marches the same 3000 rays and a gate's verdict
+        // never rests on the draw. (Drawn from the system generator, each run was a new sample — 1594 to 1623 rays reaching a
+        // capsule across the gates' logs — and in release 21's suite one ray grazed a run-2 strut with a 0.25 mm chord and
+        // registered no hit: the thin-strut regime (r 0.43 mm under the half voxel diagonal 0.451 mm) whose bake rule waits on
+        // the maintainer, measured by testThinStrutsAtTheSchemaFloorAreStillHit — which, on these same seeded rays, must still
+        // find its holes (its strict expected failure is this sample's RED control).
+        var rng = SeededRays(state: 0x5EED_2026_1126)
         func rnd(_ a: Float, _ b: Float) -> Float { Float.random(in: a...b, using: &rng) }
         func dir() -> SIMD3<Float> { simd_normalize(SIMD3<Float>(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1))) }
 

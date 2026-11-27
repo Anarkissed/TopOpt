@@ -11,8 +11,12 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <mutex>
 #include <thread>
 #include <unordered_map>
+
+#include "topopt/lattice.hpp"
+#include "topopt/tpms_gen.hpp"
 
 #ifdef TOPOPT_HAVE_MANIFOLD
 #include "manifold/manifold.h"
@@ -215,7 +219,7 @@ void open_boxes_with(const Layout& lay, const Domain::Probe& probe, const Cell& 
     }
     for (const Slab& b : done)
       mine.push_back({c.frame, {c.lo[0] + b.i0 * s, c.lo[1] + b.j0 * s, c.lo[2] + b.z0 * s},
-                      {c.lo[0] + b.i1 * s, c.lo[1] + b.j1 * s, c.lo[2] + b.z1 * s}});
+                      {c.lo[0] + b.i1 * s, c.lo[1] + b.j1 * s, c.lo[2] + b.z1 * s}, c.region});
   };
   if (!walls.flat) {
     // No flat face to read columns from: the cell's own shape point by point.
@@ -361,7 +365,8 @@ void open_boxes_with(const Layout& lay, const Domain::Probe& probe, const Cell& 
     open_runs = keep;
   }
   for (const Run& r : done)
-    mine.push_back({c.frame, {c.lo[0] + r.i0 * s, c.lo[1] + r.j0 * s, r.c0}, {c.lo[0] + r.i1 * s, c.lo[1] + r.j1 * s, r.c1}});
+    mine.push_back({c.frame, {c.lo[0] + r.i0 * s, c.lo[1] + r.j0 * s, r.c0}, {c.lo[0] + r.i1 * s, c.lo[1] + r.j1 * s, r.c1},
+                    c.region});
   // The crossed columns point by point; then the air beside all of it, the open columns'
   // own stretches included (a wall that crosses the columns on a slant). A column of air
   // that opened with its neighbour, and the little an open column runs on past the
@@ -1039,6 +1044,23 @@ struct CarvedSolids {
   double part_mm3 = 0.0;
   double pitch_mm = 0.25;   // the open space's own pitch and the overlap it was carved with: MeshSpec::strut_reach_mm
   double grow_mm = 0.02;    // reads them, so a carving gives the same mesh whatever the build's own grow_mm
+  // SHEETS: the open boxes (a sheet layout's only: each sheet is cut to its region's boxes grown by the run-on), and
+  // the sheets made once for every build of the make-check-make loop (only the posts change between its passes).
+  std::vector<OpenSpace::Box> open_boxes;
+  struct SheetsMade {
+    const void* key = nullptr;     // the MeshSpec::sheets they were made from
+    std::size_t seams_key = 0;
+    Manifold body;                 // every sheet, cut and joined (not yet to the solid)
+    Manifold with_solid;           // the solid and the sheets, joined (made on the first build with no drop_at)
+    bool joined = false;
+    bool body_freed = false;
+    bool ok = false;
+    std::string why;
+    std::size_t blocks = 0, triangles = 0, places = 0, seams_blended = 0, seams_fell_back = 0;
+    double deviation_mm = 0.0, mm3 = 0.0, ms = 0.0, ms_union = 0.0, contoured_mm3 = 0.0;
+  };
+  mutable std::mutex sheets_mu;
+  mutable std::shared_ptr<SheetsMade> sheets;
 };
 // A small separate piece of the solid body whose lowest point is one of the mid-air places (`drop_at`) is left out.
 bool sliver_dropped(const manifold::Box& b, double v, const std::vector<Vec3>& drop_at) {
@@ -1119,6 +1141,7 @@ Carved carve_part(const PartMeasure& pm, const Layout& lay, const OpenSpace& ope
   }
   made->part_mm3 = made->part.Volume();
   made->solid = made->part;
+  if (sheet_kind_of(lay.topology)) made->open_boxes = open_space.boxes;   // SHEETS: each sheet is cut to these
   if (!open_space.boxes.empty()) {
     std::vector<Manifold> open;
     open.reserve(open_space.boxes.size());
@@ -1164,6 +1187,25 @@ namespace {
 // weave's shallow struts and its feet as closed shells of their own from the same shapes, never joined.
 // The sides of a round strut, and of the ball, at a joint where a level bar meets a vertical one (StrutMaker::add).
 constexpr int kFineSides = 16;
+// PRINT RESOLUTION (MeshSpec::strut_facet_mm > 0): a round strut of radius r, and the ball at its joints: 8 sides when its
+// corners then lie no more than `facet_mm` outside the true round, its flat sides as near the centre as Full's (the
+// `full`-sided bar of the round's area), and its corners' radius over r. Else (or the bound 0): `full` sides of the
+// round's area, as at Full. Measured on core's fixtures and never used: 6 sides (the print check then found places that
+// start in mid-air at the joints: the fcc plate's 88, 160 struts left out), 10 (Manifold cuts a ten-segment ball as
+// finely as a twelve's: the octet plate came out at 97.6k triangles against Full's 88.0k).
+struct RoundSides { int sides; double corner; };
+RoundSides round_sides(double r, int full, double facet_mm) {
+  const double kPi = 3.14159265358979323846;
+  const double full_corner = std::sqrt(2.0 * kPi / (full * std::sin(2.0 * kPi / full)));
+  if (!(facet_mm > 0.0) || !(r > 0.0)) return {full, full_corner};
+  const double flat = full_corner * std::cos(kPi / full);   // Full's flat sides from the centre, over r
+  constexpr int n = 8;
+  if (n < full) {
+    const double corner = flat / std::cos(kPi / n);
+    if ((corner - 1.0) * r <= facet_mm) return {n, corner};
+  }
+  return {full, full_corner};
+}
 struct StrutMaker {
   const MeshSpec& spec;
   int SEG = 12, HALF = 6;
@@ -1256,8 +1298,13 @@ struct StrutMaker {
         const double l1 = std::sqrt(e1.x * e1.x + e1.y * e1.y + e1.z * e1.z);
         e1 = {e1.x / l1, e1.y / l1, e1.z / l1};
         const Vec3 e2{d.y * e1.z - d.z * e1.y, d.z * e1.x - d.x * e1.z, d.x * e1.y - d.y * e1.x};
-        const int sides = fine ? std::max(SEG, kFineSides) : SEG;
-        const double round = fine ? std::sqrt(2.0 * kPi / (sides * std::sin(2.0 * kPi / sides))) : kRound;
+        int sides = fine ? std::max(SEG, kFineSides) : SEG;
+        double round = fine ? std::sqrt(2.0 * kPi / (sides * std::sin(2.0 * kPi / sides))) : kRound;
+        if (!fine && spec.strut_facet_mm > 0.0) {   // PRINT RESOLUTION (Full: 0, nothing here)
+          const RoundSides rs = round_sides(r, SEG, spec.strut_facet_mm);
+          sides = rs.sides;
+          round = rs.corner;
+        }
         solids.push_back(Manifold::Cylinder(len + pa + pb, r * round, r * round, sides)
                              .Transform(manifold::mat3x4(mv(e1), mv(e2), mv(d), mv(a))));
       }
@@ -1378,6 +1425,374 @@ double strut_run_on_mm(const Carved& carved, const MeshSpec& spec) {
   const CarvedSolids* kept = carved.kept ? static_cast<const CarvedSolids*>(carved.kept.get()) : nullptr;
   return kept ? 0.5 * kept->pitch_mm + kept->grow_mm + 0.05 : 0.5 * 0.25 + 0.02 + 0.05;
 }
+
+// -- SHEETS (notes28 sheets SPEC section 4) --------------------------------------------------------------------
+namespace {
+// A sheet block's cells, as many a side as fit in this (and never fewer than two): the block is contoured with one
+// ring of cells round it and cut at its own box grown by the run-on, so two blocks overlap and are joined by Manifold
+// without a seam (a block cut flush at a cell face would meet its neighbour face to face).
+constexpr double kSheetBlockMm = 30.0;
+// How far a block's sheet runs past its own box into its neighbours' (beyond the run-on): the two overlap by this.
+constexpr double kSheetBlockOverlapMm = 0.05;
+
+Manifold manifold_of(const TriangleMesh& soup_or_mesh, const Frame* frame) {
+  // Corners at one place are one corner (generate_tpms writes each triangle's own three); turned into the part.
+  manifold::MeshGL64 g;
+  g.numProp = 3;
+  std::map<std::array<double, 3>, std::uint64_t> at;
+  std::vector<std::uint64_t> idx(soup_or_mesh.vertices.size());
+  for (std::size_t v = 0; v < soup_or_mesh.vertices.size(); ++v) {
+    const Vec3& q = soup_or_mesh.vertices[v];
+    const auto it = at.emplace(std::array<double, 3>{q.x, q.y, q.z}, at.size());
+    idx[v] = it.first->second;
+    if (it.second) {
+      const Vec3 p = frame ? frame->at(q.x, q.y, q.z) : q;
+      g.vertProperties.push_back(p.x);
+      g.vertProperties.push_back(p.y);
+      g.vertProperties.push_back(p.z);
+    }
+  }
+  for (const auto& t : soup_or_mesh.triangles) {
+    const std::uint64_t a = idx[static_cast<std::size_t>(t[0])], b = idx[static_cast<std::size_t>(t[1])],
+                        c = idx[static_cast<std::size_t>(t[2])];
+    if (a == b || b == c || a == c) continue;
+    g.triVerts.push_back(a);
+    g.triVerts.push_back(b);
+    g.triVerts.push_back(c);
+  }
+  return Manifold(g);
+}
+
+// generate_tpms writes each triangle with three corners of its own: welded here as they come (corners at one place are
+// one corner) and turned into the part, straight into Manifold's own form, so a block never holds its triangles twice.
+struct WeldSink : TriangleSink {
+  const Frame* frame;
+  manifold::MeshGL64 g;
+  std::size_t triangles = 0;
+  struct Key {
+    std::uint64_t a, b, c;
+    bool operator==(const Key& o) const { return a == o.a && b == o.b && c == o.c; }
+  };
+  struct KeyHash {
+    std::size_t operator()(const Key& k) const {
+      return static_cast<std::size_t>((k.a * 0x9E3779B97F4A7C15ULL) ^ (k.b * 0xC2B2AE3D27D4EB4FULL) ^ (k.c * 0x165667B19E3779F9ULL));
+    }
+  };
+  std::unordered_map<Key, std::uint64_t, KeyHash> at;
+  explicit WeldSink(const Frame* f) : frame(f) { g.numProp = 3; }
+  std::uint64_t corner(const Vec3& q) {
+    Key k;
+    std::memcpy(&k.a, &q.x, 8);
+    std::memcpy(&k.b, &q.y, 8);
+    std::memcpy(&k.c, &q.z, 8);
+    const auto it = at.emplace(k, static_cast<std::uint64_t>(at.size()));
+    if (it.second) {
+      const Vec3 p = frame ? frame->at(q.x, q.y, q.z) : q;
+      g.vertProperties.push_back(p.x);
+      g.vertProperties.push_back(p.y);
+      g.vertProperties.push_back(p.z);
+    }
+    return it.first->second;
+  }
+  void add_triangle(const Vec3& a, const Vec3& b, const Vec3& c) override {
+    ++triangles;
+    const std::uint64_t i = corner(a), j = corner(b), k = corner(c);
+    if (i == j || j == k || i == k) return;
+    g.triVerts.push_back(i);
+    g.triVerts.push_back(j);
+    g.triVerts.push_back(k);
+  }
+};
+
+std::shared_ptr<CarvedSolids::SheetsMade> make_sheets(const Domain& domain, const Layout& lay, const CarvedSolids& kept,
+                                                      const MeshSpec& spec, double run_on) {
+  const auto t0 = std::chrono::steady_clock::now();
+  auto made = std::make_shared<CarvedSolids::SheetsMade>();
+  made->key = spec.sheets;
+  made->seams_key = spec.sheet_seams ? spec.sheet_seams->size() : 0;
+  const std::vector<SheetField>& sheets = *spec.sheets;
+  const double dev = std::max(0.0, spec.sheet_deviation_mm);   // 0: the mesh as contoured
+  struct Job {
+    std::size_t field = 0;
+    long long b[3] = {0, 0, 0};   // the block's first and last grid index (cells laid) along each axis
+    long long e[3] = {0, 0, 0};
+  };
+  std::vector<Job> jobs;
+  for (std::size_t fi = 0; fi < sheets.size(); ++fi) {
+    const SheetField& f = sheets[fi];
+    if (!(f.cell_mm > 0.0)) continue;
+    const int k = std::max(2, static_cast<int>(std::floor(kSheetBlockMm / f.cell_mm + 0.5)));
+    // Each block: the laid cells' own extent inside it (a block is never contoured past the cells it holds).
+    std::map<std::array<long long, 3>, std::array<long long, 6>> blocks;   // ordered: the same jobs every run
+    for (const Cell& c : lay.cells) {
+      if (c.region != f.region || c.frame != f.frame) continue;
+      std::array<long long, 3> b{}, i{};
+      for (int a = 0; a < 3; ++a) {
+        i[static_cast<std::size_t>(a)] = std::llround((c.lo[a] - f.anchor[a]) / f.cell_mm);
+        b[static_cast<std::size_t>(a)] = static_cast<long long>(std::floor(static_cast<double>(i[static_cast<std::size_t>(a)]) / k)) * k;
+      }
+      const auto it = blocks.find(b);
+      if (it == blocks.end()) {
+        blocks.emplace(b, std::array<long long, 6>{i[0], i[1], i[2], i[0], i[1], i[2]});
+      } else {
+        for (int a = 0; a < 3; ++a) {
+          it->second[static_cast<std::size_t>(a)] = std::min(it->second[static_cast<std::size_t>(a)], i[static_cast<std::size_t>(a)]);
+          it->second[static_cast<std::size_t>(a + 3)] = std::max(it->second[static_cast<std::size_t>(a + 3)], i[static_cast<std::size_t>(a)]);
+        }
+      }
+    }
+    for (const auto& kv : blocks)
+      jobs.push_back({fi, {kv.second[0], kv.second[1], kv.second[2]}, {kv.second[3], kv.second[4], kv.second[5]}});
+  }
+  // Each frame's open boxes, by frame.
+  // Each field's own open space: the boxes read from its own region's cells, in its frame (builder B, 11-25: two fields
+  // on one frame were each cut to every box of that frame, while the strength check credits a voxel by its own cell's
+  // field; the mesh, the preview and the credit now read the same).
+  std::map<std::pair<int, int>, std::vector<const OpenSpace::Box*>> boxes_of;   // (region, frame)
+  for (const OpenSpace::Box& b : kept.open_boxes) boxes_of[{b.region, b.frame}].push_back(&b);
+  // E's blend bands (SPEC 1.5): the file's, made once (MeshSpec::sheet_bands); a direct caller's made here, once. Each
+  // region's own sheet then stops a block's overlap inside its side of every band that was made.
+  std::vector<SeamBand> own_bands;
+  const std::vector<SeamBand>* bands = nullptr;
+  if (spec.sheet_seams && !spec.sheet_seams->empty()) {
+    if (spec.sheet_bands && spec.sheet_bands->size() == spec.sheet_seams->size()) {
+      bands = spec.sheet_bands;
+    } else {
+      own_bands.resize(spec.sheet_seams->size());
+      for (std::size_t k = 0; k < spec.sheet_seams->size(); ++k)
+        if (!(*spec.sheet_seams)[k].solid_wall)
+          own_bands[k] = mesh_sheet_seam_band(domain, lay, sheets, (*spec.sheet_seams)[k], spec);
+      bands = &own_bands;
+    }
+  }
+  const auto band_made = [&](std::size_t k) {
+    const SheetSeamBand& s = (*spec.sheet_seams)[k];
+    return bands && !s.solid_wall && (*bands)[k].ok &&
+           (!(*bands)[k].mesh.triangles.empty() || !(*bands)[k].blocks.empty()) && s.across && s.across->ok;
+  };
+  struct Stop { const SheetSeamBand* seam; bool a_side; };
+  std::vector<std::vector<Stop>> stops(sheets.size());
+  if (bands)
+    for (std::size_t k = 0; k < spec.sheet_seams->size(); ++k) {
+      if (!band_made(k)) continue;
+      const SheetSeamBand& s = (*spec.sheet_seams)[k];
+      if (s.a >= 0 && static_cast<std::size_t>(s.a) < sheets.size()) stops[static_cast<std::size_t>(s.a)].push_back({&s, true});
+      if (s.b >= 0 && static_cast<std::size_t>(s.b) < sheets.size()) stops[static_cast<std::size_t>(s.b)].push_back({&s, false});
+    }
+
+  std::vector<Manifold> pieces(jobs.size());
+  std::vector<std::size_t> tris(jobs.size(), 0);
+  std::vector<double> devs(jobs.size(), 0.0), vols(jobs.size(), 0.0);
+  std::vector<std::string> whys(jobs.size());
+  std::atomic<std::size_t> next{0};
+  const std::atomic<bool>* stop = spec.stop;
+  auto work = [&] {
+    for (;;) {
+      const std::size_t j = next.fetch_add(1);
+      if (j >= jobs.size() || asked(stop)) break;
+      const Job& job = jobs[j];
+      const SheetField& f = sheets[job.field];
+      const Frame& fr = lay.frames[static_cast<std::size_t>(f.frame)];
+      const double L = f.cell_mm;
+      const LatticeTopology topo = sheet_topology(f.kind);
+      double lo[3], hi[3];
+      for (int a = 0; a < 3; ++a) {
+        lo[a] = f.anchor[a] + static_cast<double>(job.b[a]) * L;
+        hi[a] = f.anchor[a] + static_cast<double>(job.e[a] + 1) * L;
+      }
+      // The DC cell: a third of the thinnest wall (the old run's), and never coarser than a 24th of the cell. Coarser, the
+      // contouring misses the sheet's own curve and the bounded simplifier refines what it left without end, and not
+      // the same way twice (measured, gyroid in an 8 mm cell: at the open look's 1.65 mm wall a third of it is 0.55 mm,
+      // 4k triangles contoured and 2k to 107k out for walls 0.003 mm apart; at 0.33 mm 12.7k in and 2.6k out, steady).
+      // (PRINT RESOLUTION: the two shares are MeshSpec's, 3 and 24 at Full.)
+      const double h = std::max(1e-3, std::min(f.wall_min_mm / spec.sheet_dc_wall_share, L / spec.sheet_dc_cell_share));
+      // The block's own sheet runs this far past its box. The simplifier treats a sheet within three DC cells of the
+      // block's cut as a crease and may move it there by up to half a DC cell (TpmsGenOptions, at_cut), so each block runs
+      // far enough into its neighbour that what it keeps there is clear of its own crease, and the neighbour's crease
+      // lies in it (measured with the overlap at the run-on alone: a 0.88 mm wall at a block face of a graded plate).
+      const double g = run_on + 3.0 * h + kSheetBlockOverlapMm;
+      TpmsRegion R;
+      R.anchor = {lo[0] - L, lo[1] - L, lo[2] - L};
+      R.nx = static_cast<int>(job.e[0] - job.b[0]) + 3;
+      R.ny = static_cast<int>(job.e[1] - job.b[1]) + 3;
+      R.nz = static_cast<int>(job.e[2] - job.b[2]) + 3;
+      R.cell_mm = L;
+      // Lipschitz-1, positive inside the block's box grown by g (and by h: the generator erodes its clip by one DC cell).
+      const double cl[3] = {lo[0] - g - h, lo[1] - g - h, lo[2] - g - h}, ch[3] = {hi[0] + g + h, hi[1] + g + h, hi[2] + g + h};
+      // E: the bands this block reaches (its box, in the part, meets the band's grid): the sheet stops `g` inside the
+      // band's edge on its own side (the band runs `g` past it), as one block stops inside its neighbour.
+      std::vector<Stop> near_stops;
+      for (const Stop& st : stops[job.field]) {
+        const SheetSeamAcross& X = *st.seam->across;
+        double pl[3] = {1e300, 1e300, 1e300}, ph[3] = {-1e300, -1e300, -1e300};
+        for (int c = 0; c < 8; ++c) {
+          const Vec3 v = fr.at((c & 1) ? ch[0] : cl[0], (c & 2) ? ch[1] : cl[1], (c & 4) ? ch[2] : cl[2]);
+          const double xyz[3] = {v.x, v.y, v.z};
+          for (int a = 0; a < 3; ++a) { pl[a] = std::min(pl[a], xyz[a]); ph[a] = std::max(ph[a], xyz[a]); }
+        }
+        const double xo[3] = {X.origin.x, X.origin.y, X.origin.z};
+        bool meets = true;
+        for (int a = 0; a < 3 && meets; ++a) meets = ph[a] >= xo[a] && pl[a] <= xo[a] + (X.n[a] - 1) * X.h;
+        if (meets) near_stops.push_back(st);
+      }
+      if (near_stops.empty()) {
+        R.clip = [cl, ch](const Vec3& q) {
+          return std::min({q.x - cl[0], ch[0] - q.x, q.y - cl[1], ch[1] - q.y, q.z - cl[2], ch[2] - q.z});
+        };
+      } else {
+        R.clip = [cl, ch, near_stops, &fr, &domain, g, h](const Vec3& q) {
+          double c = std::min({q.x - cl[0], ch[0] - q.x, q.y - cl[1], ch[1] - q.y, q.z - cl[2], ch[2] - q.z});
+          const Vec3 p = fr.at(q.x, q.y, q.z);
+          for (const Stop& st : near_stops) {
+            const double m = sheet_seam_mm(domain, *st.seam, p);
+            if (!std::isfinite(m)) continue;
+            const double edge = 0.5 * st.seam->band_mm;
+            c = std::min(c, st.a_side ? (g + h - edge) - m : m - (edge - g - h));
+          }
+          return c;
+        };
+      }
+      // The floor (two lines, SPEC 2): the file never prints a wall below it. The wall contoured is sheet_print_wall_mm
+      // (thicker within about 0.07 mm of the floor: the field's own wall is uneven by up to 3 %, and the mesh may sit
+      // inside it by the bound), and the generator's bead guard is given floor / (1 - 3 %). Its inward margin is then
+      // never under 0.6 of the bound: at a margin near 0 its simplifier refines without end (measured: a 0.905 mm wall over
+      // a 0.9 mm bead, 6.5 s and 39k triangles a cell against 2.4 s and 2.9k at 0.92; at 0.9 it did not finish).
+      const double floor_mm = lay.min_strut_mm;
+      const auto raised = [floor_mm, dev](double w) { return sheet_print_wall_mm(w, floor_mm, dev); };
+      TpmsWallField W;
+      W.field = [&f, topo, L, raised](const Vec3& q) {
+        return lattice_sheet_wall_param_mm(topo, raised(sheet_wall_at_local(f, q)), L);
+      };
+      TpmsGenOptions o;
+      o.min_wall_mm = f.wall_min_mm;
+      o.dc_cell_mm = h;
+      o.max_deviation_mm = dev;
+      o.bead_mm = dev > 0.0 ? floor_mm / (1.0 - kSheetWallUnevenness) : 0.0;
+      o.true_wall_mm = [&f, raised](const Vec3& q) { return raised(sheet_wall_at_local(f, q)); };
+      o.wall_param_of = [topo, L](double w) { return lattice_sheet_wall_param_mm(topo, w, L); };
+      o.true_wall_steps = false;   // the wall is blended trilinearly: no step anywhere (SPEC 1.4)
+      WeldSink sink(&fr);
+      TpmsGenStats st;
+      try {
+        st = generate_tpms(f.kind, R, W, sink, o);
+      } catch (const std::exception& e) {
+        whys[j] = std::string("a sheet block could not be contoured: ") + e.what();
+        continue;
+      }
+      tris[j] = sink.triangles;
+      devs[j] = st.simplified ? std::max(st.simplify.max_out_measured_mm, st.simplify.max_in_measured_mm) : 0.0;
+      vols[j] = (hi[0] - lo[0] + 2.0 * g) * (hi[1] - lo[1] + 2.0 * g) * (hi[2] - lo[2] + 2.0 * g);
+      if (sink.g.triVerts.empty()) continue;
+      sink.at = {};
+      Manifold sheet(sink.g);
+      sink.g = manifold::MeshGL64{};
+      if (sheet.Status() != Manifold::Error::NoError) {
+        whys[j] = "a sheet block's surface is not closed";
+        continue;
+      }
+      // The region's open space near the block, each box grown by the run-on.
+      std::vector<Manifold> cut;
+      const auto it = boxes_of.find({f.region, f.frame});
+      if (it != boxes_of.end())
+        for (const OpenSpace::Box* b : it->second) {
+          bool meets = true;
+          for (int a = 0; a < 3 && meets; ++a) meets = b->lo[a] - run_on < ch[a] && b->hi[a] + run_on > cl[a];
+          if (!meets) continue;
+          cut.push_back(Manifold::Cube({b->hi[0] - b->lo[0] + 2 * run_on, b->hi[1] - b->lo[1] + 2 * run_on,
+                                        b->hi[2] - b->lo[2] + 2 * run_on})
+                            .Translate({b->lo[0] - run_on, b->lo[1] - run_on, b->lo[2] - run_on})
+                            .Transform(manifold::mat3x4(mv(fr.ax[0]), mv(fr.ax[1]), mv(fr.ax[2]), mv(fr.origin))));
+        }
+      if (cut.empty()) continue;
+      const Manifold open = Manifold::BatchBoolean(cut, manifold::OpType::Add);
+      pieces[j] = fresh((sheet ^ open) ^ kept.part);
+    }
+  };
+  const int nt = static_cast<int>(std::min<std::size_t>(static_cast<std::size_t>(thread_count(spec.threads)), std::max<std::size_t>(1, jobs.size())));
+  std::vector<std::thread> pool;
+  for (int t = 1; t < nt; ++t) pool.emplace_back(work);
+  work();
+  for (std::thread& t : pool) t.join();
+  check(stop);
+  for (std::size_t j = 0; j < jobs.size(); ++j) {
+    made->triangles += tris[j];
+    made->deviation_mm = std::max(made->deviation_mm, devs[j]);
+    if (!whys[j].empty() && made->why.empty()) made->why = whys[j];
+  }
+  made->blocks = jobs.size();
+  for (const Job& job : jobs)
+    made->places += static_cast<std::size_t>((job.e[0] - job.b[0] + 1) * (job.e[1] - job.b[1] + 1) * (job.e[2] - job.b[2] + 1));
+  for (const double v : vols) made->contoured_mm3 += v;
+  // E's blend bands (SPEC 1.5): each band made, cut to its two regions' open space (each box grown by the run-on, as
+  // their sheets are) and to the part. A seam the file made a solid wall (fell_back), or whose band a direct caller's
+  // make could not make, is counted as fallen back.
+  if (spec.sheet_seams)
+    for (std::size_t k = 0; k < spec.sheet_seams->size(); ++k) {
+      const SheetSeamBand& seam = (*spec.sheet_seams)[k];
+      if (seam.solid_wall) {
+        if (seam.fell_back) ++made->seams_fell_back;
+        continue;
+      }
+      if (!band_made(k)) {
+        if (!(bands && (*bands)[k].ok)) ++made->seams_fell_back;   // (ok and empty: nothing of either lies in the band)
+        continue;
+      }
+      const SeamBand& band = (*bands)[k];
+      std::vector<Manifold> parts;
+      bool bad = false;
+      if (!band.mesh.triangles.empty()) parts.push_back(manifold_of(band.mesh, nullptr));
+      for (const TriangleMesh& b : band.blocks) parts.push_back(manifold_of(b, nullptr));
+      for (const Manifold& p : parts) bad = bad || p.Status() != Manifold::Error::NoError;
+      if (bad || parts.empty()) { ++made->seams_fell_back; continue; }
+      const Manifold m = parts.size() == 1 ? parts.front() : fresh(Manifold::BatchBoolean(parts, manifold::OpType::Add));
+      parts.clear();
+      if (m.Status() != Manifold::Error::NoError) { ++made->seams_fell_back; continue; }
+      const manifold::Box mb = m.BoundingBox();
+      std::vector<Manifold> cut;
+      for (const int side : {seam.a, seam.b}) {
+        if (side < 0 || static_cast<std::size_t>(side) >= sheets.size()) continue;
+        const SheetField& f = sheets[static_cast<std::size_t>(side)];
+        const Frame& fr = lay.frames[static_cast<std::size_t>(f.frame)];
+        const auto it = boxes_of.find({f.region, f.frame});
+        if (it == boxes_of.end()) continue;
+        for (const OpenSpace::Box* b : it->second) {
+          const Manifold box = Manifold::Cube({b->hi[0] - b->lo[0] + 2 * run_on, b->hi[1] - b->lo[1] + 2 * run_on,
+                                               b->hi[2] - b->lo[2] + 2 * run_on})
+                                   .Translate({b->lo[0] - run_on, b->lo[1] - run_on, b->lo[2] - run_on})
+                                   .Transform(manifold::mat3x4(mv(fr.ax[0]), mv(fr.ax[1]), mv(fr.ax[2]), mv(fr.origin)));
+          const manifold::Box bb = box.BoundingBox();
+          if (bb.max.x < mb.min.x || bb.min.x > mb.max.x || bb.max.y < mb.min.y || bb.min.y > mb.max.y ||
+              bb.max.z < mb.min.z || bb.min.z > mb.max.z)
+            continue;
+          cut.push_back(box);
+        }
+      }
+      if (cut.empty()) continue;
+      const Manifold open = Manifold::BatchBoolean(cut, manifold::OpType::Add);
+      pieces.push_back(fresh((m ^ open) ^ kept.part));
+      ++made->seams_blended;
+    }
+  if (!made->why.empty()) {
+    made->ok = false;
+    made->ms = ms_since(t0);
+    return made;
+  }
+  std::vector<Manifold> some;
+  for (Manifold& m : pieces)
+    if (!m.IsEmpty()) some.push_back(std::move(m));
+  pieces.clear();
+  made->body = some.empty() ? Manifold() : fresh(Manifold::BatchBoolean(some, manifold::OpType::Add));
+  if (made->body.Status() != Manifold::Error::NoError) {
+    made->why = "joining the sheet blocks failed";
+    made->ms = ms_since(t0);
+    return made;
+  }
+  made->mm3 = made->body.Volume();
+  made->ok = true;
+  made->ms = ms_since(t0);
+  return made;
+}
+}  // namespace
 
 void weave_bar_shells(const Domain& domain, const Layout& lay, const Bars& bars, const std::vector<char>& strut,
                       const std::vector<char>& feet, const Carved& carved, const MeshSpec& spec, TriangleMesh& out,
@@ -1528,6 +1943,9 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
         const int sides = std::max(SEG, kFineSides);
         const double round = std::sqrt(2.0 * kPi / (sides * std::sin(2.0 * kPi / sides)));
         solids.push_back(Manifold::Sphere(kv.second.r * round, sides).Translate(mv(kv.second.at)));
+      } else if (spec.strut_facet_mm > 0.0) {   // PRINT RESOLUTION (Full: 0, the ball as before)
+        const RoundSides rs = round_sides(kv.second.r, SEG, spec.strut_facet_mm);
+        solids.push_back(Manifold::Sphere(kv.second.r * rs.corner, rs.sides).Translate(mv(kv.second.at)));
       } else {
         solids.push_back(Manifold::Sphere(kv.second.r * kRound, SEG).Translate(mv(kv.second.at)));
       }
@@ -1603,6 +2021,47 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
   rep.solid_mm3 = solid.Volume();
   rep.ms_solid = ms_since(t0);
   check(stop);
+
+  // -- SHEETS (notes28 sheets SPEC section 4): each field block by block, cut to its region's open space grown by
+  // the run-on and to the part, then joined to the solid. Made once for every pass of the make-check-make loop (the
+  // carving keeps them); the solid and the sheets joined once too, while nothing of the solid is left out.
+  if (spec.sheets && !spec.sheets->empty()) {
+    std::shared_ptr<CarvedSolids::SheetsMade> made;
+    {
+      std::lock_guard<std::mutex> lock(kept.sheets_mu);
+      const std::size_t seams_key = spec.sheet_seams ? spec.sheet_seams->size() : 0;
+      if (!kept.sheets || kept.sheets->key != spec.sheets || kept.sheets->seams_key != seams_key)
+        kept.sheets = make_sheets(domain, lay, kept, spec, strut_run_on_mm(carved, spec));
+      made = kept.sheets;
+      if (made->ok && made->joined && !spec.drop_at.empty() && made->body_freed)   // made again, to leave things out
+        made = kept.sheets = make_sheets(domain, lay, kept, spec, strut_run_on_mm(carved, spec));
+      if (made->ok && !made->joined && spec.drop_at.empty()) {
+        const auto tu = std::chrono::steady_clock::now();
+        made->with_solid = made->body.IsEmpty() ? kept.solid : fresh(kept.solid + made->body);
+        made->joined = true;
+        made->ms_union = ms_since(tu);
+        // Memory: the sheets alone are not read again unless a pass leaves part of the solid out (never for a sheet
+        // file: its print check posts, it leaves nothing out), and then they are made again.
+        made->body = Manifold();
+        made->body_freed = true;
+      }
+    }
+    check(stop);
+    rep.sheet_blocks = made->blocks;
+    rep.sheet_triangles = made->triangles;
+    rep.sheet_places = made->places;
+    rep.sheet_contoured_mm3 = made->contoured_mm3;
+    rep.sheet_deviation_mm = made->deviation_mm;
+    rep.sheet_mm3 = made->mm3;
+    rep.ms_sheets = made->ms;
+    rep.ms_sheet_union = made->ms_union;
+    rep.seams_blended = made->seams_blended;
+    rep.seams_fell_back = made->seams_fell_back;
+    if (!made->ok) return fail(made->why.empty() ? "the sheets could not be made" : made->why);
+    if (spec.drop_at.empty() && made->joined) solid = made->with_solid;
+    else if (!made->body.IsEmpty()) solid = fresh(solid + made->body);
+    if (solid.Status() != Manifold::Error::NoError) return fail("joining the sheets to the part failed");
+  }
 
   // ── one mesh ──────────────────────────────────────────────────────────────
   t0 = std::chrono::steady_clock::now();

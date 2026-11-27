@@ -1129,6 +1129,12 @@ std::string bridge_last_refusal();
 // The guard's own test hook: 0 → "answered"; 1 → a std::exception; 2 → a non-std
 // exception. 1 and 2 return "" with the reason in bridge_last_refusal().
 std::string bridge_guard_self_test(int kind);
+// ★ notes30 (his crash 11-26: the app logged on every render and per strut): how many lines the bridge has
+// written to the log this process — the tests' counting sink. A lookup's refusal (a per-type number, a limit, a
+// readiness) writes none; a press's refusal (import, run, lay) writes each different one once.
+long long bridge_log_line_count();
+// RED CONTROL (tests): every refusal written to the log, as before notes30.
+void bridge_set_control_log_every_refusal(bool on);
 
 // ---------------------------------------------------------------------------
 // Lattice certification limits (lattice mode UI, handoff 2026-07-29-lattice-mode-

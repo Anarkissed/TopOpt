@@ -21,8 +21,28 @@ public struct AppPopup: Equatable, Identifiable, Sendable {
 @MainActor public final class AppPopups: ObservableObject {
     public static let shared = AppPopups()
     @Published public var current: AppPopup? {
-        didSet { if current == nil { action = nil; second = nil; third = nil; dismissTitle = nil; dismissShown = true; extra = nil } }
+        didSet {
+            if current == nil {
+                action = nil; second = nil; third = nil; dismissTitle = nil; dismissShown = true; extra = nil; stacked = false
+                why = nil; under = nil
+            }
+        }
     }
+    /// ★ notes30 X2 (his 11-26 answer on the pad Structural could not lay): a pop-up's (i) — its title and words, opened in the
+    /// one centred card OVER the pop-up; a tap anywhere on that card gives the pop-up back as it was (`close`).
+    public private(set) var why: (title: String, text: String)?
+    /// The pop-up an (i) was opened over (its buttons and all), given back when the (i)'s card closes.
+    private var under: Saved?
+    private struct Saved {
+        let popup: AppPopup
+        let action, second, third: (title: String, run: () -> Void)?
+        let dismissTitle: String?
+        let dismissShown, stacked: Bool
+        let why: (title: String, text: String)?
+    }
+    /// ★ notes30 depth: a choice pop-up (`choose`) — its actions stacked, the first on top, its dismiss word last — even with
+    /// one action (LatticeReview's depth rule: Protect skin and Not now only).
+    public private(set) var stacked = false
     /// ★ notes29 (his 11-25, the one (i)): content an (i) shows under its words (a Flexible row's core detail); cleared with it.
     public private(set) var extra: AnyView?
     /// ★ notes25: a third action (the print file's refusal, Auto adjusted: "Lattice again", "Change settings", "Show me").
@@ -42,35 +62,77 @@ public struct AppPopup: Equatable, Identifiable, Sendable {
         if let log { NSLog("TopOpt popup (%@): %@", title, log) }
         let p = AppPopup(title: title, text: text)
         if FlexibleSaid.recording { Self.recorded.append(p) }
+        under = nil; why = nil   // ★ notes30 X2: a new pop-up replaces everything, the one under an (i) too
         current = p
         self.action = action
         second = nil; third = nil; dismissTitle = nil; dismissShown = true   // ★ notes25: never another pop-up's buttons
         extra = nil
+        stacked = false
     }
 
     /// ★ his 11-22: a pop-up with two actions and a dismiss word ("Try again", "Make it on the iPad", "Cancel").
     /// ★ notes25: `third` — a third action below the second; `dismiss` nil — no dismiss button among them.
+    /// ★ notes30 depth: `second` nil — one action and the dismiss word, stacked the same way.
+    /// ★ notes30 X2: `why` — the pop-up's (i) (its title and words), beside its title; its card opens over the pop-up.
     public func choose(_ title: String, _ text: String, log: String? = nil, first: (title: String, run: () -> Void),
-                       second: (title: String, run: () -> Void), third: (title: String, run: () -> Void)? = nil,
-                       dismiss: String?) {
+                       second: (title: String, run: () -> Void)?, third: (title: String, run: () -> Void)? = nil,
+                       dismiss: String?, why: (title: String, text: String)? = nil) {
         show(title, text, log: log, action: first)
+        stacked = true
         self.second = second
         self.third = third
         dismissTitle = dismiss
         dismissShown = dismiss != nil
+        self.why = why
+    }
+
+    /// ★ notes30 X2: the pop-up's (i) tapped — its words in the one centred card, over the pop-up, which waits under it (as any
+    /// (i) opened over a pop-up: `help`).
+    public func openWhy() {
+        guard let w = why, current?.info == false else { return }
+        help(w.title, w.text)
+    }
+
+    /// Whether the pop-up `id` waits under an (i)'s card (it is still up: its card comes back when the (i)'s closes).
+    public func holds(_ id: UUID?) -> Bool { id != nil && under?.popup.id == id }
+
+    /// A tap anywhere (the backdrop, an (i)'s card): an (i) opened over a pop-up gives that pop-up back as it was (★ notes30
+    /// X2); anything else closes.
+    public func close() {
+        guard current?.info == true, let s = under else { current = nil; return }
+        under = nil
+        current = s.popup
+        action = s.action; second = s.second; third = s.third
+        dismissTitle = s.dismissTitle; dismissShown = s.dismissShown; stacked = s.stacked
+        why = s.why; extra = nil
     }
 
     /// An (i): the setting's name and its explanation, in the same centred card. ★ notes29 (his 11-25): no OK — a big bold
     /// "Tap anywhere to continue", and any tap anywhere closes it; `action` (e.g. "Mark as tested") is offered above that line,
     /// `extra` drawn under the words.
-    public func help(_ title: String, _ text: String, action: (title: String, run: () -> Void)? = nil, extra: AnyView? = nil) {
+    /// ★ notes30 X2 (his yes, 11-26): `second`, `third` — more actions (the Lattice page's warning glyph's fixes), stacked under
+    /// the first in the card's slot. An (i) opened while a pop-up is up (its own (i), the only one a tap can reach under the
+    /// backdrop) opens OVER it: the pop-up waits under the card and comes back when the card closes (`close`).
+    public func help(_ title: String, _ text: String, action: (title: String, run: () -> Void)? = nil,
+                     second: (title: String, run: () -> Void)? = nil, third: (title: String, run: () -> Void)? = nil,
+                     extra: AnyView? = nil) {
         let p = AppPopup(title: title, text: text, info: true)
         if FlexibleSaid.recording { Self.recorded.append(p) }
+        if let c = current, !c.info {
+            under = Saved(popup: c, action: self.action, second: self.second, third: self.third, dismissTitle: dismissTitle,
+                          dismissShown: dismissShown, stacked: stacked, why: why)
+        }
         current = p
-        self.action = action
-        second = nil; third = nil; dismissTitle = nil; dismissShown = false
+        let acts = [action, second, third].compactMap { $0 }
+        self.action = acts.first
+        self.second = acts.count > 1 ? acts[1] : nil
+        self.third = acts.count > 2 ? acts[2] : nil
+        dismissTitle = nil; dismissShown = false; stacked = false; why = nil
         self.extra = extra
     }
+
+    /// The actions an (i)'s card offers, in order (its slot holds them all).
+    var infoActions: [(title: String, run: () -> Void)] { [action, second, third].compactMap { $0 } }
 
     /// A wrong number, said front and centre: the setting, what is allowed, and what he typed.
     public func wrongNumber(_ setting: String, _ why: String) {
@@ -87,7 +149,7 @@ struct AppPopupLayer: View {
                 ZStack {
                     // The dim backdrop: a tap on it closes the pop-up (an error's too, as before). ★ notes29: a Button, so the
                     // tap is the same on the iPad and in the hosted tests (a test's click never reaches an onTapGesture)
-                    Button { popups.current = nil } label: {
+                    Button { popups.close() } label: {   // ★ notes30 X2: an (i) over a pop-up gives the pop-up back
                         Rectangle().fill(Color.black.opacity(0.35))
                             .frame(width: g.size.width, height: g.size.height)
                             .contentShape(Rectangle())
@@ -111,7 +173,7 @@ struct AppPopupLayer: View {
     /// tested") is its own button, laid over the card in the slot the card keeps for it.
     private func infoCard(_ p: AppPopup, room: CGSize) -> some View {
         let width = AppInfoCard.width(for: p.text, title: p.title, room: room.width)
-        let action = popups.action
+        let actions = popups.infoActions   // ★ notes30 X2: one to three, stacked in the slot
         let content = VStack(spacing: DS.Space.m) {
             Image(systemName: AppInfoGlyph.litSymbol)
                 .font(.system(size: 30, weight: .semibold))
@@ -127,8 +189,8 @@ struct AppPopupLayer: View {
             if let extra = popups.extra {
                 extra.frame(maxWidth: .infinity, alignment: .leading)
             }
-            if action != nil {   // the action's slot (its button is laid over it, above the card's own tap)
-                Color.clear.frame(height: 44)
+            if !actions.isEmpty {   // the actions' slot (their buttons are laid over it, above the card's own tap)
+                Color.clear.frame(height: AppInfoCard.slotHeight(actions.count))
                     .anchorPreference(key: AppInfoActionSlot.self, value: .bounds) { $0 }
             }
             Text(AppInfoCard.tapAnywhere)
@@ -140,7 +202,7 @@ struct AppPopupLayer: View {
         }
         .padding(DS.Space.xl2)
         .frame(width: width)
-        return Button { popups.current = nil } label: {
+        return Button { popups.close() } label: {
             GlassPanel {
                 ViewThatFits(in: .vertical) {
                     content
@@ -155,13 +217,19 @@ struct AppPopupLayer: View {
         .accessibilityIdentifier("app-popup-card")
         .overlayPreferenceValue(AppInfoActionSlot.self) { slot in
             GeometryReader { g in
-                if let slot, let a = action {
+                if let slot, !actions.isEmpty {
                     let r = g[slot]
-                    PillButton(a.title) { let run = a.run; popups.current = nil; run() }
-                        .background(CornerPairStyle.publish("appPopupAction"))
-                        .accessibilityIdentifier("app-popup-action")
-                        .frame(width: r.width)
-                        .position(x: r.midX, y: r.midY)
+                    VStack(spacing: AppInfoCard.slotSpacing) {
+                        ForEach(Array(actions.enumerated()), id: \.offset) { i, a in
+                            PillButton(a.title, style: i == 0 ? .primary : .secondary) {
+                                let run = a.run; popups.current = nil; run()
+                            }
+                            .background(CornerPairStyle.publish(i == 0 ? "appPopupAction" : "appPopupAction\(i + 1)"))
+                            .accessibilityIdentifier(i == 0 ? "app-popup-action" : "app-popup-action-\(i + 1)")
+                        }
+                    }
+                    .frame(width: r.width)
+                    .position(x: r.midX, y: r.midY)
                 }
             }
         }
@@ -176,26 +244,39 @@ struct AppPopupLayer: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 30, weight: .semibold))
                     .foregroundStyle(DS.Color.warning.color)
-                Text(p.title).dsStyle(DS.TypeScale.title).foregroundStyle(DS.Color.textPrimary.color)
-                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("app-popup-title")
+                HStack(spacing: 0) {
+                    Text(p.title).dsStyle(DS.TypeScale.title).foregroundStyle(DS.Color.textPrimary.color)
+                        .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("app-popup-title")
+                    if let w = popups.why {   // ★ notes30 X2: its (i) — the one (i); its card opens over this pop-up (`help`)
+                        AppInfoButton(title: w.title, text: w.text, label: "About \(w.title)", id: "app-popup-why")
+                            .background(CornerPairStyle.publish("appPopupWhy"))
+                    }
+                }
                 Text(p.text).dsStyle(DS.TypeScale.body).foregroundStyle(DS.Color.textSecondary.color)
                     .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .accessibilityIdentifier("app-popup-text")
                 HStack(spacing: DS.Space.s) {
-                    if let a = popups.action, let b = popups.second {   // ★ his 11-22: two choices and a dismiss, stacked
+                    if popups.stacked, let a = popups.action {   // ★ his 11-22: the choices and a dismiss, stacked
                         VStack(spacing: DS.Space.s) {
+                            // ★ notes30: each choice publishes its frame (a hosted test taps it, and holds it to 44 pt)
                             PillButton(a.title) { let run = a.run; popups.current = nil; run() }
+                                .background(CornerPairStyle.publish("appPopupChoice1"))
                                 .accessibilityIdentifier("app-popup-action")
-                            PillButton(b.title, style: .secondary) { let run = b.run; popups.current = nil; run() }
-                                .accessibilityIdentifier("app-popup-second")
+                            if let b = popups.second {   // ★ notes30 depth: a choice pop-up may offer one action only
+                                PillButton(b.title, style: .secondary) { let run = b.run; popups.current = nil; run() }
+                                    .background(CornerPairStyle.publish("appPopupChoice2"))
+                                    .accessibilityIdentifier("app-popup-second")
+                            }
                             if let c = popups.third {   // ★ notes25
                                 PillButton(c.title, style: .secondary) { let run = c.run; popups.current = nil; run() }
+                                    .background(CornerPairStyle.publish("appPopupChoice3"))   // ★ notes30 X2: held to 44 pt
                                     .accessibilityIdentifier("app-popup-third")
                             }
                             if popups.dismissShown {
                                 PillButton(popups.dismissTitle ?? "OK", style: .secondary) { popups.current = nil }
+                                    .background(CornerPairStyle.publish("appPopupDismiss"))
                                     .accessibilityIdentifier("app-popup-ok")
                             }
                         }

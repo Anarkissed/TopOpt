@@ -154,7 +154,9 @@ final class Notes29DensityDialTests: XCTestCase {
         let block = try XCTUnwrap(wizard.components(separatedBy: "private var smallCellsSwitch").dropFirst().first?
             .components(separatedBy: "private var singleCellSwitch").first)
         // (362's merge of N1: the page's own switch, model.allowQuilt, and N1's captions)
-        XCTAssertTrue(block.contains(".disabled(model.allowQuilt)"), "★ greyed only with Allow quilt on")
+        // ★ RE-PINNED (notes30 M1): and for a sheet type, which keeps one cell size per region (Notes30SheetsIntegrateTests)
+        XCTAssertTrue(block.contains(".disabled(model.allowQuilt || LatticeSheets.greyed(model.topologyID).contains(.smallCellsInThinWalls))"),
+                      "★ greyed only with Allow quilt on (or for a sheet)")
         XCTAssertFalse(block.contains(".disabled(true)"), "★ never greyed for good")
         XCTAssertTrue(block.contains("Self.smallCellsInfo"), "★ its (i) is the engine's own rule")
         for caption in [LatticeSetupWizard.smallCellsQuiltLine, LatticeSetupWizard.smallCellsOnLine,

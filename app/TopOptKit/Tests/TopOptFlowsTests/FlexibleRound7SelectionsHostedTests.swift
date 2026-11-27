@@ -219,10 +219,15 @@ final class FlexibleRound7SelectionsHostedTests: XCTestCase {
         XCTAssertEqual(s.faceUI.padTarget, "handle-depth-\(r3.key)", "★ a click on the handle's number opens the keypad")
         s.faceUI.padTarget = nil
         pump(0.5)
+        // ★ RE-PINNED (notes30, his one (i) of notes29; builder F1): the (i) opens the centred notification with his four
+        // numbers (Notes30FollowUpsHostedTests draws it); it opened a card of its own beside it ("statsCard")
+        AppPopups.shared.current = nil
         try press(h, "info-l-\(r3.key)", "Face 3's (i) in the list")
-        XCTAssertEqual(s.faceUI.info?.ref, r3, "★ the (i) opened for Face 3")
+        XCTAssertEqual(AppPopups.shared.current?.title, FlexibleFaceStatsRows.title(p.flexibleName(r3)), "★ the (i) opened for Face 3")
+        XCTAssertNotNil(AppPopups.shared.extra, "★ his four numbers under its words")
         pump(0.5)
-        XCTAssertNotNil(h.frames.all["statsCard"], "★ his four numbers' card")
+        XCTAssertNil(h.frames.all["statsCard"], "★ no card of its own beside the (i)")
+        AppPopups.shared.current = nil
     }
 
     // MARK: S5 (an offscreen test cannot drive a SwiftUI drag — round7/batch_d2/drag_probe.txt; the gesture writes the chip's spot

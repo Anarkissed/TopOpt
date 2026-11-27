@@ -31,8 +31,18 @@ double level_strut_per_cell(LatticeTopology topo) {
   return most;
 }
 
+SheetOverhang sheet_overhang(LatticeTopology topo) {
+  SheetOverhang o;
+  if (topo == LatticeTopology::Gyroid) o = {0.01, 0.06, 0.09, 0.09, 0.17, 0.32};
+  if (topo == LatticeTopology::SchwarzD) o = {0.01, 0.06, 0.09, 0.09, 0.17, 0.24};
+  return o;
+}
+
 double auto_cell_cap_mm(LatticeTopology topo) {
-  const double span = topo == LatticeTopology::Octet ? 0.0 : level_strut_per_cell(topo);   // the octet: R9
+  // SHEETS: the widest near-level patch, held from both sides, in place of a level strut (SheetOverhang::patch30).
+  const double span = topo == LatticeTopology::Octet ? 0.0
+                      : sheet_kind_of(topo)          ? sheet_overhang(topo).patch30
+                                                     : level_strut_per_cell(topo);   // the octet: R9
   return span > 0.0 ? 2.0 * kBridgeReachLimitMm / span : std::numeric_limits<double>::infinity();
 }
 

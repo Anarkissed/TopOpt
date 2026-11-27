@@ -30,7 +30,8 @@ struct AppInfoGlyph: View {
 }
 
 /// The one (i) button: the glyph in a 44 pt target; its tap opens the setting's explanation in the centred notification.
-/// `tap` replaces the notification only where the (i) opens a live card of numbers (the Flexible face's numbers).
+/// `tap` replaces the notification (★ notes30: no page uses it — the Flexible face's numbers, its last user, open the
+/// notification too, FlexibleInfoButton; the unused SelectionsList `InfoButton` still names it).
 struct AppInfoButton: View {
     let title: String
     let text: String
@@ -83,6 +84,9 @@ enum AppInfoCard {
     static let minWidth: CGFloat = 340
     static let maxWidth: CGFloat = 680
     static let margin: CGFloat = 24
+    /// ★ notes30 X2: the actions' slot — each a 44 pt button, stacked.
+    static let slotSpacing: CGFloat = 8
+    static func slotHeight(_ n: Int) -> CGFloat { n <= 0 ? 0 : CGFloat(n) * 44 + CGFloat(n - 1) * slotSpacing }
 
     /// The card's width for these words in a room this wide: about 70 characters a line for a long text, so it grows wider
     /// before it grows tall; a short one stays narrow.

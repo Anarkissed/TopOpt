@@ -12821,13 +12821,20 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
     post.cell_size_field[e] = cell.size;
     post.cell_size_mm = std::max(post.cell_size_mm, cell.size);
     if (credit.credited[e]) {
-      post.relative_density[e] = credit.cell_rho[static_cast<std::size_t>(c)];
+      // SHEETS (notes28 sheets SPEC 1.4, builder B): a sheet is credited by PLACE, each voxel its own wall's density
+      // (LatticeCredit::voxel_rho); a strut type has none and keeps its cell's.
+      post.relative_density[e] = credit.voxel_rho.empty() ? credit.cell_rho[static_cast<std::size_t>(c)]
+                                                          : static_cast<double>(credit.voxel_rho[e]);
     } else {
       // Void in the composite solve (certify_latticed_variant's open_cut): its density is never read.
       post.relative_density[e] = rho_floor;
       no_credit[e] = 1;
     }
   }
+  // ANALYZE GUARD (sheets): the cells-per-member guard reads the member width the engine measured on the part itself
+  // (LatticePosture::member_width_mm: room_through over each cell, as the lay's floor and the credit read it), not the
+  // voxel staircase, which reads a member about two voxels thin. Empty for a strut type: the staircase, as before.
+  post.member_width_mm = ll::sheet_member_width_mm(out.layout, *ask.session->domain(), credit, g, ask.threads);
 
   // ── THE OLD CHECK, unchanged: the null-posture solve, the composite solve, the gate. Its context is the one the
   // old run builds, with the settings laid over it (each equal to what it replaces when not stated).
@@ -12890,6 +12897,20 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
   // ── the block (the old receipt's names, renamed: lattice_accepted -> accepted, ...).
   const bool law = a.lattice_strut_report;
   const StrutStrengthReport& ss = a.lattice_strut;
+  // ── SHEETS (notes28 sheets SPEC 1.6, builder B): sheet_cells.bin beside strength.json, each laid cell's worst credited
+  // voxel's margin by the sheet's own law on this composite solve (the bound the strut result reads), and the block's
+  // sheet keys ("sheet_cells", "sheet_credit"). Nothing for a strut type.
+  std::string sheet_keys;
+  if (ll::sheet_kind_of(topo)) {
+    const std::vector<float> margins =
+        ll::lattice_voxel_margins(topo, credit, a.stress_tensor_field, cx.build_dir, material.yield_strength_mpa,
+                                  law && ss.z_knockdown_used > 0.0 ? ss.z_knockdown_used : material.z_knockdown);
+    const ll::SheetCheckFiles sw = ll::write_sheet_check_files(ask.out_dir, out.layout, credit, margins, S.frame);
+    if (!sw.ok)
+      return strength_no("strength_failed", 1, "The lattice's strength could not be checked, so no file was made.", sw.why);
+    done.files.push_back(sw.file);
+    sheet_keys = sw.keys;
+  }
   const double nan = std::numeric_limits<double>::quiet_NaN();
   // V5 (his ruling, 2026-11-17): in Structural the lattice passes only when the solid AND the struts keep the safety
   // margin. `accepted` stays the old gate exactly; a type with no strut law cannot reach a full pass. A result, never a
@@ -13000,7 +13021,9 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
        ", \"out_of_regime\": " + std::string(out_of_regime ? "true" : "false") +
        ", \"regime_note\": " + json_str(regime_note) + "},\n";
   s += "    \"fields\": \"fields.bin\",\n";
-  if (done.files.size() > 1) s += "    \"scenario_fields\": \"scenario_fields.bin\",\n";
+  if (std::find(done.files.begin(), done.files.end(), std::string("scenario_fields.bin")) != done.files.end())
+    s += "    \"scenario_fields\": \"scenario_fields.bin\",\n";
+  s += sheet_keys;   // SHEETS: "sheet_cells", "sheet_credit" (empty for a strut type)
   // The old report's diagnosis (diagnose_gate), on the composite analysis, when it is not accepted.
   if (!a.accepted) {
     GateDiagnosisInputs gd;
@@ -13160,6 +13183,11 @@ ll::StrengthDone run_lattice_file_strength(const ll::StrengthAsk& ask,
   done.accepted = a.accepted;
   return done;
 }
+
+// The interim guard's plain sentence (the reviewer's ruling with the owner's approval, 2026-11-26).
+constexpr double kSolidDepthNeededVoxels = 1.5;   // measured, see solid_depth_needed_mm
+const char* const kLoadOnBareLatticeText =
+    "A load lands on bare vines. Give the loaded face a Solid finish or a protected skin so its strength can be checked.";
 
 // ══ BRIEF E2, PART A: THE ORGANIC CHECK, A FRAME OF BEAMS (lattice_layout_frame.hpp) ═════════════════════════════
 // On the strength job's own grid and load case (strength_setup, as Install 3's): the material per voxel is the part's
@@ -13719,6 +13747,9 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
   } else if (c.no_load_path) {   // OS9 amended: the load handed no one (unheld, or only near adrift parts) over the share
     R.verdict = "fail";
     R.fail_reason = "no_load_path";
+  } else if (c.load_on_bare_lattice) {   // the interim guard (2026-11-26): the vines would carry the load
+    R.verdict = "fail";
+    R.fail_reason = "load_on_bare_lattice";
   } else if (R.solid_margin_effective < options.margin_stop) {
     R.verdict = "fail";
     R.fail_reason = "solid_margin";
@@ -13817,6 +13848,16 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
     if (R.fail_reason == "load_on_open_lattice")
       s += "    \"load_on_no_credit_n\": " + num(c.load_unheld_n) + ",\n    \"load_total_n\": " + num(c.load_total_n) + ",\n";
     if (R.fail_reason == "frame_not_solved") s += "    \"fail_detail\": " + json_str(c.why_not) + ",\n";
+    if (R.fail_reason == "load_on_bare_lattice") {
+      const Vec3 at = S.frame.point_to_model(c.load_on_lattice_at);   // P2: the part's own coordinates
+      s += "    \"load_on_frame_n\": " + num(c.load_on_frame_n) + ",\n    \"load_total_n\": " + num(c.load_total_n) +
+           ",\n    \"load_share\": " + num(c.load_share) + ",\n    \"load_on_lattice_at\": [" + num(at.x) + ", " +
+           num(at.y) + ", " + num(at.z) + "],\n    \"fail_text\": " + json_str(kLoadOnBareLatticeText) + ",\n";
+      // The depth of solid (a Solid finish or a protected skin) under the loaded face that clears the guard and the open
+      // lattice test together: 1.5 of the check's voxels, measured (organic_bare_lattice_depth, 2026-11-26: on a 24 mm
+      // coupon at resolution 40 the guard cleared at 1 voxel, the open-lattice test at 1.5, with the switch off and on).
+      s += "    \"solid_depth_needed_mm\": " + num(kSolidDepthNeededVoxels * cert_grid.spacing) + ",\n";
+    }
   }
   s += "    \"solid_margin\": {\"worst_case\": " + num(R.solid_margin.worst_case) + ", \"in_plane\": " + num(R.solid_margin.in_plane) +
        ", \"interlayer\": " + num(R.solid_margin.interlayer) + ", \"effective\": " + num(R.solid_margin_effective) +
@@ -14354,7 +14395,8 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
         }
       for (const ll::Bar& b : bars.bars) if (!prev_margin_of.count(ends_key(b.a, b.b))) prev_margin_of[ends_key(b.a, b.b)] = std::numeric_limits<double>::infinity();
       const bool clean = c.solved && c.under_safety == 0;
-      if (clean || n >= limit || !c.solved) {
+      const bool bare = cr.fail_reason == "load_on_bare_lattice";   // the interim guard: adding vines cannot cure it
+      if (clean || bare || n >= limit || !c.solved) {
         rounds_json += r + "}";
         {   // K4: the summary, of this last check (the lattice the last round's strengthened.json gives)
           double widest = 0.0;
@@ -14414,6 +14456,7 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
           summary_keys += "]";
         }
         res.passing = cr.verdict == "pass";
+        if (bare) return finish(true, "load_on_bare_lattice", 0, kLoadOnBareLatticeText);
         if (clean) return finish(true, "done", 0, "");
         if (!c.solved) return finish(true, "frame_not_solved", 0, "The frame could not be solved, so there is nothing to strengthen from.");
         return finish(true, "limit", 0, "The rounds of strengthening allowed were all done.");
@@ -14780,9 +14823,11 @@ OrganicStrengthenResult run_organic_strengthen(const std::string& job_path, cons
                     ", \"peak\": " + json_num(std::round(process_memory().peak_rss_mb)) + "}, \"check\": " +
                     json_str("r" + std::to_string(n) + "/strength.json");
     const bool clean = c.solved && c.under_safety == 0;
-    if (clean || !varies || n >= limit || !c.solved) {
+    const bool bare = cr.fail_reason == "load_on_bare_lattice";   // the interim guard: strengthening cannot cure it
+    if (clean || bare || !varies || n >= limit || !c.solved) {
       rounds_json += r + "}";
       res.passing = cr.verdict == "pass";
+      if (bare) return finish(true, "load_on_bare_lattice", 0, kLoadOnBareLatticeText);
       if (clean) return finish(true, "done", 0, "");
       if (!c.solved) return finish(true, "frame_not_solved", 0, "The frame could not be solved, so there is nothing to strengthen from.");
       if (!varies)
