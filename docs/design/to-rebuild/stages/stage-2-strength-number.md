@@ -479,3 +479,19 @@ WHY the one-voxel form is jumpy in the fill (read from `analyze.cpp`, 21:30; the
 | 0.26 | 1.799 | 2.162 | 2.293 | 2.220 | -3.2 % |
 
 By the ruled test (the shown margin moves under 0.5 % when k doubles) the three heavier versions settle at k = 8. The lightest does not: 2.51 / 2.16 / 2.29 / 2.22 at k = 2 / 4 / 8 / 16, wandering inside about 6 %. Cost at k = 16 with the fills counted a layer at a time: peak memory 383 MB against 375 MB with the switch off (the whole-grid form took 450 MB at k = 8), the finish step 5 to 11 s a version against 2 to 5 s, the whole run 1065 s against 1072 s. So k = 8 costs nothing that matters and is where three of four versions settle; the fourth is the one-voxel form's own jumpiness.
+
+### ONE JUDGE, evidence (a) against a finer reference (2026-11-26 21:56; the certificate's fills sampled 32 x 32 per voxel; 7 of 12 rows before my memory guard stopped the run, swapouts rising under another agent's lock job)
+
+Peak through the file's fills against the certificate's, percent:
+
+| shape, b in voxels | all-or-nothing (today) | k = 2 | k = 4 | k = 8 | k = 16 |
+|---|---|---|---|---|---|
+| round hole, 3 | -34.3 | -11.7 | -7.0 | +2.4 | -0.1 |
+| round hole, 4 | -26.9 | -9.3 | -8.4 | +0.4 | +1.0 |
+| round hole, 5 | -14.0 | -1.8 | +1.5 | +2.5 | -0.3 |
+| round hole, 6 | -22.2 | -10.0 | -11.4 | +0.3 | +0.2 |
+| ellipse, 3 | -43.6 | -18.5 | -5.0 | +0.2 | +1.4 |
+| ellipse, 4 | -20.2 | +14.0 | -1.1 | +0.3 | -0.1 |
+| ellipse, 5 | -22.6 | -13.1 | +9.2 | -2.1 | -2.2 |
+
+Read plainly. From k = 8 the file's fills give the certificate's peak within about 2.5 % (worst +2.5 and -2.2), where today's all-or-nothing re-check is 14 to 44 % under it. Within 1 % in 4 of 7 rows at k = 8 and at k = 16; going from 8 to 16 does not tighten it (the scatter is the one-voxel form's own, see "WHY the one-voxel form is jumpy"; the ellipse at 5 voxels also carries the 360-sided polygon against the true ellipse). So the ruled "within 1 %" is not met by the one-voxel form at any k tried, and will not be by a finer k. The remaining rows (the ellipse at 6, the ring) re-run when the gate is green.
