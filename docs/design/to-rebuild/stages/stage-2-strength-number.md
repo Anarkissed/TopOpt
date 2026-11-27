@@ -717,3 +717,13 @@ WHAT IT SAYS, and it CORRECTS what I wrote above ("the cruder judge is the neare
 
 Honest position: I cannot say from this which number is right for Top Motor Mount; I can say the two disagree for a measured reason on BOTH sides, and that it is the stage 4 question (surface stress recovery; a member rule in voxels) arriving early. Parked for the reviewer.
 
+### All shapes side by side: the one-voxel peak reading against the true value, by what the cut voxels are given (2026-11-27 06:30)
+
+| shape | all-or-nothing | E x fill^3 (one judge as built) | E x fill^2 | E x fill |
+|---|---|---|---|---|
+| thick ring, pressure on the curved inner face (re-run today, 4 resolutions) | -6 to 0 % | +52 to +76 % | +17 to +27 % | -7 to -4 % |
+| bending beam with cut faces, 4 to 16 voxels through (today) | -43 to -1 % | -12 to +16 % | -28 to +3 % | -47 to -4 % |
+| plate with a hole, ellipse (measured earlier, above) | (see its tables) | (see its tables) | plate -3.8 to +4.3 %, ellipse -19 to -2 % | plate -18 to -6 % |
+
+No column holds +/-10 % on both the ring and the beam. All-or-nothing is right on the ring and unsafe on the beam; E x fill^3 is near on the beam and far too high on the ring; E x fill^2 misses both by less (high on the ring, low on the beam). The two shapes differ in ONE thing: on the ring the LOAD sits on the cut face (the soft skin is squeezed directly), on the beam the cut faces are free and only carry the bending. So the candidate that the measurements point at is not a different power but a different treatment of LOADED cut faces from FREE ones, or reading the stress at the true surface instead of in the cut voxel (stage 4). Not built; for the reviewer.
+
