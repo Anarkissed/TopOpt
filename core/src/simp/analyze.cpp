@@ -578,8 +578,13 @@ FixedDesignAnalysis analyze_fixed_design(
       // bounding box, and with the default (outside not air) a member lying against
       // the box, or a part that fills it, reads as thick as the measure reaches and
       // would never fall back (found on the beam test, 2026-11-27).
-      const std::vector<double> width = local_member_thickness_mm(
-          grid, density, kIso, kn.thickness_cap_voxels, /*grid_outside_is_void=*/true);
+      // CONVEX CORNERS JOIN THEIR MEMBER (lattice_member_width_mm, the rule made for
+      // the lattice's cells-per-member floor): the largest ball that holds an edge
+      // or corner voxel of a THICK member is small, so without this every edge of
+      // every part read as thin and fell back (the beam test, 2026-11-27).
+      const std::vector<double> width = lattice_member_width_mm(
+          grid, density, kIso, kn.thickness_cap_voxels, kStressThinMemberSizes * size,
+          grid.spacing);
       auto width_at = [&](int i, int j, int k) {
         const std::size_t idx = grid.index(i, j, k);
         if (density[idx] > kIso) return width[idx];
@@ -625,15 +630,22 @@ FixedDesignAnalysis analyze_fixed_design(
               eff_real[idx] = vm_real[idx] / k_v;
             }
       }
-      const std::vector<double> r_vm =
-          stress_over_size(grid, vm_real, density, kStressMaterialFloor, size);
+      // Each reading: the ball centred on voxel centres AND on the part's surface
+      // nodes (stress_measure.hpp), the larger of the two voxel by voxel.
+      auto over_size = [&](const std::vector<double>& f, double d) {
+        std::vector<double> r = stress_over_size(grid, f, density, kStressMaterialFloor, d);
+        const std::vector<double> s =
+            stress_over_size_on_surface(grid, f, density, kStressMaterialFloor, d);
+        for (std::size_t q = 0; q < r.size(); ++q)
+          if (s[q] > r[q]) r[q] = s[q];
+        return r;
+      };
+      const std::vector<double> r_vm = over_size(vm_real, size);
       const std::vector<double> r_eff =
-          eff_real.empty() ? std::vector<double>()
-                           : stress_over_size(grid, eff_real, density, kStressMaterialFloor, size);
+          eff_real.empty() ? std::vector<double>() : over_size(eff_real, size);
       const double across_size = kAcrossLayerLengthFactor * size;
-      const std::vector<double> r_across = stress_over_size(
-          grid, interlayer_tension_field(grid, tensor_real, build_dir), density,
-          kStressMaterialFloor, across_size);
+      const std::vector<double> r_across =
+          over_size(interlayer_tension_field(grid, tensor_real, build_dir), across_size);
       const std::vector<double> across_today = interlayer_tension_field(grid, stress, build_dir);
       double m_vm = 0.0, m_eff = 0.0, m_across = 0.0;
       std::size_t thick = 0, thin = 0;

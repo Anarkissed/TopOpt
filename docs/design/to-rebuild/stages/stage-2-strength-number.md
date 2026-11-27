@@ -587,3 +587,16 @@ FINDING 1 TESTED (02:30, a measuring arm inside the test, not in the engine): th
 | `size`, forced to 3.6 mm | "the stress is read over 3.60 mm ... on real stiffness" | 4.101 -> 4.093 | 84.88 g |
 
 The part as drawn prints at 100.13 g of 114.98 g solid, so the version really saves 15.2 % of printed weight (the solid figures say 23.5 %). With the switch on and his material the STRENGTH NUMBER DOES NOT MOVE (2.597 both ways): PA12 has no published length, as ruled. Forced to 3.6 mm the margin would read 58 % higher (4.09): shown only to say what an averaged reading would do on this part; it is not what ships for PA12, and that run was made on a build from BEFORE the thin-member rule. Runs 526 / 458 / 516 s: the switch costs no time on this job. The bracket's forced run: see the folder `opt11/sample_a/size36`.
+
+### The two fixes IN THE ENGINE, on the beam (2026-11-27 02:48; behind `TOPOPT_STRENGTH=size`)
+
+`stress_over_size_on_surface` (the ball also centred on the nodes where material meets air; `stress_measure.cpp`) and the corner-aware member width (`lattice_member_width_mm` with the floor at twice the size) are in `analyze.cpp`. The beam again:
+
+| thickness | what the job reads | job's reading | own true value | off |
+|---|---|---|---|---|
+| 0.5 x the size | one voxel (fell back) | 0.33 | (0.97) | the grid's limit, A-06 |
+| 1 x | one voxel (fell back) | 0.68 | (0.64) | the grid's limit, A-06 |
+| 2 x | over the size, every voxel thick, none thin | 0.778 | 0.818 | -4.9 % |
+| 4 x | over the size, every voxel thick, none thin | 0.893 | 0.909 | -1.7 % |
+
+So the engine now gives what the measuring arm gave: inside the 5 % bar from twice the size, and the edge voxels no longer fall back (0 thin where there were 360 and 392). The margin at twice the size is thin (-4.9 %). OWED NEXT: the plate, ring, ellipse and across-layer tests still read with voxel-centred balls only; they are switched to the engine's combined reading and the switch point (1.75 voxels) and the bar are measured again on all of them; then the 15 mm part.
