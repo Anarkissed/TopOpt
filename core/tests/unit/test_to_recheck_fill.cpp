@@ -21,10 +21,12 @@
 #include <vector>
 
 #include "topopt/analyze.hpp"
+#include "topopt/face_loads.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/file_fill.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/simp.hpp"
+#include "topopt/step.hpp"
 
 using topopt::DirichletBC;
 using topopt::NodalLoad;
@@ -153,6 +155,111 @@ double peak(const VoxelGrid& g, const std::vector<double>& density, bool* ok) {
   return res.max_von_mises / kFarStress;
 }
 
+// THE THICK RING (tests E, second half): inner radius 6 mm, outer 12 mm, pressure
+// on the drawn inner face (stage 1's loader). `density` decides which voxels are
+// elements (any fill above the floor) and how full each is.
+constexpr double kPressure = 10.0, kInnerMm = 6.0, kOuterMm = 12.0;
+constexpr int kRingSides = 360;
+
+topopt::TriangleMesh ring_mesh(double cx, double cy, double height) {
+  topopt::TriangleMesh m;
+  const double pi = std::acos(-1.0);
+  for (int i = 0; i < kRingSides; ++i) {
+    const double a = 2.0 * pi * i / kRingSides, c = std::cos(a), s = std::sin(a);
+    m.vertices.push_back(Vec3{cx + kInnerMm * c, cy + kInnerMm * s, 0.0});     // 4 i     inner, bottom
+    m.vertices.push_back(Vec3{cx + kOuterMm * c, cy + kOuterMm * s, 0.0});     // 4 i + 1 outer, bottom
+    m.vertices.push_back(Vec3{cx + kInnerMm * c, cy + kInnerMm * s, height});  // 4 i + 2 inner, top
+    m.vertices.push_back(Vec3{cx + kOuterMm * c, cy + kOuterMm * s, height});  // 4 i + 3 outer, top
+  }
+  auto quad = [&](int p0, int p1, int p2, int p3) {
+    m.triangles.push_back({p0, p1, p2});
+    m.triangles.push_back({p0, p2, p3});
+  };
+  for (int i = 0; i < kRingSides; ++i) {
+    const int j = (i + 1) % kRingSides, A = 4 * i, B = 4 * j;
+    quad(A + 2, A + 3, B + 3, B + 2);  // top
+    quad(A, B, B + 1, A + 1);          // bottom
+    quad(A + 1, B + 1, B + 3, A + 3);  // outer wall
+    quad(A, A + 2, B + 2, B);          // inner wall, toward the axis
+  }
+  return m;
+}
+
+topopt::StepModel ring_inner_face(double cx, double cy, double height) {
+  topopt::StepModel model;
+  const double pi = std::acos(-1.0);
+  for (int s = 0; s < 180; ++s) {
+    const double a0 = 2.0 * pi * s / 180, a1 = 2.0 * pi * (s + 1) / 180;
+    const Vec3 p00{cx + kInnerMm * std::cos(a0), cy + kInnerMm * std::sin(a0), 0.0};
+    const Vec3 p10{cx + kInnerMm * std::cos(a1), cy + kInnerMm * std::sin(a1), 0.0};
+    const Vec3 p01{p00.x, p00.y, height}, p11{p10.x, p10.y, height};
+    const int b = static_cast<int>(model.mesh.vertices.size());
+    for (const Vec3& p : {p00, p10, p01, p11}) model.mesh.vertices.push_back(p);
+    model.mesh.triangles.push_back({b, b + 2, b + 1});
+    model.mesh.triangles.push_back({b + 1, b + 2, b + 3});
+    model.triangle_face.push_back(0);
+    model.triangle_face.push_back(0);
+  }
+  model.face_count = 1;
+  return model;
+}
+
+// The ring's peak von Mises / pressure for a field of fills on a w x w x 2 grid.
+double ring_peak(int rv, int w, double cxv, double cyv, const std::vector<double>& density,
+                 bool* ok) {
+  VoxelGrid g;
+  g.nx = w;
+  g.ny = w;
+  g.nz = kThickness;
+  g.spacing = kInnerMm / rv;
+  g.origin = Vec3{0.0, 0.0, 0.0};
+  g.tags.assign(density.size(), topopt::VoxelTag::Empty);
+  for (std::size_t i = 0; i < density.size(); ++i)
+    if (density[i] >= topopt::kStressMaterialFloor) g.tags[i] = topopt::VoxelTag::Interior;
+  const double h = g.spacing;
+  const topopt::StepModel model = ring_inner_face(cxv * h, cyv * h, kThickness * h);
+  const std::vector<topopt::NodeArea> areas =
+      topopt::face_node_areas(g, topopt::face_pieces(model, {0}, 0.5 * h), nullptr);
+  std::vector<NodalLoad> loads;
+  for (const topopt::NodeArea& a : areas) {
+    const double f = -kPressure * a.area;
+    loads.push_back({a.node, 0, f * a.normal.x});
+    loads.push_back({a.node, 1, f * a.normal.y});
+  }
+  const double rm = 1.5 * rv;
+  auto node_at = [&](double xv, double yv) {
+    return topopt::fea_node_index(g, static_cast<int>(std::lround(xv)),
+                                  static_cast<int>(std::lround(yv)), 0);
+  };
+  const int a = node_at(cxv + rm, cyv), b = node_at(cxv - rm, cyv), c = node_at(cxv, cyv + rm);
+  std::vector<DirichletBC> bcs;
+  bcs.push_back({a, 0, 0.0});
+  bcs.push_back({a, 1, 0.0});
+  bcs.push_back({a, 2, 0.0});
+  bcs.push_back({b, 1, 0.0});
+  bcs.push_back({b, 2, 0.0});
+  bcs.push_back({c, 2, 0.0});
+  topopt::Material m;
+  m.youngs_modulus_mpa = 3500.0;
+  m.yield_strength_mpa = 55.0;
+  m.density_g_cm3 = 1.24;
+  m.z_knockdown = 1.0;
+  m.poisson = 0.33;
+  m.family = "fdm";
+  topopt::SimpParams params;
+  params.youngs_modulus = m.youngs_modulus_mpa;
+  params.poisson = m.poisson;
+  params.penalty = 3.0;
+  topopt::KnockdownSpec knockdown;
+  double solid = 0.0;
+  for (double d : density) solid += d > 0.0;
+  const topopt::FixedDesignAnalysis res = topopt::analyze_fixed_design(
+      g, params, density, bcs, loads, m, Vec3{0.0, 0.0, 1.0}, 1e-8, 20000,
+      topopt::SolverKind::MultigridCG_Matfree, 0.0, knockdown, true, solid);
+  *ok = !res.non_convergent && res.max_von_mises > 0.0 && std::isfinite(res.max_von_mises);
+  return res.max_von_mises / kPressure;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -212,6 +319,53 @@ int main(int argc, char** argv) {
       }
       std::printf("\n");
     }
+  // The ring: fills of its own closed mesh against the exact fills.
+  for (int rv : {3, 4, 5, 6}) {
+    const int w = 4 * rv + 4;
+    const double cxv = 0.5 * w + 0.29, cyv = 0.5 * w - 0.41, h = kInnerMm / rv;
+    const double ri = rv, ro = rv * kOuterMm / kInnerMm;
+    const std::size_t n = static_cast<std::size_t>(w) * w * kThickness;
+    std::vector<double> exact(n, 0.0), binary(n, 0.0);
+    for (int j = 0; j < w; ++j)
+      for (int i = 0; i < w; ++i) {
+        int in = 0;
+        for (int q = 0; q < kSub; ++q)
+          for (int p = 0; p < kSub; ++p) {
+            const double r = std::hypot(i + (p + 0.5) / kSub - cxv, j + (q + 0.5) / kSub - cyv);
+            if (r > ri && r < ro) ++in;
+          }
+        const double rc = std::hypot(i + 0.5 - cxv, j + 0.5 - cyv);
+        for (int k = 0; k < kThickness; ++k) {
+          const std::size_t v = (static_cast<std::size_t>(k) * w + j) * w + i;
+          exact[v] = static_cast<double>(in) / (kSub * kSub);
+          binary[v] = (rc > ri && rc < ro) ? 1.0 : 0.0;
+        }
+      }
+    bool ok = false;
+    const double cert = ring_peak(rv, w, cxv, cyv, exact, &ok);
+    if (!ok) ++failures;
+    const double bin = ring_peak(rv, w, cxv, cyv, binary, &ok);
+    if (!ok) ++failures;
+    std::printf("%-18s %6d %12.3f %+9.1f%%", "thick ring", rv, cert, 100.0 * (bin / cert - 1.0));
+    VoxelGrid g;
+    g.nx = w;
+    g.ny = w;
+    g.nz = kThickness;
+    g.spacing = h;
+    g.origin = Vec3{0.0, 0.0, 0.0};
+    g.tags.assign(n, topopt::VoxelTag::Empty);
+    const topopt::TriangleMesh mesh = ring_mesh(cxv * h, cyv * h, kThickness * h);
+    for (int k : kKs) {
+      const std::vector<double> fill = topopt::file_fill_fractions(mesh, g, k);
+      const double v = ring_peak(rv, w, cxv, cyv, fill, &ok);
+      if (!ok) ++failures;
+      const double off = 100.0 * (v / cert - 1.0);
+      std::printf(" %+7.1f%%", off);
+      if (gate && k == kRecheckSub && std::fabs(off) > 1.0) ++failures;
+      std::fflush(stdout);
+    }
+    std::printf("\n");
+  }
   std::printf("[one judge] %s: %d failure(s)\n", gate ? "gate" : "measure only", failures);
   return failures == 0 ? 0 : 1;
 }
