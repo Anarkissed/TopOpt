@@ -668,3 +668,12 @@ TODAY'S one-voxel reading on a beam in pure bending against the true surface str
 | 16 | 0.93 (-7 %) | 0.94 |
 
 Two parts to the miss: reading at the voxel's centre instead of at the surface (the right column: half a voxel in, 1 - 1 / n), and below about 6 voxels the solve itself falling short of even that. To be within 10 % of the surface stress today's reading needs 12 voxels through a bending member; within 20 %, 6. Stage 4 sets its number from this table; surface stress recovery would remove the first part.
+
+### One judge, evidence (b) continued: the original stand (2026-11-27 05:25, B7; res 128, PA12, drawn faces, automatic pad)
+
+| version | certificate | shown, re-check off | shown, `fill:8` |
+|---|---|---|---|
+| 0.68 | 2.587 | 2.597 | 2.444 (-5.9 %; accepted, the pass mark is 1.5) |
+
+Run 620 s against 530 s; peak 1002 MB against 987 MB. So the drop is not special to Top Motor Mount's size: on the stand it is 6 %, on Top Motor Mount 35 to 41 %. Neither is "within 1 %". Top Motor Mount has about 21 000 voxels cut by the file's surface at res 96, 7 500 of them with their centre outside the file (voxels the all-or-nothing judge does not solve at all). Its re-check with the stress field kept (heaviest version, switch off and on) is running outside the lock to show WHERE the peak sits.
+
