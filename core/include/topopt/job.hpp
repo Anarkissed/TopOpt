@@ -1080,6 +1080,14 @@ struct JobLoadCase {
   int wall_loops = 0;                        // 0 = none (no wall rescue)
   double wall_line_width_mm = -1.0;          // inner; < 0 = core default (0.45)
   double wall_line_width_outer_mm = -1.0;    // outer; < 0 = mirror inner
+  // ★ notes30 (his word 11-26: the print settings the user set travel with the part): the solid top and bottom skins
+  // the slicer lays, as the user set them at import — the layer counts and their thickness (count x layer height).
+  // Read by the TO rebuild's printed-grams figure in place of its assumed 1.0 mm top / 0.6 mm bottom. Nothing in
+  // this build reads them yet. < 0 = not stated (a job from before notes30).
+  int top_solid_layers = -1;                 // loads.top_solid_layers
+  int bottom_solid_layers = -1;              // loads.bottom_solid_layers
+  double top_solid_mm = -1.0;                // loads.top_solid_mm
+  double bottom_solid_mm = -1.0;             // loads.bottom_solid_mm
 };
 
 // An axis-aligned box in model space (mm), min <= max componentwise — a design

@@ -76,6 +76,9 @@ struct FlexibleFEView: Equatable {
     var turned = false
     /// The FE field moves the picture.
     var active: Bool { !sequence.isEmpty }
+    /// ★ notes30 FF1: the lattice generation `token` was made for (nil: no token — nothing landed for it); the page's picture
+    /// worker makes the token again with the overlay it made the meshes on.
+    var tokenGeneration: Int?
 
     static func == (a: Self, b: Self) -> Bool {
         a.token == b.token && a.sequence == b.sequence && a.pending == b.pending && a.heldByRun == b.heldByRun && a.failure == b.failure
@@ -89,8 +92,9 @@ extension FlexibleMainStage {
 
     /// The FE view of `drawn` (the lattice as the player shows it), starting its sims when they
     /// have not started (the shown sim first). Cheap: the mesh displacements are cached per
-    /// (overlay, field).
-    func feView(_ m: FlexibleStageModel, drawn: FlexibleGeneratedLattice?) -> FlexibleFEView {
+    /// (overlay, field). ★ notes30 FF1: `meshes` false (refresh's gather) — the plan only; the page's picture worker makes
+    /// the meshes and the token.
+    func feView(_ m: FlexibleStageModel, drawn: FlexibleGeneratedLattice?, meshes: Bool = true) -> FlexibleFEView {
         guard let g = drawn, !m.latticeIsStale, !controlColumnSquish else { return FlexibleFEView() }
         let groupIDs = m.squishSims.map(\.sim.id)
         // the sequence: the pick, or every group ("Play all", or one group with nothing to pick)
@@ -123,7 +127,7 @@ extension FlexibleMainStage {
         } else {
             v.fields = quick
         }
-        v.mesh = v.fields.map { feMesh(for: $0) }
+        v.mesh = meshes ? v.fields.map { feMesh(for: $0) } : []
         v.sequence = seqIDs.compactMap { id in v.fields.firstIndex { $0.simID == id } }
         v.pending = seqIDs.contains { m.squish[$0] == .pending } || unscheduled
         if v.sequence.isEmpty, !v.pending { v.failure = seqIDs.compactMap { m.squish[$0]?.failure }.first }
@@ -133,6 +137,7 @@ extension FlexibleMainStage {
         for f in v.fields { h.combine(f.serial); h.combine(f.scale) }
         h.combine(overlaySerial)
         v.token = h.finalize()
+        v.tokenGeneration = g.generation   // ★ notes30 FF1
         // ★ BATCH N VERIFICATION: what the renderer SHOWS of the sequence — a refined field whose quick one
         // is still on screen (kept beside it) is read as that quick one until the swap at rest
         v.shownSequence = v.sequence.map { i in

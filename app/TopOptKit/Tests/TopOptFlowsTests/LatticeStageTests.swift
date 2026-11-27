@@ -59,7 +59,8 @@ final class LatticeStageTests: XCTestCase {
 
     private func stageLatticeJob(_ m: AppModel) throws -> Data {
         let req = try XCTUnwrap(m.makeLatticeRunRequest())
-        let obj = try JSONSerialization.jsonObject(with: try RemoteRun.buildJobJSON(req))
+        // ★ notes30: the four solid-skin keys are the only move (Notes30PrintSettingsTests); out here, the pins guard the rest
+        let obj = Notes30PrintSkins.without(try JSONSerialization.jsonObject(with: try RemoteRun.buildJobJSON(req)))
         return try JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys])
     }
 
@@ -68,7 +69,7 @@ final class LatticeStageTests: XCTestCase {
         p.lattice.stageMode = .structural
         var out: [String: String] = [:]
         for (label, doc) in try VariantFacePrismFixture.variantDocuments(p) {
-            let obj = try JSONSerialization.jsonObject(with: doc)
+            let obj = Notes30PrintSkins.without(try JSONSerialization.jsonObject(with: doc))   // ★ notes30 (as above)
             out[label] = sha(try JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]))
         }
         return out

@@ -50,6 +50,11 @@ public struct RunRequest: Equatable, Sendable {
     public var safetyMargin: Double = SafetyMargin.defaultValue
     /// ★ EXACT PROTECT (job `keep_regions`, ProtectKeepRegions): the protected holes' and flat faces' regions. Empty ⇒ omitted.
     public var keepRegions: [KeepRegionSpec] = []
+    /// ★ notes30 (his word 11-26: the print settings he set travel with the part): the solid top and bottom shell layers from
+    /// the print settings (job `loads.top_solid_layers` / `bottom_solid_layers`, and their thickness `top_solid_mm` /
+    /// `bottom_solid_mm` = layers × `layerHeightMM`), for the TO rebuild's printed grams. AppModel.makeRunRequest sets them.
+    public var topSolidLayers: Int = PrintParams.fdmDefault.topLayers
+    public var bottomSolidLayers: Int = PrintParams.fdmDefault.bottomLayers
     /// "Minimize plastic": on → the material-reduction ladder; off → one
     /// conservative variant that just handles the forces.
     public let minimizePlastic: Bool

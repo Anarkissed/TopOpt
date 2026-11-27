@@ -496,6 +496,24 @@ public final class LatticeLayoutSession: @unchecked Sendable {
         }
     }
 
+    /// ★ notes30 (the strut lattice's scaffold, his 11-26: "open up the walls first"): the ROUGH cut-open for `s` BEFORE its
+    /// lay, for every lattice type — `gridAhead`'s map with every lattice region's "where" open, its cells not laid yet (the
+    /// exact map, made at the landing, replaces it; its edge can shift slightly where a cell is not laid). The session's domain
+    /// for `s` is made now and the lay keeps it, so the lay is the same. nil: no domain. LatticeLayoutBridge.hpp,
+    /// lattice_layout_grid_rough.
+    public func gridRough(_ s: Settings, origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>) async throws
+        -> (rg: [Int8], ms: Double)? {
+        let sid = id
+        let input = convert(s)
+        return try await worker.run {
+            var err = topoptbridge.BridgeError()
+            let r = topoptbridge.lattice_layout_grid_rough(sid, input, origin.x, origin.y, origin.z, voxel, dims.x, dims.y,
+                                                           dims.z, &err)
+            if !err.ok { throw TopOptError(message: String(err.message)) }
+            return r.supported ? (Array(r.grid.rg), r.grid.ms) : nil
+        }
+    }
+
     /// The stress result a layout grades by (core's DemandField): von Mises MPa, x fastest, on a grid whose LOW CORNER is
     /// `origin`. Kept by the session until set again (one pointer between lays: core keeps the part's own reference by
     /// it), so set it once per field, never per lay. nil clears it (no stress yet).
@@ -821,16 +839,20 @@ extension LatticeLayoutSession {
 }
 
 /// One thread with its own stack, running jobs in order. Never main.
-final class LatticeLayoutWorker: @unchecked Sendable {
+/// ★ notes30 FF1 (approved by 362 with the Flexible freeze plan): shared — the main Flexible page makes its picture on one of
+/// these too (`TopOptWorkerThread`, TopOptFlows' FlexiblePictureWorker): public, a name, and `submit` (a job with no answer).
+public typealias TopOptWorkerThread = LatticeLayoutWorker
+
+public final class LatticeLayoutWorker: @unchecked Sendable {
     private let cond = NSCondition()
     private var jobs: [() -> Void] = []
     private var stopping = false
     private(set) var thread: Thread?
 
-    init(stackSize: Int) {
+    public init(stackSize: Int, name: String = "TopOpt lattice layout") {   // ★ notes30 FF1: public, named
         let t = Thread { [self] in self.loop() }   // the thread keeps its worker until stop() lets the loop end
         t.stackSize = stackSize
-        t.name = "TopOpt lattice layout"
+        t.name = name
         t.qualityOfService = .userInitiated
         thread = t
         t.start()
@@ -861,8 +883,17 @@ final class LatticeLayoutWorker: @unchecked Sendable {
         }
     }
 
+    /// ★ notes30 FF1: a job with no answer, run after the ones already asked (dropped once stopping).
+    public func submit(_ job: @escaping () -> Void) {
+        cond.lock()
+        defer { cond.unlock() }
+        guard !stopping else { return }
+        jobs.append(job)
+        cond.signal()
+    }
+
     /// Lets the jobs already asked finish, then ends the thread.
-    func stop() {
+    public func stop() {   // ★ notes30 FF1: public
         cond.lock()
         stopping = true
         cond.signal()

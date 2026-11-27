@@ -101,7 +101,9 @@ enum ChosenExport {
 
     /// Every part's mesh, then the files into `dir`, in the lines' order. A part that can't be read stops it before any
     /// file is written.
+    /// ★ notes30 (his word 11-26): `params` — each part's print settings, written into the 3MF as that object's own.
     static func write(_ lines: [ChosenExportLine], format: ChosenExportFormat, title: String, into dir: URL,
+                      params: (ChosenExportLine) -> PrintParams? = { _ in nil },
                       mesh: (ChosenExportLine) -> Mesh?) throws -> [URL] {
         let meshes = try lines.map { l -> Mesh in
             guard let m = mesh(l) else { throw Unreadable(name: l.name, original: l.result == nil) }
@@ -124,6 +126,8 @@ enum ChosenExport {
                                                                                  indices: $1.indices) },
                                    title: title)
                 .write(to: url, options: .atomic)
+            let each = lines.map(params)   // the objects are the lines, in order
+            try ThreeMFPrintSettings.stamp(url) { $0 < each.count ? each[$0] : nil }
             return [url]
         }
     }

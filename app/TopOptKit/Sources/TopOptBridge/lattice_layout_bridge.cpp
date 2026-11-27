@@ -1149,11 +1149,17 @@ LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float ori
   return o;
 }
 
-LatticeLayoutGridAhead lattice_layout_grid_ahead(int64_t session, const LatticeLayoutSettings& settings, float origin_x,
-                                                 float origin_y, float origin_z, float voxel_mm, int32_t nx, int32_t ny,
-                                                 int32_t nz, BridgeError& err) {
+namespace {
+// The map for these settings BEFORE the lay (lattice_layout_grid's encoding), from the domain's "where" alone.
+// `every_region_open` false: lattice_layout_grid_ahead's own map (a woven region is open whatever is laid in it; any
+// other region needs its cells laid: unsupported). ★ notes30 (the strut lattice's scaffold, his 11-26 "open up the walls
+// first"): true — the ROUGH cut-open, every lattice region's "where" open, its cells not yet known (the exact map, made from
+// the laid cells, replaces it at the landing; its edge can shift slightly where a cell is not laid).
+LatticeLayoutGridAhead grid_before_lay(const char* name, int64_t session, const LatticeLayoutSettings& settings,
+                                       float origin_x, float origin_y, float origin_z, float voxel_mm, int32_t nx,
+                                       int32_t ny, int32_t nz, bool every_region_open, BridgeError& err) {
   LatticeLayoutGridAhead o;
-  const std::string why = bridge_guard_run("lattice_layout_grid_ahead", [&] {
+  const std::string why = bridge_guard_run(name, [&] {
     if (nx <= 0 || ny <= 0 || nz <= 0 || !(voxel_mm > 0.0f)) throw std::invalid_argument("lattice layout grid: an empty box");
     if (static_cast<int64_t>(nx) * ny * nz > 8'000'000) throw std::invalid_argument("lattice layout grid: too many voxels");
     const auto t0 = std::chrono::steady_clock::now();
@@ -1180,6 +1186,8 @@ LatticeLayoutGridAhead lattice_layout_grid_ahead(int64_t session, const LatticeL
             uint8_t c = 1;
             if (w.why == ll::Why::Outside) {
               c = 0;
+            } else if (w.why == ll::Why::Lattice && every_region_open) {
+              c = 2;   // ★ notes30: the rough cut-open — the lattice's "where", whatever its cells
             } else if (w.why == ll::Why::Lattice) {
               // SolidAt (bars.cpp, O1): a woven region's lattice is open; any other needs the cells laid
               const ll::Region* r = nullptr;
@@ -1227,6 +1235,21 @@ LatticeLayoutGridAhead lattice_layout_grid_ahead(int64_t session, const LatticeL
     failed(err, why);
   }
   return o;
+}
+}  // namespace
+
+LatticeLayoutGridAhead lattice_layout_grid_ahead(int64_t session, const LatticeLayoutSettings& settings, float origin_x,
+                                                 float origin_y, float origin_z, float voxel_mm, int32_t nx, int32_t ny,
+                                                 int32_t nz, BridgeError& err) {
+  return grid_before_lay("lattice_layout_grid_ahead", session, settings, origin_x, origin_y, origin_z, voxel_mm, nx, ny, nz,
+                         false, err);
+}
+
+LatticeLayoutGridAhead lattice_layout_grid_rough(int64_t session, const LatticeLayoutSettings& settings, float origin_x,
+                                                 float origin_y, float origin_z, float voxel_mm, int32_t nx, int32_t ny,
+                                                 int32_t nz, BridgeError& err) {
+  return grid_before_lay("lattice_layout_grid_rough", session, settings, origin_x, origin_y, origin_z, voxel_mm, nx, ny, nz,
+                         true, err);
 }
 
 LatticeLayoutGrowth lattice_layout_growth_read(int64_t session, int64_t from, int64_t most, BridgeError& err) {
