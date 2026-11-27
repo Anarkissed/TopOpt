@@ -132,6 +132,11 @@ add_executable(test_to_solver_connection_rule tests/unit/test_to_solver_connecti
 target_link_libraries(test_to_solver_connection_rule PRIVATE topopt)
 target_include_directories(test_to_solver_connection_rule PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 add_test(NAME to_solver_connection_rule COMMAND test_to_solver_connection_rule)
+# Stage 5: the stage-5 smoother on made-up shapes beyond his parts (block, hole, thin bracket, dilute
+# design, a loaded piece cut loose): multigrid, no l1 retry, within a cycle budget; the cut-off load refused.
+add_executable(test_to_solver_shapes tests/unit/test_to_solver_shapes.cpp)
+target_link_libraries(test_to_solver_shapes PRIVATE topopt)
+add_test(NAME to_solver_shapes COMMAND test_to_solver_shapes)
 
 # Stage 1, M6 (LatticeReview for TOReview): on the strength grid, the protected skin against the lattice cubes, the
 # switch off and `face` (jobs A and B as test_to_stage1_lattice_check makes them). Prints the counts, pins nothing.
