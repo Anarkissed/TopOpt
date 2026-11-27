@@ -400,3 +400,16 @@ Test `to_strength_across_layers`: the plate with a round hole with the layers st
 | over 4.00 voxels | -0.6 % | +1.5 % | +4.0 % | +3.9 % | inside |
 
 Read plainly: the across-layer reading over a size behaves like the in-plane one (which read -4.9 % at the same point) and is inside the bar at 19 of 20 points; at 2.0 voxels across on the coarsest grid, where the hole is only 3 voxels in radius, it is 5.4 % low against a 5 % bar. Not hidden and not tuned away: for the reviewer to rule (accept at a hole of 3 voxels' radius, or ask for a margin on the across-layer reading). Committed as measured, measure-only in ctest.
+
+### The across-layer reading in a job (2026-11-26 19:43, build f7287eca): the bracket again, size forced to 3.6 mm
+
+Shown margin and printed grams per version, the same job three ways (res 64, drawn faces, automatic pad, one thread):
+
+| version | one-voxel form | over 3.6 mm, in-plane only (17:22) | over 3.6 mm, across the layers too |
+|---|---|---|---|
+| 0.68 | 5.285, 101.1 g | 6.617, 101.1 g | 6.617, 101.1 g |
+| 0.52 | 5.293, 84.8 g | 6.626, 84.8 g | 6.626, 84.8 g |
+| 0.38 | 4.851, 69.5 g | 5.773, 69.5 g | 6.362, 69.4 g |
+| 0.26 | 3.661, 53.1 g | 3.661, 53.1 g | 3.976, 53.1 g |
+
+The two heavier versions are decided in-plane and do not move. The lightest, decided across the layers, moves from 3.661 to 3.976 (+8.6 %) now that its check is averaged too; the 0.38 version, where the two checks are close (16.4 against 16.3 in the report), moves with it. The designs differ by a few hundredths of a gram at 0.38 and 0.26: the loop's own margin probes read the new number, so its path shifts very slightly. Runs rc 0, 912 s.
