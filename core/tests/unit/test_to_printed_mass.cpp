@@ -123,6 +123,38 @@ int main() {
                 "with the edge rule %.2f\n", inside, edge);
     CHECK(std::fabs(inside - 10.0) < 1e-9);
     CHECK(edge > 10.5 && edge < 30.0);
+    // THE SURFACE-NODE BALL: counted only where the surface lies on voxel boundaries.
+    // (a) A full block (the 10 x 10 x 10 grid, every voxel full, stress rising with
+    //     x): its faces are all on voxel boundaries, so the +x face's nodes read;
+    //     the node ball there sits ON the face and reads above the voxel-centred one.
+    {
+      std::vector<double> ramp(1000, 0.0);
+      for (int k = 0; k < 10; ++k)
+        for (int j = 0; j < 10; ++j)
+          for (int i = 0; i < 10; ++i)
+            ramp[(static_cast<std::size_t>(k) * 10 + j) * 10 + i] = 10.0 * (i + 0.5);
+      const std::vector<double> on = stress_over_size_on_surface(g, ramp, full, kStressMaterialFloor, 8.0);
+      const std::vector<double> at = stress_over_size(g, ramp, full, kStressMaterialFloor, 8.0);
+      const std::size_t face = (static_cast<std::size_t>(5) * 10 + 5) * 10 + 9;   // a voxel on the +x face
+      const std::size_t deep = (static_cast<std::size_t>(5) * 10 + 5) * 10 + 5;   // a voxel in the middle
+      std::printf("[surface node] a ramp to 95 at the +x face, read over 8 mm (4 voxels): voxel-centred %.2f, on the face %.2f\n",
+                  at[face], on[face]);
+      CHECK(on[face] > at[face] && on[face] < 95.0);
+      CHECK(on[deep] == 0.0);  // no surface node touches an inner voxel
+      CHECK(peak_stress_over_size_edge_and_surface(g, ramp, full, kStressMaterialFloor, 8.0) == on[face] ||
+            peak_stress_over_size_edge_and_surface(g, ramp, full, kStressMaterialFloor, 8.0) > at[face]);
+    }
+    // (b) The wall with a CUT layer on its face (fill 0.3, above): every surface
+    //     node there touches a cut voxel, so none counts; the voxel-centred ball on
+    //     the cut layer is the one that sits on the edge.
+    {
+      const std::vector<double> on = stress_over_size_on_surface(g, s, fill, kStressMaterialFloor, 6.0);
+      const std::size_t cut_voxel = (static_cast<std::size_t>(5) * 10 + 5) * 10 + 5;
+      const std::size_t behind = (static_cast<std::size_t>(5) * 10 + 5) * 10 + 4;
+      CHECK(on[cut_voxel] == 0.0 && on[behind] == 0.0);
+    }
+    // A ball that does not reach past a voxel reads nothing on the surface.
+    for (double v : stress_over_size_on_surface(g, s, fill, kStressMaterialFloor, 1.0)) CHECK(v == 0.0);
     // A voxel under the material floor is air to both.
     fill[5] = 0.01;
     CHECK(stress_over_size(g, s, fill, kStressMaterialFloor, 6.0)[5] == 0.0);

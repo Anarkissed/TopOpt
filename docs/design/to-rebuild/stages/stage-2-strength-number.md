@@ -615,3 +615,18 @@ With that, all four tests on one build:
 | across the layers (plate 8 voxels thick, through analyze) | 1.75: +2.4 to +8.0; 2.00: -0.2 to +7.0; 2.50: -1.0 to +6.8; 3.00: +0.7 to +8.2; 4.00: +1.3 to +6.9 |
 
 So: the switch point of 1.75 voxels stands (every figure on the curved shapes between -4.9 and +8.2 % from there up, none more than 5 % low), the flat-face miss is cured (-11.2 % became -4.9 %), and the thin-member rule falls back where ruled. The two thin margins, said again: -4.9 % at 2.0 voxels across on the coarsest plate, and -4.9 % on the beam at twice the size. Owed: the 15 mm part restated with all of this (needs a CLI from this tip; after B7).
+
+### THE 15 mm PART RESTATED (2026-11-27 03:56, build eb126ecf: the thin-member rule, the surface-node ball, the corner-aware width)
+
+The sample bracket at 15 % size, res 48 (voxel 0.31 mm), PLA's own size 1.2 mm (3.8 voxels), drawn faces, automatic pad, one thread. Shown margin:
+
+| version | switch off | size, as first measured (11-26, no thin-member rule) | size, as ruled (now) | now against off |
+|---|---|---|---|---|
+| 0.68 | 6.50 | 8.65 | 8.20 | +26 % |
+| 0.52 | 6.51 | 8.65 | 8.20 | +26 % |
+| 0.38 | 5.25 | 7.87 | 6.64 | +26 % |
+| 0.26 | 4.24 | 5.97 | 6.03 | +42 % |
+
+So the "33 to 41 %" becomes 26 % on the three heavier versions (their thin sections now keep today's reading) and 42 % on the lightest, whose deciding spot is in a section thick enough to be read over the size. Cost with the second solve: 576 s against 631 s with the switch off (no slower on this job); peak memory 174 MB. Rests, as before, on the published length halved by his rule; his print replaces it when the rig exists (the reviewer's ruling: ship on the published value).
+
+Unit checks for the surface-node ball (`test_to_printed_mass`, 0 failures): on a full block with stress rising to 95 at a face, the voxel-centred ball over 4 voxels reads 89.76 and the ball on the face 91.90; where the face carries a cut layer no surface node counts; a ball under one voxel reads nothing on the surface.
