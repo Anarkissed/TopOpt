@@ -55,6 +55,10 @@ std::vector<double> g_switch_readings;
 // edges masked, and its unresolved count. Filled by peak_ratio.
 double g_engine_carry = 0.0;
 std::size_t g_engine_unresolved = 0;
+// The curvature-shaped carry (shape 1) over the reference stress, its curved points and
+// how many of those were read as concave (the centre of curvature in the air).
+double g_carry2 = 0.0;
+std::size_t g_carry2_curved = 0, g_carry2_concave = 0, g_carry2_tight = 0, g_carry2_capped = 0;
 // The patch recovery (stress_recovered_at_surface) over the far stress, the loaded
 // edges masked the same way, at patch radius 2.5 and 3.5 voxels, and its unresolved counts.
 double g_patch[2] = {0.0, 0.0};
@@ -198,6 +202,12 @@ double peak_ratio(int radius_voxels, bool exact_fill, double penalty, bool* ok,
     const topopt::SurfaceCarry sc = topopt::stress_carried_to_surface(g, f, density);
     g_engine_carry = sc.peak / kFarStress;
     g_engine_unresolved = sc.unresolved;
+    const topopt::SurfaceCarry sc2 = topopt::stress_carried_to_surface(g, f, density, 1);
+    g_carry2 = sc2.peak / kFarStress;
+    g_carry2_curved = sc2.curved_points;
+    g_carry2_concave = sc2.curved_concave;
+    g_carry2_tight = sc2.tight_points;
+    g_carry2_capped = sc2.capped_points;
   }
   g_patch[0] = g_patch[1] = 0.0;
   g_patch_unresolved[0] = g_patch_unresolved[1] = 0;
@@ -250,6 +260,9 @@ int main(int argc, char** argv) {
     row.ratio_fill_linear = peak_ratio(r, true, 1.0, &ok3, row.over_size);
     const double engine_carry = g_engine_carry;
     const std::size_t engine_unresolved = g_engine_unresolved;
+    const double carry2 = g_carry2;
+    const std::size_t carry2_curved = g_carry2_curved, carry2_concave = g_carry2_concave,
+                      carry2_tight = g_carry2_tight, carry2_capped = g_carry2_capped;
     const double patch[2] = {g_patch[0], g_patch[1]};
     const std::size_t patch_unresolved[2] = {g_patch_unresolved[0], g_patch_unresolved[1]};
     const double quad[2] = {g_quad[0], g_quad[1]};
@@ -261,6 +274,10 @@ int main(int argc, char** argv) {
                 row.over_size[0], row.over_size[1], row.over_size[2]);
     std::printf("[carry] hole radius %d voxels: ENGINE carry (E x fill), percent against the textbook %+.1f, unresolved %zu\n",
                 r, 100.0 * (engine_carry / kTextbook - 1.0), engine_unresolved);
+    std::printf("[carry2] hole radius %d voxels: curvature-shaped carry (E x fill), percent against the textbook %+.1f "
+                "(straight line %+.1f), curved points %zu, of them concave %zu, tight %zu, capped %zu\n",
+                r, 100.0 * (carry2 / kTextbook - 1.0), 100.0 * (engine_carry / kTextbook - 1.0),
+                carry2_curved, carry2_concave, carry2_tight, carry2_capped);
     std::printf("[patch] hole radius %d voxels: tensor patch recovery (E x fill), percent against the textbook: "
                 "radius 2.5: %+.1f %%, unresolved %zu; radius 3.5: %+.1f %%, unresolved %zu\n",
                 r, 100.0 * (patch[0] / kTextbook - 1.0), patch_unresolved[0],

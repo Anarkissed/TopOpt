@@ -52,7 +52,8 @@ struct Out {
   // The patch recovery of the tensor (stress_recovered_at_surface), mid-span only, at
   // patch radius 2.5 and 3.5 voxels, / true surface stress.
   double patch25 = 0.0, patch35 = 0.0;
-  double quad35 = 0.0, quad45 = 0.0;  // the quadratic patch (order 2) at radius 3.5 and 4.5
+  double quad35 = 0.0, quad45 = 0.0;
+  double carry2 = 0.0;  // the curvature-shaped carry (shape 1)  // the quadratic patch (order 2) at radius 3.5 and 4.5
   bool ok = false;
 };
 
@@ -167,6 +168,7 @@ Out bend(int core, double fill, double skin_density, double penalty) {
     const topopt::SurfaceCarry sc = topopt::stress_carried_to_surface(g, mid_field, density);
     o.engine_carry = sc.peak / surface;
     o.engine_unresolved = sc.unresolved;
+    o.carry2 = topopt::stress_carried_to_surface(g, mid_field, density, 1).peak / surface;
   }
   if (res.stress_tensor_field.size() == 6 * n) {
     std::vector<double> mid_tensor = res.stress_tensor_field;  // the same mask as the carry
@@ -206,10 +208,10 @@ int main() {
           continue;
         }
         std::printf("[cut skin]   %s  curvature %.3f (%+.0f %%)   peak %.3f (%+.0f %%)   material-stress peak %.3f   "
-                    "carried to the true surface %.3f (%+.0f %%)   engine carry %.3f (%+.0f %%), unresolved %zu   patch2.5 %.3f, patch3.5 %.3f   patch2 3.5 %.3f, 4.5 %.3f\n",
+                    "carried to the true surface %.3f (%+.0f %%)   engine carry %.3f (%+.0f %%), unresolved %zu   patch2.5 %.3f, patch3.5 %.3f   patch2 3.5 %.3f, 4.5 %.3f   carry2 %.3f\n",
                     md.name, o.curvature, 100.0 * (o.curvature - 1.0), o.peak, 100.0 * (o.peak - 1.0),
                     o.peak_material, o.at_surface, 100.0 * (o.at_surface - 1.0), o.engine_carry,
-                    100.0 * (o.engine_carry - 1.0), o.engine_unresolved, o.patch25, o.patch35, o.quad35, o.quad45);
+                    100.0 * (o.engine_carry - 1.0), o.engine_unresolved, o.patch25, o.patch35, o.quad35, o.quad45, o.carry2);
         std::fflush(stdout);
       }
     }

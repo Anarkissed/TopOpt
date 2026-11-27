@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <unordered_map>
 
 #include <Eigen/Dense>
 
@@ -264,10 +265,165 @@ double von_mises6(const double* s) {
 }  // namespace
 
 SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<double>& field,
-                                       const std::vector<double>& density) {
+                                       const std::vector<double>& density, int shape) {
   const std::size_t n = grid.voxel_count();
   if (field.size() != n || density.size() != n)
     throw std::invalid_argument("stress_carried_to_surface: field / density size != voxel_count");
+  if (shape != 0 && shape != 1)
+    throw std::invalid_argument("stress_carried_to_surface: shape must be 0 or 1");
+  // SHAPE 1: the true-surface positions of every CUT-face point, bucketed in cells of
+  // three voxels, for the curvature fit below.
+  struct CutPoint {
+    double x[3];
+    double n[3];
+  };
+  std::vector<CutPoint> cut_points;
+  std::unordered_map<long long, std::vector<std::size_t>> buckets;
+  constexpr double kCurvReach = 3.0;  // voxels
+  auto bucket_key = [](long long a, long long b, long long c) {
+    return (a + 100000) * 400000000LL + (b + 100000) * 200000LL + (c + 100000);
+  };
+  if (shape == 1)
+    for_each_surface_point(
+        grid, density, [](std::size_t) {},
+        [&](int i, int j, int k, std::size_t v, const double* nv, double t_surf) {
+          if (density[v] >= kFullVoxel) return;  // flat faces of full voxels
+          CutPoint cp{{i + 0.5 + t_surf * nv[0], j + 0.5 + t_surf * nv[1], k + 0.5 + t_surf * nv[2]},
+                      {nv[0], nv[1], nv[2]}};
+          const long long key = bucket_key(static_cast<long long>(std::floor(cp.x[0] / kCurvReach)),
+                                           static_cast<long long>(std::floor(cp.x[1] / kCurvReach)),
+                                           static_cast<long long>(std::floor(cp.x[2] / kCurvReach)));
+          buckets[key].push_back(cut_points.size());
+          cut_points.push_back(cp);
+        },
+        [](std::size_t) {});
+  // The signed principal curvature (larger magnitude) of the surface at xs with outward
+  // normal nv, per voxel; 0 when it cannot be fitted (taken as flat).
+  // SIGN CONVENTION: h is the height of the neighbouring surface points along the
+  // OUTWARD normal n. Where the centre of curvature lies in the AIR (a hole, a fillet:
+  // the material surface is concave) the surface rises toward +n away from the point,
+  // so h grows with u^2 and k > 0. Where it lies in the MATERIAL (a boss, an outer
+  // round: convex) h falls and k < 0.
+  auto curvature_at = [&](const double* xs, const double* nv) {
+    int e = 0;
+    for (int ax = 1; ax < 3; ++ax)
+      if (std::fabs(nv[ax]) < std::fabs(nv[e])) e = ax;
+    double u[3] = {0.0, 0.0, 0.0};
+    u[e] = 1.0;
+    const double un = u[0] * nv[0] + u[1] * nv[1] + u[2] * nv[2];
+    for (int ax = 0; ax < 3; ++ax) u[ax] -= un * nv[ax];
+    const double ul = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+    for (int ax = 0; ax < 3; ++ax) u[ax] /= ul;
+    const double w[3] = {nv[1] * u[2] - nv[2] * u[1], nv[2] * u[0] - nv[0] * u[2],
+                         nv[0] * u[1] - nv[1] * u[0]};
+    std::vector<std::array<double, 3>> local;  // (u, v, h)
+    const long long ca = static_cast<long long>(std::floor(xs[0] / kCurvReach));
+    const long long cb = static_cast<long long>(std::floor(xs[1] / kCurvReach));
+    const long long cc = static_cast<long long>(std::floor(xs[2] / kCurvReach));
+    for (long long dc = -1; dc <= 1; ++dc)
+      for (long long db = -1; db <= 1; ++db)
+        for (long long da = -1; da <= 1; ++da) {
+          const auto it = buckets.find(bucket_key(ca + da, cb + db, cc + dc));
+          if (it == buckets.end()) continue;
+          for (std::size_t q : it->second) {
+            const double d[3] = {cut_points[q].x[0] - xs[0], cut_points[q].x[1] - xs[1],
+                                 cut_points[q].x[2] - xs[2]};
+            if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > kCurvReach * kCurvReach) continue;
+            local.push_back({d[0] * u[0] + d[1] * u[1] + d[2] * u[2],
+                             d[0] * w[0] + d[1] * w[1] + d[2] * w[2],
+                             d[0] * nv[0] + d[1] * nv[1] + d[2] * nv[2]});
+          }
+        }
+    if (local.size() < 8) return 0.0;
+    // A tangent direction in which the points take fewer than 3 distinct values (a part
+    // two voxels thick) cannot tell its square from a constant and a slope: that
+    // curvature term is left out (read as 0).
+    auto distinct = [&](int c) {
+      std::vector<double> vals;
+      for (const auto& p : local) vals.push_back(p[c]);
+      std::sort(vals.begin(), vals.end());
+      int cnt = 1;
+      for (std::size_t q = 1; q < vals.size(); ++q)
+        if (vals[q] - vals[q - 1] > 1e-3) ++cnt;
+      return cnt;
+    };
+    const bool use_uu = distinct(0) >= 3, use_vv = distinct(1) >= 3;
+    // terms: 1, u, v, u^2/2, u v, v^2/2 (the squares only where identifiable)
+    int terms[6];
+    int nt = 0;
+    for (int t = 0; t < 3; ++t) terms[nt++] = t;
+    if (use_uu) terms[nt++] = 3;
+    terms[nt++] = 4;
+    if (use_vv) terms[nt++] = 5;
+    auto tv = [](int t, const std::array<double, 3>& p) {
+      switch (t) {
+        case 0: return 1.0;
+        case 1: return p[0];
+        case 2: return p[1];
+        case 3: return 0.5 * p[0] * p[0];
+        case 4: return p[0] * p[1];
+        default: return 0.5 * p[1] * p[1];
+      }
+    };
+    Eigen::MatrixXd M = Eigen::MatrixXd::Zero(nt, nt);
+    Eigen::VectorXd rhs = Eigen::VectorXd::Zero(nt), phi(nt);
+    for (const auto& p : local) {
+      for (int q = 0; q < nt; ++q) phi(q) = tv(terms[q], p);
+      M.noalias() += phi * phi.transpose();
+      rhs += phi * p[2];
+    }
+    const double count = static_cast<double>(local.size());
+    const Eigen::VectorXd mean = M.block(1, 0, nt - 1, 1) / count;
+    const Eigen::MatrixXd scatter = M.block(1, 1, nt - 1, nt - 1) / count - mean * mean.transpose();
+    const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(scatter, Eigen::EigenvaluesOnly);
+    if (!(es.eigenvalues()(0) >= 0.01)) return 0.0;
+    const Eigen::VectorXd coef = M.ldlt().solve(rhs);
+    double a = 0.0, b = 0.0, c = 0.0;
+    for (int q = 0; q < nt; ++q) {
+      if (terms[q] == 3) a = coef(q);
+      if (terms[q] == 4) b = coef(q);
+      if (terms[q] == 5) c = coef(q);
+    }
+    // eigenvalues of [[a, b], [b, c]]; the one of larger magnitude
+    const double mid = 0.5 * (a + c), rad = std::sqrt(0.25 * (a - c) * (a - c) + b * b);
+    const double k1 = mid + rad, k2 = mid - rad;
+    const double k = std::fabs(k1) >= std::fabs(k2) ? k1 : k2;
+    return std::isfinite(k) ? k : 0.0;
+  };
+  // The curvature of every cut-face point, then each replaced by the MEDIAN of the
+  // values within 2 voxels of it (itself included): one point's fit is too noisy.
+  std::vector<double> smoothed_k;
+  if (shape == 1) {
+    std::vector<double> raw_k(cut_points.size(), 0.0);
+    for (std::size_t q = 0; q < cut_points.size(); ++q)
+      raw_k[q] = curvature_at(cut_points[q].x, cut_points[q].n);
+    smoothed_k.assign(cut_points.size(), 0.0);
+    std::vector<double> near;
+    for (std::size_t q = 0; q < cut_points.size(); ++q) {
+      const double* xs = cut_points[q].x;
+      near.clear();
+      const long long ca = static_cast<long long>(std::floor(xs[0] / kCurvReach));
+      const long long cb = static_cast<long long>(std::floor(xs[1] / kCurvReach));
+      const long long cc = static_cast<long long>(std::floor(xs[2] / kCurvReach));
+      for (long long dc = -1; dc <= 1; ++dc)
+        for (long long db = -1; db <= 1; ++db)
+          for (long long da = -1; da <= 1; ++da) {
+            const auto it = buckets.find(bucket_key(ca + da, cb + db, cc + dc));
+            if (it == buckets.end()) continue;
+            for (std::size_t o : it->second) {
+              const double d[3] = {cut_points[o].x[0] - xs[0], cut_points[o].x[1] - xs[1],
+                                   cut_points[o].x[2] - xs[2]};
+              if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= 4.0) near.push_back(raw_k[o]);
+            }
+          }
+      std::sort(near.begin(), near.end());
+      const std::size_t h = near.size() / 2;
+      smoothed_k[q] = near.empty() ? 0.0
+                      : near.size() % 2 == 1 ? near[h]
+                                             : 0.5 * (near[h - 1] + near[h]);
+    }
+  }
+  std::size_t cut_counter = 0;  // cut-face points come in the same order as cut_points
   auto full = [&](int i, int j, int k) {
     if (i < 0 || j < 0 || k < 0 || i >= grid.nx || j >= grid.ny || k >= grid.nz) return false;
     const std::size_t v = grid.index(i, j, k);
@@ -278,6 +434,18 @@ SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<
   // carry along a unit normal nv with the surface t_surf voxels out from the centre
   auto carry = [&](int i, int j, int k, std::size_t v, const double* nv, double t_surf) {
     const double c[3] = {i + 0.5, j + 0.5, k + 0.5};
+    const bool is_cut = density[v] < kFullVoxel;
+    // SHAPE 1 uses the curved form only where the surface is CONCAVE (k > 0: the centre
+    // of curvature in the air) with 2.5 <= R <= 40 voxels; under 2.5 it is a stress
+    // raiser too tight for the grid (counted, straight line).
+    double R_curved = 0.0;
+    if (shape == 1 && is_cut) {
+      const double kc = smoothed_k[cut_counter++];
+      if (kc >= 1.0 / 40.0) {
+        if (1.0 / kc < 2.5) ++out.tight_points;
+        else R_curved = 1.0 / kc;
+      }
+    }
     bool have_a = false, have_b = false;
     std::size_t va = 0, vb = 0;
     double s_a = 0.0, s_b = 0.0;
@@ -305,6 +473,26 @@ SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<
     if (have_b) {
       double carried = field[va] + (field[va] - field[vb]) * (t_surf - s_a) / (s_a - s_b);
       if (carried < 0.0) carried = 0.0;
+      if (R_curved > 0.0) {
+        // CURVATURE-SHAPED: through the two voxels with A + B / r^2, r = R + depth from
+        // the centre of curvature (in the air), read at r = R.
+        const double R = R_curved;
+        const double ra = R + (t_surf - s_a), rb = R + (t_surf - s_b);
+        const double ia = 1.0 / (ra * ra), ib = 1.0 / (rb * rb);
+        const double B = (field[va] - field[vb]) / (ia - ib);
+        const double A = field[va] - B * ia;
+        double curved = A + B / (R * R);
+        if (curved < 0.0) curved = 0.0;
+        if (std::isfinite(curved)) {
+          if (curved > 1.5 * carried) {  // at most +50 % on the straight line
+            curved = 1.5 * carried;
+            ++out.capped_points;
+          }
+          carried = curved;
+          ++out.curved_points;
+          ++out.curved_concave;
+        }
+      }
       ++out.surface_points;
       out.peak = std::max(out.peak, carried);
     } else {

@@ -117,9 +117,19 @@ struct SurfaceCarry {
   std::size_t surface_points = 0;    // surface voxels where the carry was made
   std::size_t unresolved = 0;        // surface voxels with fewer than two full voxels behind them along the normal
   double peak_unresolved = 0.0;      // the largest fallback value among those
+  std::size_t curved_points = 0;     // shape 1: cut-face points carried by the curvature-shaped form
+  std::size_t curved_concave = 0;    // of those, the ones whose centre of curvature lies in the air
+  std::size_t tight_points = 0;      // shape 1: concave cut-face points with R < 2.5 voxels (a stress raiser too tight for the grid)
+  std::size_t capped_points = 0;     // shape 1: curved readings capped at 1.5 x the straight line
 };
+// `shape` 0: the straight line above. 1: CURVATURE-SHAPED at CONCAVE cut-face points only
+// (flat faces and convex points keep the line): the surface's curvature fitted from the
+// cut-face points within 3 voxels, median-smoothed over 2 voxels, and the two voxels'
+// stress carried with A + B / r^2, r from the centre of curvature (Kirsch-like). R over
+// 40 voxels is flat; R under 2.5 keeps the line and counts as `tight_points`; a curved
+// reading over 1.5 x the straight line is capped there (`capped_points`).
 SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<double>& field,
-                                       const std::vector<double>& density);
+                                       const std::vector<double>& density, int shape = 0);
 
 // THE STRESS AT THE TRUE SURFACE, by a patch recovery of the stress TENSOR (second
 // candidate, measured in the tests' `[patch]` rows; the engine does not call it).

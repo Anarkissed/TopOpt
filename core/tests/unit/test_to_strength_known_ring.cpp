@@ -89,6 +89,10 @@ double g_carry_line = 0.0, g_carry_curve = 0.0;
 // The engine's carry (stress_carried_to_surface) over the pressure, and its unresolved count.
 double g_engine_carry = 0.0;
 std::size_t g_engine_unresolved = 0;
+// The curvature-shaped carry (shape 1) over the reference stress, its curved points and
+// how many of those were read as concave (the centre of curvature in the air).
+double g_carry2 = 0.0;
+std::size_t g_carry2_curved = 0, g_carry2_concave = 0, g_carry2_tight = 0, g_carry2_capped = 0;
 // The patch recovery (stress_recovered_at_surface, the bore marked loaded) over the
 // pressure at patch radius 2.5 and 3.5 voxels, and its unresolved counts.
 double g_patch[2] = {0.0, 0.0};
@@ -241,6 +245,12 @@ double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* are
         topopt::stress_carried_to_surface(g, res.von_mises_material_field, density);
     g_engine_carry = sc.peak / kPressure;
     g_engine_unresolved = sc.unresolved;
+    const topopt::SurfaceCarry sc2 = topopt::stress_carried_to_surface(g, res.von_mises_material_field, density, 1);
+    g_carry2 = sc2.peak / kPressure;
+    g_carry2_curved = sc2.curved_points;
+    g_carry2_concave = sc2.curved_concave;
+    g_carry2_tight = sc2.tight_points;
+    g_carry2_capped = sc2.capped_points;
   }
   g_patch[0] = g_patch[1] = 0.0;
   g_patch_unresolved[0] = g_patch_unresolved[1] = 0;
@@ -306,6 +316,10 @@ int main(int argc, char** argv) {
                 100.0 * (cc_line / kTextbook - 1.0), 100.0 * (cc_curve / kTextbook - 1.0),
                 100.0 * (g_carry_line / kTextbook - 1.0), 100.0 * (g_carry_curve / kTextbook - 1.0),
                 100.0 * (g_engine_carry / kTextbook - 1.0), g_engine_unresolved);
+    std::printf("[carry2] inner radius %d voxels: curvature-shaped carry (E x fill), percent against the textbook %+.1f "
+                "(straight line %+.1f), curved points %zu, of them concave %zu, tight %zu, capped %zu\n",
+                r, 100.0 * (g_carry2 / kTextbook - 1.0), 100.0 * (g_engine_carry / kTextbook - 1.0),
+                g_carry2_curved, g_carry2_concave, g_carry2_tight, g_carry2_capped);
     std::printf("[patch] inner radius %d voxels: tensor patch recovery (E x fill, bore loaded), percent against the textbook: "
                 "radius 2.5: %+.1f %%, unresolved %zu; radius 3.5: %+.1f %%, unresolved %zu\n",
                 r, 100.0 * (g_patch[0] / kTextbook - 1.0), g_patch_unresolved[0],

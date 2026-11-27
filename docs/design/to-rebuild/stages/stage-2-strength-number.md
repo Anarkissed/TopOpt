@@ -899,3 +899,19 @@ The exact hoop stress beside a round hole (Kirsch: 1 + a^2 / 2 r^2 + 3 a^4 / 2 r
 
 Reading it: the engine's measured row (-29 / -14 / -14 / -9 % at 3 to 6) lies between the two straight-line columns, so the measured miss IS the straight line's, as the research said. For the straight-line carry a hole is "resolved" (inside 5 %) from about 8 to 12 voxels of radius, depending on how deep its two full voxels sit. A carry of the shape A + B / r^2, with r measured from the surface's centre of curvature (exact for a pressurised ring, and the leading term beside any hole), halves the miss and brings the limit down to about 4 to 7 voxels. So the next form to build and measure is that one: the same function, the surface's radius of curvature from the fills, the two full voxels fitted to A + B / r^2 (falling back to the straight line where the surface is flat). The limit A-08 then reads "under about 4 voxels of radius", and what is under it goes to the size form.
 
+### Candidate one with a CURVATURE-SHAPED carry (`shape = 1` of `stress_carried_to_surface`): 2026-11-27 14:30, two builds
+
+The surface's curvature from the true-surface positions of the nearby cut-face points (a quadric fit in the tangent frame, the median over 2 voxels); only on CONCAVE surfaces; the two full voxels fitted to A + B / r^2, r from the centre of curvature; a radius under 2.5 voxels is counted `tight_points` and kept on the straight line (the detection ledger A-08 asks for); never above 1.5 x the straight line (never fired). The first build, without those limits, read the ring +46 / +16 / +72 / +8 %. Percent against exact, real stiffness; (T n) = tight points:
+
+| shape | 3 | 4 | 5 | 6 | straight line, for comparison |
+|---|---|---|---|---|---|
+| plate, round hole (held out), radius | -28.9 (T 22: tight, straight line) | +3.2 | -4.2 | -1.0 | -28.9 / -13.8 / -14.4 / -9.1 |
+| ellipse (held out), E x fill, b | -37.2 (T 12) | -36.7 (T 18) | -11.0 | -5.5 | -37.2 / -36.7 / -34.7 / -15.3 |
+| ring, pressure ON the bore, bore | +19.3 (T 32) | +14.3 | +24.2 | +19.2 | -13.0 / -4.9 / -4.3 / +1.3 |
+| cut-skin beam | the straight line's values (flat) | | | | |
+
+READING IT.
+- FREE concave surfaces: the held-out plate is inside 5 % from a hole radius of 4 voxels (+3.2 / -4.2 / -1.0), where the straight line was 9 to 14 % low. The ellipse's tip is tight (straight line, flagged) at b = 3 and 4 and reads -11 and -5.5 % at tip radii of 2.5 and 3 voxels. So on free surfaces the form meets the bar from about 4 voxels of radius, nearly at 3, and says "tight" below 2.5.
+- The LOADED bore of the ring reads 14 to 24 % HIGH. Arithmetic on the exact ring field (Lamé, von Mises) says a perfect solve carried this way reads within 1.3 %, and carried in a straight line reads 4 to 12 % LOW (at samples 0.5 and 1.5 voxels in). The measured straight line read only -4.9 to +1.3 %: so the SOLVE'S stress in the first full voxels behind a loaded cut face is itself too high and too steep, the straight line was hiding it by cancelling, and the better carry shows it. It is the loaded cut face again (ledger A-01's family): the fault is in how the load meets the cut voxels in the solve, not in the carry.
+NEXT: the curved form on FREE surfaces only (a surface voxel tagged Load keeps the straight line, which is the measured best there), then the pair on all five shapes is the candidate to put to the reviewer; the loaded cut face is its own item (the direction-aware cut-voxel stiffness from the research is the lead).
+

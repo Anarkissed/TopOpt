@@ -82,6 +82,10 @@ double g_carry_line = 0.0, g_carry_curve = 0.0;
 // edges masked, and its unresolved count. Filled by peak_ratio.
 double g_engine_carry = 0.0;
 std::size_t g_engine_unresolved = 0;
+// The curvature-shaped carry (shape 1) over the reference stress, its curved points and
+// how many of those were read as concave (the centre of curvature in the air).
+double g_carry2 = 0.0;
+std::size_t g_carry2_curved = 0, g_carry2_concave = 0, g_carry2_tight = 0, g_carry2_capped = 0;
 // The patch recovery (stress_recovered_at_surface) over the far stress, the loaded
 // edges masked the same way, at patch radius 2.5 and 3.5 voxels, and its unresolved counts.
 double g_patch[2] = {0.0, 0.0};
@@ -206,6 +210,12 @@ double peak_ratio(int b_voxels, double penalty, bool* ok) {
     const topopt::SurfaceCarry sc = topopt::stress_carried_to_surface(g, f, density);
     g_engine_carry = sc.peak / kFarStress;
     g_engine_unresolved = sc.unresolved;
+    const topopt::SurfaceCarry sc2 = topopt::stress_carried_to_surface(g, f, density, 1);
+    g_carry2 = sc2.peak / kFarStress;
+    g_carry2_curved = sc2.curved_points;
+    g_carry2_concave = sc2.curved_concave;
+    g_carry2_tight = sc2.tight_points;
+    g_carry2_capped = sc2.capped_points;
   }
   g_patch[0] = g_patch[1] = 0.0;
   g_patch_unresolved[0] = g_patch_unresolved[1] = 0;
@@ -256,6 +266,9 @@ int main(int argc, char** argv) {
   double patch[2][3][4] = {};
   std::size_t patch_unresolved[2][3][4] = {};
   double quad[2][3][4] = {};
+  double carry2[3][4] = {};
+  std::size_t carry2_curved[3][4] = {}, carry2_concave[3][4] = {}, carry2_tight[3][4] = {},
+              carry2_capped[3][4] = {};
   std::size_t quad_unresolved[2][3][4] = {}, quad_dropped[2][3][4] = {};
   for (int p = 0; p < 3; ++p) {
     std::printf("%-20s", kName[p]);
@@ -273,6 +286,11 @@ int main(int argc, char** argv) {
       carry_curve[p][bi] = g_carry_curve;
       engine_carry[p][bi] = g_engine_carry;
       engine_unresolved[p][bi] = g_engine_unresolved;
+      carry2[p][bi] = g_carry2;
+      carry2_curved[p][bi] = g_carry2_curved;
+      carry2_concave[p][bi] = g_carry2_concave;
+      carry2_tight[p][bi] = g_carry2_tight;
+      carry2_capped[p][bi] = g_carry2_capped;
       for (int q = 0; q < 2; ++q) {
         patch[q][p][bi] = g_patch[q];
         patch_unresolved[q][p][bi] = g_patch_unresolved[q];
@@ -295,6 +313,12 @@ int main(int argc, char** argv) {
     for (int q = 0; q < 4; ++q)
       std::printf("  %+.1f (unresolved %zu)", 100.0 * (engine_carry[p][q] / kReference - 1.0),
                   engine_unresolved[p][q]);
+    std::printf("\n");
+    std::printf("[carry2] %-20s curvature-shaped carry, percent against the reference, b = 3, 4, 5, 6:", kName[p]);
+    for (int q = 0; q < 4; ++q)
+      std::printf("  %+.1f (curved %zu, concave %zu, tight %zu, capped %zu)",
+                  100.0 * (carry2[p][q] / kReference - 1.0), carry2_curved[p][q],
+                  carry2_concave[p][q], carry2_tight[p][q], carry2_capped[p][q]);
     std::printf("\n");
     for (int pr = 0; pr < 2; ++pr) {
       std::printf("[patch] %-20s tensor patch recovery, radius %.1f, percent against the reference, b = 3, 4, 5, 6:",
