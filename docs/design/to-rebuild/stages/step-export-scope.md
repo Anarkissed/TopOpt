@@ -50,6 +50,54 @@ Prototype tool `agent-scratch/tosurface/tools/step0c.cpp` (not in the repo; OCCT
 - Tried: letting near-identical flats merge (0.002-0.005 mm, 0.0005-0.001 rad): 10,046 -> 9,649 / 9,518 faces and the solid invalid before the write. Dropped: the faces are on the round surfaces.
 - Next, proposed to him (needs his yes): step A, his faces back exactly (his solid cut by the design's surface in OCCT, so every drawn face, countersinks included, is ONE face as he drew it; only the new surfaces stay faceted); then step B, smooth patches for the new surfaces (the prototype above).
 
+### Step A (his yes 2026-11-26 ~14:45): the Boolean route, STOPPED at its stop rule
+
+Tool `agent-scratch/tosurface/tools/stepA.cpp`: print-file triangles on his faces (0.015 mm) pushed out by a small step, the new surfaces simplified, his exact solid cut by that faceted solid (BRepAlgoAPI_Common).
+- Try 1 (the stand at 64 before the keep-layer fix, push 0.05 mm): 4,871 faces, 89 of them his exact curved faces; but 2 solids and +12 % volume: his whole left wing came through (the cut misread inside and outside) and the caps were sliced where the design reaches past his faces into the design box. The caps turned out to be a stage 3 bug (keep layers two-sided), fixed in b92e3bd0.
+- Try 2 (the fixed stand at 64, push 0.05 mm): a 4-face zero-volume result, BOPAlgo_AlertBadPositioning.
+- Try 3 (push 0.3 mm; fuzzy 0.001 mm at push 0.05; fuzzy 0.01 at 0.3): nothing usable; AcquiredSelfIntersection (16-336), TooSmallEdge (680), BuilderFailed. Pushing the facets out makes the design self-intersect in tight places (the socket's T-slots, the countersink rims), and 30,000 facets lying 0.05-0.3 mm from his faces is what OCCT's Booleans handle worst.
+- Also learned: the stand's file keeps real design-box material outside his part (about 9 % of its corners, more than 2 mm out, as stage 1 alone's file), so any route must use "his part plus the design box", not his part alone.
+- Next route, proposed to him: no Boolean. Build the solid face by face: each of his faces the design keeps WHOLE copied as it is from his STEP; each face it keeps IN PART rebuilt on his exact surface, bounded by the seam where the design cuts it; the new surfaces as facets; all sewn into one solid (tolerance about 0.02 mm, the import's own). The seams then carry a small tolerance, which Shapr3D (Parasolid) must accept: step A's new risk.
+
+### Step A, the face-by-face route (his "Try it out", 2026-11-26 ~23:30): STOPPED at its stop rule
+
+Tool `agent-scratch/tosurface/tools/stepB.cpp`: each connected piece of the print file lying on one of his faces rebuilt as ONE face on his exact surface, bounded by its own seam loops; the new surfaces planar facets (simplified, seams kept); every edge built once and shared (no sewing). The fixed stand at 64 (b92e3bd0): 19,556 of 60,204 triangles lie on his faces, in 298 pieces with 375 loops; the new surfaces simplify to 11,720 facets (the 0.05 mm cap stops there).
+- Try 1: 10,416 faces (199 curved: his), but invalid, volume 2x: the loops of pieces whose surface normal points into the part ran clockwise on his surface, so those faces were everything outside them.
+- Try 2: each piece oriented by its triangles (124 reversed): 187 of the 298 rebuilt faces still invalid (137 cylinders, 41 tori, 9 planes).
+- Try 3: seam tolerances 0.02 mm plus a whole-solid repair: the first invalid face reads BRepCheck_BadOrientationOfSubshape (a cylinder); the repair split the result into 24 shells. 2.0 GB peak.
+- What it says: his periodic surfaces (bores, fillets) bounded by straight chords need their seam handled explicitly (a piece wrapping 360 degrees has no seam edge of its own), and the orientation must come from his face's own wires, not from mine reversed.
+- What it would NOT fix: on the stand, the new surfaces (the bosses' walls) are still about 10,000 facets after simplification; only step B (smooth patches) or exact offsets of his faces (the stand's keep layers ARE his faces moved 5 mm) bring those down.
+- Next, if he wants it: (a) copy his faces the design keeps WHOLE straight from his STEP, with his exact edges (no rebuild at all: the cylinders' seam problem disappears for every bore left intact), rebuild only the partly kept faces; (b) the keep layers as exact offsets of his faces (OCCT BRepOffsetAPI_MakeOffsetShape), which on this stand would make the bosses single faces too.
+
+### Step C, his faces copied and re-trimmed (his "Yes, build them" 2026-11-27 ~01:10, after the research report): STOPPED after 7 runs
+
+Tool `agent-scratch/tosurface/tools/stepC.cpp`, the report's ranks 1 and 2 in their cheapest form: his faces kept WHOLE copied from his STEP; his CUT faces that are planes rebuilt on his exact plane from the seam chords (exact on a plane); everything else facets; his faces joined to the rest by sewing (0.02-0.05 mm, edge cutting), no vertex-moving repair. The fixed stand at 64:
+- His 162 faces: 84 whole (copied), 13 cut planes (rebuilt in 36 pieces), 34 cut curved (facets for now), 31 gone. So his countersinks and bores the design leaves alone come back as his own faces.
+- Run 2: ONE shell, 16 free edges totalling 0.6 mm, volume +0.1 %; not a solid.
+- Runs 3-5: the faulty faces are the rebuilt bottom and top planes (wire not closed) and 0.001-0.08 mm2 sliver facets beside them; invalid already before the coplanar merge, so sewing's handling of edges under its tolerance is the suspect.
+- Run 6: edges under 0.05 mm collapsed onto their own corners first (2,857 of them): 4 free edges left (0.1 mm), but the volume read +11 % and OCCT's UnifySameDomain crashed (segfault inside IntUnifyFaces).
+- Run 7: the last 4 gaps (0.03 mm each) sit at two mirror spots where HIS file has a cluster of near-zero faces (0.00-0.04 mm2 cylinders, tori, planes): skipping faces under 0.1 mm2 did not close them.
+- What it says: sewing is a shortcut that fails exactly at the tiny features (his slivers, our slivers); the report's rank 2 does not sew: his face's border is built as pieces of curves ON his surface, shared with the neighbours. That is the next step if he wants it.
+- **PAUSED by his word, 2026-11-27 ~01:50.** Nothing more on the STEP export until he asks.
+
+### Step D, shared topology with no sewing (his word ~02:00: "continue after reading the literature, if it gives a good plan"): STOPPED after 3 runs
+
+Plan from the papers (`agent-scratch/tosurface/stepA_lit_plan.md`: Benkő, Martin & Várady 2001 pp. 847-848; Bénière et al. 2013 pp. 1387-1389; Mesh2Brep 2025): topology from the labelled mesh, every B-rep edge built once and used by both faces, so the shell closes by construction. Tool `agent-scratch/tosurface/tools/stepD.cpp`: his whole faces copied with his surfaces, their edges split into pieces ON his exact curves (his own pcurves) wherever facets touch; his cut planes rebuilt on his plane; facets elsewhere; no sewing, no ShapeFix, no UnifySameDomain. The fixed stand at 64:
+- 87 of his faces copied, 35 rebuilt plane pieces, 11,545 facets; 2,401 pieces of his edges on 175 of his edges; largest facet-to-his-curve gap 0.0095 mm (under the 0.01 mm stop line); 3.5 s, 109 MB.
+- Run 1: 21 edges used once, 2 used three times; the solid step then aborted (open shell).
+- Run 2: the open edges are short straight edges that lie on his edges but got no piece: corners at the ends of his CLOSED edges (circles) took one end's parameter by projection, so the last piece before the corner was never built.
+- Run 3: corners at his edges' exact end parameters (both ends on a closed edge): 17 edges used once, 2 used three times. Stopped at the 3-run rule.
+- What is left is bookkeeping, not geometry: a few chains along his edges still miss a piece (and two edges are claimed twice). The approach itself holds: the shell is 99.9 % closed with no tolerance search, and his faces and curves are exact.
+
+### Step D DONE (his "Follow this to the end", 2026-11-27 ~06:50): a VALID solid with his own faces
+
+The same tool, finished (`agent-scratch/tosurface/tools/stepD.cpp`, prototype, not in the repo). The fixed stand at 64 -> `stand_064_his_faces.step` (32 MB; zipped 5.9 MB), sent to him:
+- 78 of his faces copied exactly (countersinks, bores, flats the design keeps whole), 39 of his cut flat faces rebuilt on his exact planes, 11,593 facets for the new surfaces; 11,710 faces.
+- ONE valid solid in OCCT (BRepCheck: no invalid face, wire, edge, vertex or shell), no sewing, no ShapeFix, no UnifySameDomain, no SameParameter pass; read back from the STEP: one valid solid. Volume 86,381.2 mm3 against the print file's 86,450.6 (-0.08 %). Largest tolerance anywhere 0.0108 mm (at the 0.01 mm steps his file has and the print cannot resolve). Pictures front and back match the print file (`stage-3-pics/stand_step_his_faces_front.png`, `_back.png`). 8 s, 1.5 GB.
+- What it took, after the three earlier runs: (1) a mesh edge is on his edge only if both its ends and its middle are, and a corner snaps to his corner only within 0.002 mm; (2) a face of his is copied only if the mesh gives a full chain along every edge it shares with something not copied (else it steps down, repeated until stable; 7 faces), and not at all if it has an edge under 0.1 mm (9 faces: his file's 0.03 mm edges and 0.00 mm2 slivers); (3) the print's own slivers collapse first (edges under 0.005 mm, onto their own corners: 661), and corners snapping makes coincide are merged (9); (4) every corner of a rebuilt plane goes exactly onto his plane, or onto the line of two (Mesh2Brep's snapping; largest move 0.014 mm); (5) a piece of his edge gets NO 2D curve on a plane (OCCT computes it) and his own 2D curve on a curved face (it keeps the face's turn on wrap-around surfaces; projected pieces broke the countersinks' loops); his edges' 2D curves on planes count along the edge differently from their 3D curves (reused, they put pieces 6.5 mm off); (6) OCCT's SameParameter pass is NOT used: it "fixed" those pieces by raising tolerances to 6.46 mm; (7) edges meeting his plane only within a 0.01 mm step carry their measured gap as tolerance (28).
+- Still to do for an editable file: the 11,593 facets (the bosses) need smooth patches (step B); his CUT curved faces (37) are facets until their seams are traced on his surfaces.
+- Waiting on him: does Shapr3D open it, and do his own faces (a countersink, a flat) offset and extrude as single faces?
+
 ### Prototype plan (one part, for his approval before any build)
 
 1. Input: one finished stage 3 version of Top Motor Mount (drawn faces exact, cut walls from the function).
