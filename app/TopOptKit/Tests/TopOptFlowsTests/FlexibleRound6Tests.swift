@@ -513,8 +513,14 @@ final class FlexibleRound6Tests: XCTestCase {
                 XCTAssertTrue(ctx.contains("controlRound5Frames"), "\(f):\(i + 1) paints the frames outside the control: \(l)")
             }
             // every channels( call: the call's text up to its closing parenthesis passes groupColours: false
+            // ★ notes30 FF1: the main refresh now GATHERS the channels' inputs (`FlexiblePageChannels.inputs(model:…)`, where
+            // groupColours is decided) and its picture worker computes them — that gather is the main refresh's call
+            func next(_ s: Substring) -> Range<Substring.Index>? {
+                [s.range(of: "FlexiblePageChannels.channels("), s.range(of: "FlexiblePageChannels.inputs(")]
+                    .compactMap { $0 }.min { $0.lowerBound < $1.lowerBound }
+            }
             var rest = code[...]
-            while let r = rest.range(of: "FlexiblePageChannels.channels(") {
+            while let r = next(rest) {
                 calls += 1
                 var depth = 1, j = r.upperBound
                 while j < rest.endIndex, depth > 0 {

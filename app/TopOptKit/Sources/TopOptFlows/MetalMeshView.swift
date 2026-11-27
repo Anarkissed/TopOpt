@@ -6290,6 +6290,13 @@ struct VertexTintKey: Equatable {
         for f in rgba { h.combine(f) }
         hash = h.finalize()
     }
+
+    /// ★ notes30 FF1 (approved by 362): the same array storage (or both nil) — O(1), no element read.
+    static func sameStorage(_ a: [Float]?, _ b: [Float]?) -> Bool {
+        guard let a, let b else { return a == nil && b == nil }
+        guard a.count == b.count else { return false }
+        return a.withUnsafeBufferPointer { pa in b.withUnsafeBufferPointer { pb in pa.baseAddress == pb.baseAddress } }
+    }
 }
 
 struct MeshViewInputs {
@@ -6978,6 +6985,8 @@ extension MetalMeshView {
         private var appliedSignature: ViewerMeshSignature?
         private var appliedTint: TintKey?
         private var appliedVertexTint: VertexTintKey?
+        /// ★ notes30 FF1 (approved by 362 with the Flexible freeze plan): the last vertex-tint array, kept — see `apply`.
+        private var appliedVertexTintArray: [Float]?
         private var appliedExtraLineCount = -1
         private var appliedCutPlane: SIMD4<Float>??
         private var appliedRibbonCount = -1
@@ -7324,7 +7333,11 @@ extension MetalMeshView {
                 // four floats per vertex, and a full compare on every body
                 // evaluation is the "viewer lag = selectedMesh rebuild" mistake in
                 // a new place.
-                let vkey = inputs.vertexTints.map { VertexTintKey($0) }
+                // ★ notes30 FF1 (approved by 362): an array sharing the kept one's storage IS the applied tints — while it is
+                // kept, an edit in place would have copied it (copy-on-write) — so the full hash runs only for another array
+                let vkey = VertexTintKey.sameStorage(inputs.vertexTints, appliedVertexTintArray)
+                    ? appliedVertexTint : inputs.vertexTints.map { VertexTintKey($0) }
+                appliedVertexTintArray = inputs.vertexTints
                 if vkey != appliedVertexTint {
                     appliedVertexTint = vkey
                     renderer.setVertexTints(inputs.vertexTints ?? [])

@@ -148,6 +148,11 @@ final class FlexibleLatticePass {
     private(set) var feToken = -1
     private(set) var feUploadCount = 0
     private var feTex: [MTLTexture] = []
+    /// ★ notes30 FF1: each field VERSION's texture and its half-rounded field, kept while the version is listed — a landing
+    /// makes ONE texture (its own), never every field's again; a texture is never written after it is made (the GPU may still
+    /// read the old one from a committed frame: command buffers retain what they reference). `feTexturesMade`: tests.
+    private var feTexByVersion: [String: (tex: MTLTexture, field: FlexibleFEField)] = [:]
+    private(set) var feTexturesMade = 0
     private let emptyFE: MTLTexture
     /// FE mode this frame: a field is bound.
     var feActive: Bool { feShown >= 0 && feShown < feTex.count && feShown < feFields.count }
@@ -550,7 +555,42 @@ final class FlexibleLatticePass {
         facesToken = l.facesToken
         hidden = l.hidden
         uploadCount += 1
-        let f = l.lattice
+        // ★ notes30 FF1: the volumes' bytes, the reference and the region's box — made by the main Flexible page's picture
+        // worker (`FlexibleLatticeGPU`, once per lattice generation), else here (`prepare`, the same sum); the textures are
+        // made from them with one copy each
+        let prep = (FlexiblePictureWorker.controlPictureOnMain ? nil : l.latticeGPU.flatMap { $0.generation == l.token ? $0 : nil })
+            ?? Self.prepare(l.lattice, generation: l.token)
+        referenceInputs = prep.ref
+        rmTex = prep.rm.flatMap { makeVolumeTexture($0.bytes, dims: $0.dims, format: $0.four ? .rgba32Float : .rg32Float, texel: $0.four ? 16 : 8) }
+        dsTex = prep.ds.flatMap { makeVolumeTexture($0.bytes, dims: $0.dims, format: .rg16Float, texel: 4) }
+        faces = Array(l.faces.prefix(FlexibleSquishField.maxFaces))
+        columnTex = faces.map { makeColumns($0) ?? emptyColumns }
+        maxDepthMM = faces.map(\.maxDepthMM).max() ?? 0
+        regionMin = prep.regionMin
+        regionMax = prep.regionMax
+        rhoSpan = prep.rhoSpan
+        base = makeBase(prep.ref)
+    }
+
+    /// ★ notes30 FF1: a 3D texture from bytes already packed (one copy; never written again).
+    private func makeVolumeTexture<T>(_ bytes: [T], dims: (Int, Int, Int), format: MTLPixelFormat, texel: Int) -> MTLTexture? {
+        let d = MTLTextureDescriptor()
+        d.textureType = .type3D
+        d.pixelFormat = format
+        d.width = dims.0; d.height = dims.1; d.depth = dims.2
+        d.usage = [.shaderRead]
+        d.storageMode = .shared
+        guard let tex = device.makeTexture(descriptor: d) else { return nil }
+        bytes.withUnsafeBytes { raw in
+            tex.replace(region: MTLRegionMake3D(0, 0, 0, dims.0, dims.1, dims.2), mipmapLevel: 0, slice: 0,
+                        withBytes: raw.baseAddress!, bytesPerRow: dims.0 * texel, bytesPerImage: dims.0 * dims.1 * texel)
+        }
+        return tex
+    }
+
+    /// ★ notes30 FF1: the CPU half of `upload` (moved here unchanged, any thread): the reference the walls are compared with,
+    /// the (ρ, mask[, seam][, Manual]) volume's floats, the (SDF, skin) volume's halves, the region's box and the ρ span.
+    static func prepare(_ f: FlexibleLatticeInputs, generation: Int) -> FlexibleLatticeGPU {
         // (ρ, mask) on ρ's grid and (part SDF, skin) on the SDF's: the builder puts each pair
         // on one grid; a test fixture that does not is resampled here, and the REFERENCE
         // keeps the resampled grid, so parity is exact either way.
@@ -577,16 +617,13 @@ final class FlexibleLatticePass {
         // the other piece's code) in the third (buildDir.w = 2); none (P1, its red control) keeps P1's volume and field exactly
         let piecesOK = ref.manualWall != nil && [ref.manualPiece, ref.manualAcross, ref.manualOther].allSatisfy { $0.map { Self.sameGrid($0, f.rho) } ?? false }
         if FlexibleLatticeField.controlP1Manual || !piecesOK { ref.manualPiece = nil; ref.manualAcross = nil; ref.manualOther = nil }
-        referenceInputs = ref
         var extra: [(FlexGrid, FlexGrid)] = []
         if let w = ref.manualWall, let t = ref.manualType {
             if let pc = ref.manualPiece, let ac = ref.manualAcross, let ot = ref.manualOther { extra = [(w, pc), (ac, ot)] } else { extra = [(w, t)] }
         }
-        if let ac = ref.rhoAcross, let sd = ref.pressSide { rmTex = makeVolume4(f.rho, mask, ac, sd, manual: extra) } else { rmTex = makeVolume(f.rho, mask, manual: extra) }
-        dsTex = makeHalfVolume(f.partSDF, skin)
-        faces = Array(l.faces.prefix(FlexibleSquishField.maxFaces))
-        columnTex = faces.map { makeColumns($0) ?? emptyColumns }
-        maxDepthMM = faces.map(\.maxDepthMM).max() ?? 0
+        let rm: FlexibleLatticeGPU.Volume<Float>?
+        if let ac = ref.rhoAcross, let sd = ref.pressSide { rm = packVolume4(f.rho, mask, ac, sd, manual: extra) } else { rm = packVolume(f.rho, mask, manual: extra) }
+        let ds = packHalfVolume(f.partSDF, skin)
         // the lattice region's box and the in-mask ρ span
         var lo = SIMD3<Float>(repeating: .infinity), hi = SIMD3<Float>(repeating: -.infinity)
         var rLo = Float.infinity, rHi = -Float.infinity
@@ -598,15 +635,14 @@ final class FlexibleLatticePass {
             let r = f.rho.values[n]
             rLo = Swift.min(rLo, r); rHi = Swift.max(rHi, r)
         } } }
+        var regionMin = SIMD3<Float>(repeating: 1e30), regionMax = SIMD3<Float>(repeating: -1e30)
         if lo.x.isFinite {
             let pad = SIMD3<Float>(repeating: Self.boxPadMM)
             regionMin = simd_max(lo - mask.spacing, f.boundsMin - pad)
             regionMax = simd_min(hi + mask.spacing, f.boundsMax + pad)
-        } else {
-            regionMin = SIMD3(repeating: 1e30); regionMax = SIMD3(repeating: -1e30)
         }
-        rhoSpan = rLo.isFinite ? SIMD2(rLo, rHi) : SIMD2(0, 1)
-        base = makeBase(ref)
+        return FlexibleLatticeGPU(generation: generation, ref: ref, rm: rm, ds: ds, regionMin: regionMin, regionMax: regionMax,
+                                  rhoSpan: rLo.isFinite ? SIMD2(rLo, rHi) : SIMD2(0, 1))
     }
 
     /// ★ ROUND 4 (D2): the player picked another squeeze — the SAME lattice (its volumes stay
@@ -633,11 +669,26 @@ final class FlexibleLatticePass {
         feUploadCount += 1
         feTex = []
         feFields = []
-        for f in l.fe {
-            guard let t = makeFieldTexture(f) else { continue }
+        // ★ notes30 FF1: a version already on the GPU is kept (its texture and its half-rounded field); a new one is made from
+        // the bytes the page's picture worker prepared (one copy), else here. RED CONTROL `controlPictureOnMain`: today's —
+        // every field made again, its bytes too, on the main thread.
+        let remakeAll = FlexiblePictureWorker.controlPictureOnMain
+        var kept: [String: (tex: MTLTexture, field: FlexibleFEField)] = [:]
+        for (i, f) in l.fe.enumerated() {
+            let key = FlexibleFEGPUField.key(f)
+            if !remakeAll, let c = feTexByVersion[key] ?? kept[key] {
+                kept[key] = c
+                feTex.append(c.tex); feFields.append(c.field)
+                continue
+            }
+            let given = remakeAll ? nil : (i < l.feGPU.count ? l.feGPU[i] : nil).flatMap { $0.key == key ? $0 : nil }
+            guard let g = given ?? FlexibleFEGPUField.make(f), let t = makeFieldTexture(g) else { continue }
+            feTexturesMade += 1
+            kept[key] = (t, g.halfRounded)
             feTex.append(t)
-            feFields.append(Self.halfRounded(f))
+            feFields.append(g.halfRounded)
         }
+        feTexByVersion = kept
         feMesh = Array(l.feMesh.prefix(feFields.count))
         let was = feShown
         feShown = shownID.flatMap { id in feFields.firstIndex { $0.versionKey == id } } ?? -1
@@ -670,30 +721,20 @@ final class FlexibleLatticePass {
 
     /// A field as one rgba16Float 3D texture: xyz = u (mm at full load), ★ batch M (M3): w = the node's
     /// von Mises as a FRACTION of the field's own top (FlexibleFEStress.scaleTop — 0 for a field without
-    /// moduli), the walls' Stress colour.
-    private func makeFieldTexture(_ f: FlexibleFEField) -> MTLTexture? {
-        let n = f.nx * f.ny * f.nz
-        guard f.nx > 0, f.ny > 0, f.nz > 0, f.u.count == n else { return nil }
-        let vm: [Float]? = FlexibleFEStress.field(f).flatMap { s in
-            let top = FlexibleFEStress.scaleTop(s)
-            return top > 0 ? s.vonMises.map { $0 / Float(top) } : nil
-        }
-        var packed = [UInt16](repeating: 0, count: 4 * n)
-        for i in 0..<n {
-            packed[4 * i] = Self.halfBits(f.u[i].x); packed[4 * i + 1] = Self.halfBits(f.u[i].y)
-            packed[4 * i + 2] = Self.halfBits(f.u[i].z)
-            if let vm, i < vm.count { packed[4 * i + 3] = Self.halfBits(vm[i]) }
-        }
+    /// moduli), the walls' Stress colour. ★ notes30 FF1: from its prepared bytes (FlexibleFEGPUField.make — the packing
+    /// moved there, unchanged): one copy here.
+    private func makeFieldTexture(_ g: FlexibleFEGPUField) -> MTLTexture? {
+        guard g.nx > 0, g.ny > 0, g.nz > 0, g.packed.count == 4 * g.nx * g.ny * g.nz else { return nil }
         let d = MTLTextureDescriptor()
         d.textureType = .type3D
         d.pixelFormat = .rgba16Float
-        d.width = f.nx; d.height = f.ny; d.depth = f.nz
+        d.width = g.nx; d.height = g.ny; d.depth = g.nz
         d.usage = [.shaderRead]
         d.storageMode = .shared
         guard let tex = device.makeTexture(descriptor: d) else { return nil }
-        packed.withUnsafeBytes { raw in
-            tex.replace(region: MTLRegionMake3D(0, 0, 0, f.nx, f.ny, f.nz), mipmapLevel: 0, slice: 0,
-                        withBytes: raw.baseAddress!, bytesPerRow: f.nx * 8, bytesPerImage: f.nx * f.ny * 8)
+        g.packed.withUnsafeBytes { raw in
+            tex.replace(region: MTLRegionMake3D(0, 0, 0, g.nx, g.ny, g.nz), mipmapLevel: 0, slice: 0,
+                        withBytes: raw.baseAddress!, bytesPerRow: g.nx * 8, bytesPerImage: g.nx * g.ny * 8)
         }
         return tex
     }
@@ -724,30 +765,21 @@ final class FlexibleLatticePass {
     /// Two same-grid scalar fields as one rg32Float volume (read by integer `read()`).
     /// ★ 32-bit, not 16: a half has 11 bits, and a half-float cell once HALVED the octet
     /// preview's cell (2026-08-26). The field is compared with Swift to 2 µm.
-    private func makeVolume(_ a: FlexGrid, _ b: FlexGrid, manual: [(FlexGrid, FlexGrid)] = []) -> MTLTexture? {
+    /// ★ notes30 FF1: its floats only (any thread) — `upload` makes the texture from them (`makeVolumeTexture`).
+    static func packVolume(_ a: FlexGrid, _ b: FlexGrid, manual: [(FlexGrid, FlexGrid)] = []) -> FlexibleLatticeGPU.Volume<Float>? {
         let n = a.nx * a.ny * a.nz
         guard a.nx > 0, a.ny > 0, a.nz > 0, a.values.count == n, b.values.count == n, a.spacing > 0 else { return nil }
         let halves = 1 + manual.count
         var packed = [Float](repeating: 0, count: 2 * n * halves)
         for i in 0..<n { packed[2 * i] = a.values[i]; packed[2 * i + 1] = b.values[i] }
         for (h, (w, t)) in manual.enumerated() { let o = (h + 1) * n; for i in 0..<n { packed[2 * (o + i)] = w.values[i]; packed[2 * (o + i) + 1] = t.values[i] } }
-        let d = MTLTextureDescriptor()
-        d.textureType = .type3D
-        d.pixelFormat = .rg32Float
-        d.width = a.nx; d.height = a.ny; d.depth = a.nz * halves
-        d.usage = [.shaderRead]
-        d.storageMode = .shared
-        guard let tex = device.makeTexture(descriptor: d) else { return nil }
-        packed.withUnsafeBytes { raw in
-            tex.replace(region: MTLRegionMake3D(0, 0, 0, a.nx, a.ny, a.nz * halves), mipmapLevel: 0, slice: 0,
-                        withBytes: raw.baseAddress!, bytesPerRow: a.nx * 8, bytesPerImage: a.nx * a.ny * 8)
-        }
-        return tex
+        return FlexibleLatticeGPU.Volume(bytes: packed, dims: (a.nx, a.ny, a.nz * halves), four: false)
     }
 
     /// ★ R7-U21 H (EDGE-LOOK): (ρ, mask, ρ across the press's plane, press side share) as one rgba32Float volume — the
-    /// same integer `read()` per corner returns all four (FlexibleLatticeShader.flx_wall_seam).
-    private func makeVolume4(_ a: FlexGrid, _ b: FlexGrid, _ c: FlexGrid, _ e: FlexGrid, manual: [(FlexGrid, FlexGrid)] = []) -> MTLTexture? {
+    /// same integer `read()` per corner returns all four (FlexibleLatticeShader.flx_wall_seam). ★ notes30 FF1: its floats only.
+    static func packVolume4(_ a: FlexGrid, _ b: FlexGrid, _ c: FlexGrid, _ e: FlexGrid,
+                            manual: [(FlexGrid, FlexGrid)] = []) -> FlexibleLatticeGPU.Volume<Float>? {
         let n = a.nx * a.ny * a.nz
         guard a.nx > 0, a.ny > 0, a.nz > 0, a.values.count == n, b.values.count == n, c.values.count == n, e.values.count == n,
               a.spacing > 0 else { return nil }
@@ -755,38 +787,16 @@ final class FlexibleLatticePass {
         var packed = [Float](repeating: 0, count: 4 * n * halves)
         for i in 0..<n { packed[4 * i] = a.values[i]; packed[4 * i + 1] = b.values[i]; packed[4 * i + 2] = c.values[i]; packed[4 * i + 3] = e.values[i] }
         for (h, (w, t)) in manual.enumerated() { let o = (h + 1) * n; for i in 0..<n { packed[4 * (o + i)] = w.values[i]; packed[4 * (o + i) + 1] = t.values[i] } }
-        let d = MTLTextureDescriptor()
-        d.textureType = .type3D
-        d.pixelFormat = .rgba32Float
-        d.width = a.nx; d.height = a.ny; d.depth = a.nz * halves
-        d.usage = [.shaderRead]
-        d.storageMode = .shared
-        guard let tex = device.makeTexture(descriptor: d) else { return nil }
-        packed.withUnsafeBytes { raw in
-            tex.replace(region: MTLRegionMake3D(0, 0, 0, a.nx, a.ny, a.nz * halves), mipmapLevel: 0, slice: 0,
-                        withBytes: raw.baseAddress!, bytesPerRow: a.nx * 16, bytesPerImage: a.nx * a.ny * 16)
-        }
-        return tex
+        return FlexibleLatticeGPU.Volume(bytes: packed, dims: (a.nx, a.ny, a.nz * halves), four: true)
     }
 
-    /// The (SDF, skin) pair as one rg16Float volume, sampled with the hardware filter.
-    private func makeHalfVolume(_ a: FlexGrid, _ b: FlexGrid) -> MTLTexture? {
+    /// The (SDF, skin) pair as one rg16Float volume, sampled with the hardware filter. ★ notes30 FF1: its halves only.
+    static func packHalfVolume(_ a: FlexGrid, _ b: FlexGrid) -> FlexibleLatticeGPU.Volume<UInt16>? {
         let n = a.nx * a.ny * a.nz
         guard a.nx > 0, a.ny > 0, a.nz > 0, a.values.count == n, b.values.count == n, a.spacing > 0 else { return nil }
         var packed = [UInt16](repeating: 0, count: 2 * n)
         for i in 0..<n { packed[2 * i] = Self.halfBits(a.values[i]); packed[2 * i + 1] = Self.halfBits(b.values[i]) }
-        let d = MTLTextureDescriptor()
-        d.textureType = .type3D
-        d.pixelFormat = .rg16Float
-        d.width = a.nx; d.height = a.ny; d.depth = a.nz
-        d.usage = [.shaderRead]
-        d.storageMode = .shared
-        guard let tex = device.makeTexture(descriptor: d) else { return nil }
-        packed.withUnsafeBytes { raw in
-            tex.replace(region: MTLRegionMake3D(0, 0, 0, a.nx, a.ny, a.nz), mipmapLevel: 0, slice: 0,
-                        withBytes: raw.baseAddress!, bytesPerRow: a.nx * 4, bytesPerImage: a.nx * a.ny * 4)
-        }
-        return tex
+        return FlexibleLatticeGPU.Volume(bytes: packed, dims: (a.nx, a.ny, a.nz), four: false)
     }
 
     /// IEEE half bits of `f`, rounded to nearest even (no `Float16`: it does not exist on
