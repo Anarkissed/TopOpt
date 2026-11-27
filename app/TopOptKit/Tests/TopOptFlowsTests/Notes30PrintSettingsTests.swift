@@ -119,10 +119,11 @@ final class Notes30PrintSettingsTests: XCTestCase {
     /// Core's print file as its streaming writer makes it (threemf_stream.cpp, indexed + deflated, painted: the two
     /// settings files after the model, word for word), from the cube. `painted`: its first two triangles painted.
     static func coreFile(painted: Bool) -> (file: Data, settingsAt: Int?) {
-        var m = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<model unit=\"millimeter\" xml:lang=\"en-US\" "
-            + "xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\""
-            + (painted ? " xmlns:slic3rpe=\"http://schemas.slic3r.org/3mf/2017/06\"" : "")
-            + ">\r\n <resources>\r\n  <object id=\"1\" type=\"model\">\r\n   <mesh>\r\n    <vertices>\r\n"
+        let ns: String = painted ? " xmlns:slic3rpe=\"http://schemas.slic3r.org/3mf/2017/06\"" : ""
+        let head: [String] = ["<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<model unit=\"millimeter\" xml:lang=\"en-US\" ",
+                              "xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\"", ns,
+                              ">\r\n <resources>\r\n  <object id=\"1\" type=\"model\">\r\n   <mesh>\r\n    <vertices>\r\n"]
+        var m = head.joined()
         for i in 0..<8 {
             m += String(format: "     <vertex x=\"%.6f\" y=\"%.6f\" z=\"%.6f\"/>\r\n",
                         cube.vertices[3 * i], cube.vertices[3 * i + 1], cube.vertices[3 * i + 2])
@@ -138,14 +139,16 @@ final class Notes30PrintSettingsTests: XCTestCase {
             ("_rels/.rels", Data("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<Relationships/>".utf8), false),
             ("3D/3dmodel.model", Data(m.utf8), true)]
         if painted {
-            parts.append((ThreeMFPrintSettings.bambuFile, Data(("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<config>\n  <object id=\"1\">\n"
-                + "    <metadata key=\"name\" value=\"lattice\"/>\n    <metadata key=\"enable_support\" value=\"1\"/>\n"
-                + "    <metadata key=\"support_type\" value=\"tree(manual)\"/>\n  </object>\n</config>\n").utf8), false))
-            parts.append((ThreeMFPrintSettings.prusaFile, Data(("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<config>\n"
-                + " <object id=\"1\" instances_count=\"1\">\n  <metadata type=\"object\" key=\"name\" value=\"lattice\"/>\n"
-                + "  <metadata type=\"object\" key=\"support_material\" value=\"1\"/>\n"
-                + "  <metadata type=\"object\" key=\"support_material_auto\" value=\"0\"/>\n  <volume firstid=\"0\" lastid=\"11\">\n"
-                + "   <metadata type=\"volume\" key=\"name\" value=\"lattice\"/>\n  </volume>\n </object>\n</config>\n").utf8), false))
+            let bambu: [String] = ["<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<config>\n  <object id=\"1\">\n",
+                                   "    <metadata key=\"name\" value=\"lattice\"/>\n    <metadata key=\"enable_support\" value=\"1\"/>\n",
+                                   "    <metadata key=\"support_type\" value=\"tree(manual)\"/>\n  </object>\n</config>\n"]
+            let prusa: [String] = ["<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<config>\n",
+                                   " <object id=\"1\" instances_count=\"1\">\n  <metadata type=\"object\" key=\"name\" value=\"lattice\"/>\n",
+                                   "  <metadata type=\"object\" key=\"support_material\" value=\"1\"/>\n",
+                                   "  <metadata type=\"object\" key=\"support_material_auto\" value=\"0\"/>\n  <volume firstid=\"0\" lastid=\"11\">\n",
+                                   "   <metadata type=\"volume\" key=\"name\" value=\"lattice\"/>\n  </volume>\n </object>\n</config>\n"]
+            parts.append((ThreeMFPrintSettings.bambuFile, Data(bambu.joined().utf8), false))
+            parts.append((ThreeMFPrintSettings.prusaFile, Data(prusa.joined().utf8), false))
         }
         func le16(_ v: Int) -> Data { Data([UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF)]) }
         func le32(_ v: Int) -> Data { Data([UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF), UInt8((v >> 16) & 0xFF), UInt8((v >> 24) & 0xFF)]) }
@@ -258,8 +261,9 @@ final class Notes30PrintSettingsTests: XCTestCase {
         ThreeMFPrintSettings.controlNoSettings = false
         XCTAssertNil(Config(try XCTUnwrap(try Self.entry(try Data(contentsOf: red), ThreeMFPrintSettings.bambuFile))).objects[1]?["wall_loops"],
                      "RED CONTROL: no print settings")
-        print("NOTES30-3MF library: \(file.count) bytes (was \(before.count)), arm \(arm.count) keys, base \(base.count) · core painted "
-              + "\(stamped.count) bytes (was \(core.file.count)) · Bambu object 1 \(cb.objects[1] ?? [:])")
+        let bambuOne: [String: String] = cb.objects[1] ?? [:]
+        print("NOTES30-3MF library: \(file.count) bytes (was \(before.count)), arm \(arm.count) keys, base \(base.count)")
+        print("NOTES30-3MF core painted: \(stamped.count) bytes (was \(core.file.count)) · Bambu object 1 \(bambuOne)")
     }
 
     // MARK: - 2 · the TO job carries the solid skins
@@ -317,7 +321,9 @@ final class Notes30PrintSettingsTests: XCTestCase {
         let before = try job()
         RemoteRun.controlNoSolidSkins = false
         for k in Notes30PrintSkins.keys { XCTAssertNil(before.loads[k], "RED CONTROL: no \(k)") }
-        print("NOTES30-JOB loads: " + Notes30PrintSkins.keys.map { "\($0) \(now.loads[$0] ?? "none")" }.joined(separator: ", ")
-              + " · layer \(now.loads["layer_height_mm"] ?? "none") · before: " + Notes30PrintSkins.keys.map { "\(before.loads[$0] ?? "none")" }.joined(separator: "/"))
+        let nowWords: [String] = Notes30PrintSkins.keys.map { k in "\(k) \(String(describing: now.loads[k] ?? "none"))" }
+        let beforeWords: [String] = Notes30PrintSkins.keys.map { k in String(describing: before.loads[k] ?? "none") }
+        let layer = String(describing: now.loads["layer_height_mm"] ?? "none")
+        print("NOTES30-JOB loads: \(nowWords.joined(separator: ", ")) · layer \(layer) · before: \(beforeWords.joined(separator: "/"))")
     }
 }
