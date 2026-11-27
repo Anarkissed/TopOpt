@@ -441,7 +441,10 @@ SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<
     double R_curved = 0.0;
     if (shape == 1 && is_cut) {
       const double kc = smoothed_k[cut_counter++];
-      if (kc >= 1.0 / 40.0) {
+      // A LOADED face (the surface voxel tagged Load) keeps the line: the solve's stress
+      // behind a loaded cut face is too steep for the curved form.
+      if (grid.tags[v] == VoxelTag::Load) ++out.loaded_points;
+      else if (kc >= 1.0 / 40.0) {
         if (1.0 / kc < 2.5) ++out.tight_points;
         else R_curved = 1.0 / kc;
       }
@@ -473,7 +476,9 @@ SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<
     if (have_b) {
       double carried = field[va] + (field[va] - field[vb]) * (t_surf - s_a) / (s_a - s_b);
       if (carried < 0.0) carried = 0.0;
-      if (R_curved > 0.0) {
+      if (R_curved > 0.0 && grid.tags[va] == VoxelTag::Load) {
+        ++out.loaded_points;  // the first full voxel behind it is loaded: the line
+      } else if (R_curved > 0.0) {
         // CURVATURE-SHAPED: through the two voxels with A + B / r^2, r = R + depth from
         // the centre of curvature (in the air), read at r = R.
         const double R = R_curved;

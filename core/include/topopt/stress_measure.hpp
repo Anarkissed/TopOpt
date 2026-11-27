@@ -121,13 +121,16 @@ struct SurfaceCarry {
   std::size_t curved_concave = 0;    // of those, the ones whose centre of curvature lies in the air
   std::size_t tight_points = 0;      // shape 1: concave cut-face points with R < 2.5 voxels (a stress raiser too tight for the grid)
   std::size_t capped_points = 0;     // shape 1: curved readings capped at 1.5 x the straight line
+  std::size_t loaded_points = 0;     // shape 1: cut-face points kept on the line because the surface voxel or the first full voxel is tagged Load
 };
 // `shape` 0: the straight line above. 1: CURVATURE-SHAPED at CONCAVE cut-face points only
 // (flat faces and convex points keep the line): the surface's curvature fitted from the
 // cut-face points within 3 voxels, median-smoothed over 2 voxels, and the two voxels'
 // stress carried with A + B / r^2, r from the centre of curvature (Kirsch-like). R over
 // 40 voxels is flat; R under 2.5 keeps the line and counts as `tight_points`; a curved
-// reading over 1.5 x the straight line is capped there (`capped_points`).
+// reading over 1.5 x the straight line is capped there (`capped_points`). A cut-face point
+// whose surface voxel or first full voxel is tagged VoxelTag::Load keeps the line
+// (`loaded_points`): the curved form is for FREE surfaces.
 SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<double>& field,
                                        const std::vector<double>& density, int shape = 0);
 

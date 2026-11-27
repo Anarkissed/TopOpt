@@ -92,7 +92,8 @@ std::size_t g_engine_unresolved = 0;
 // The curvature-shaped carry (shape 1) over the reference stress, its curved points and
 // how many of those were read as concave (the centre of curvature in the air).
 double g_carry2 = 0.0;
-std::size_t g_carry2_curved = 0, g_carry2_concave = 0, g_carry2_tight = 0, g_carry2_capped = 0;
+std::size_t g_carry2_curved = 0, g_carry2_concave = 0, g_carry2_tight = 0, g_carry2_capped = 0,
+            g_carry2_loaded = 0;
 // The patch recovery (stress_recovered_at_surface, the bore marked loaded) over the
 // pressure at patch radius 2.5 and 3.5 voxels, and its unresolved counts.
 double g_patch[2] = {0.0, 0.0};
@@ -245,12 +246,27 @@ double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* are
         topopt::stress_carried_to_surface(g, res.von_mises_material_field, density);
     g_engine_carry = sc.peak / kPressure;
     g_engine_unresolved = sc.unresolved;
-    const topopt::SurfaceCarry sc2 = topopt::stress_carried_to_surface(g, res.von_mises_material_field, density, 1);
+    // The bore carries the pressure: a copy of the grid with every voxel with material
+    // whose centre is within 1.5 voxels of the inner radius tagged Load (Load counts as
+    // material, like Interior: only Empty is air to the carry).
+    VoxelGrid g_loaded = g;
+    for (int k = 0; k < kThickness; ++k)
+      for (int j = 0; j < w; ++j)
+        for (int i = 0; i < w; ++i) {
+          const std::size_t idx = g.index(i, j, k);
+          if (g.tags[idx] != topopt::VoxelTag::Empty &&
+              density[idx] >= topopt::kStressMaterialFloor &&
+              std::fabs(std::hypot(i + 0.5 - cxv, j + 0.5 - cyv) - ri) <= 1.5)
+            g_loaded.tags[idx] = topopt::VoxelTag::Load;
+        }
+    const topopt::SurfaceCarry sc2 =
+        topopt::stress_carried_to_surface(g_loaded, res.von_mises_material_field, density, 1);
     g_carry2 = sc2.peak / kPressure;
     g_carry2_curved = sc2.curved_points;
     g_carry2_concave = sc2.curved_concave;
     g_carry2_tight = sc2.tight_points;
     g_carry2_capped = sc2.capped_points;
+    g_carry2_loaded = sc2.loaded_points;
   }
   g_patch[0] = g_patch[1] = 0.0;
   g_patch_unresolved[0] = g_patch_unresolved[1] = 0;
@@ -317,9 +333,9 @@ int main(int argc, char** argv) {
                 100.0 * (g_carry_line / kTextbook - 1.0), 100.0 * (g_carry_curve / kTextbook - 1.0),
                 100.0 * (g_engine_carry / kTextbook - 1.0), g_engine_unresolved);
     std::printf("[carry2] inner radius %d voxels: curvature-shaped carry (E x fill), percent against the textbook %+.1f "
-                "(straight line %+.1f), curved points %zu, of them concave %zu, tight %zu, capped %zu\n",
+                "(straight line %+.1f), curved points %zu, of them concave %zu, tight %zu, capped %zu, loaded %zu\n",
                 r, 100.0 * (g_carry2 / kTextbook - 1.0), 100.0 * (g_engine_carry / kTextbook - 1.0),
-                g_carry2_curved, g_carry2_concave, g_carry2_tight, g_carry2_capped);
+                g_carry2_curved, g_carry2_concave, g_carry2_tight, g_carry2_capped, g_carry2_loaded);
     std::printf("[patch] inner radius %d voxels: tensor patch recovery (E x fill, bore loaded), percent against the textbook: "
                 "radius 2.5: %+.1f %%, unresolved %zu; radius 3.5: %+.1f %%, unresolved %zu\n",
                 r, 100.0 * (g_patch[0] / kTextbook - 1.0), g_patch_unresolved[0],
