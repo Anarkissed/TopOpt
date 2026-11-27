@@ -407,6 +407,9 @@ public final class AppModel: ObservableObject {
                           plateDirection: lc.plateDirection,
                           wantsOrientationRanking: project.buildOrientation.wantsRanking,
                           infillPercent: project.printParams.infillPercent,
+                          // ★ notes30: the layer height he set (it was left at the 0.2 mm default here, so the job's
+                          // `loads.layer_height_mm` never followed his sheet)
+                          layerHeightMM: project.printParams.layerHeightMM,
                           wallLoops: project.printParams.wallLoops,
                           wallLineWidthOuterMM: project.printParams.wallLineWidthOuterMM,
                           wallLineWidthInnerMM: project.printParams.wallLineWidthInnerMM,
@@ -434,6 +437,8 @@ public final class AppModel: ObservableObject {
                           projectCADFaces: true)   // ★ always (ruling 2026-10-26 23:44): the chip is hidden, a stored OFF can't strand a project
         request.scenarios = project.scenarioWires(leavingOut: leftOut)   // ★ load scenarios (overnight release 2026-10-26): 2+ only
         request.safetyMargin = project.force.safetyMarginValue   // ★ the safety margin (ruling 2026-10-26 13:12)
+        request.topSolidLayers = project.printParams.topLayers   // ★ notes30: the solid skins he set, for TO's printed grams
+        request.bottomSolidLayers = project.printParams.bottomLayers
         // ★ exact Protect: always reaching past the face — core 139a5411 (ruling 06:13, fix 2) cuts only the part's own skin
         // in that band and keeps grown material, so growth runs no longer need flush regions
         request.keepRegions = project.protectKeepRegions(protections, resolution: request.resolution)

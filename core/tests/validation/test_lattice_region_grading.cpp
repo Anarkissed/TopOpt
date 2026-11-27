@@ -268,15 +268,16 @@ int main() {
     CHECK(lite.find("\"lattice_accepted\": true") != std::string::npos,
           "§7 layer: the run's own certificate accepts it");
 
-    // The whole part latticed under 35 N (300 N in §2-§6). The law search bisects (its
+    // The whole part latticed under 40 N (300 N in §2-§6). The law search bisects (its
     // printable floor reads under the stop), its answer is refused on what the file holds,
     // and the shipped search bisects on whole passes up to a density the run accepts.
+    // 35 N -> 40 N: under the full octet's strut law (27554476, Install 3 (1d)) the floor certifies at 35 N (1.628).
     {
       const std::string out = dir + "/lattice_grading_off_light";
       std::filesystem::remove_all(out);
       std::string j = job_with("\"grading\": \"off\", ");
       const std::string heavy = "\"force\": [0, 300, 0]";
-      j.replace(j.find(heavy), heavy.size(), "\"force\": [0, 35, 0]");
+      j.replace(j.find(heavy), heavy.size(), "\"force\": [0, 40, 0]");
       std::ofstream(dir + "/lattice_grading_job.json") << j;
       std::string r;
       try {
@@ -291,7 +292,7 @@ int main() {
       const std::size_t o = r.find("\"one_density\": {");
       const double rr = num_after(r, "rho", o), uu = num_after(r, "upper_bound_graded_peak", o),
                    ff = num_after(r, "printable_floor", o), tt = num_after(r, "trials", o);
-      std::printf("[lattice-grading] whole part, 35 N, off: one density %.4f (floor %.4f, peak "
+      std::printf("[lattice-grading] whole part, 40 N, off: one density %.4f (floor %.4f, peak "
                   "%.4f), %.0f trials\n", rr, ff, uu, tt);
       const double law = num_after(r, "law_search_rho", o), sp = num_after(r, "shipped_passes", o);
       std::printf("[lattice-grading]   law answer %.4f, %.0f shipped pass(es), accepted %s\n", law,

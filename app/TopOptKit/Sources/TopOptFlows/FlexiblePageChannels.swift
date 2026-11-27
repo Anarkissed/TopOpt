@@ -5,10 +5,25 @@
 // ★ ONE PLACE, CALLED BY THE PAGE. These were private methods of FlexibleStagePage; they
 // live here so a test can build EXACTLY the page's overlay on his restored project (memory:
 // "value-type tests miss call sites" — FlexibleOverlayClipTests pins the page's call).
+//
+// ★ notes30 FF1 (the Flexible page freeze): each of the two is split in TWO — a main-actor GATHER of what it reads of the
+// model (`overlayJob(model:)`, `inputs(model:)`: plain values, copy-on-write) and a `nonisolated` COMPUTE of those values
+// alone (`overlay(_:)`, `channels(_:…)`), which the main Flexible page runs on its picture worker (FlexibleMainPicture). The
+// compiler's isolation check rejects any read of the live model in the compute. The `(model:)` calls are unchanged (the
+// Settings page and the tests): they gather, then compute, inline.
 
 import Foundation
 import simd
 import TopOptKit
+
+/// ★ notes30 FF1: what the overlay is built from (gathered on the main actor).
+struct FlexibleOverlayJob: @unchecked Sendable {
+    let part: ViewerMesh
+    let faces: [FlexibleOverlayFace]
+    let planes: [Int: [RegionCut]]
+    let maxEdgeMM: Double?
+    let maxTriangles: Int
+}
 
 @MainActor
 public enum FlexiblePageChannels {
@@ -22,6 +37,12 @@ public enum FlexiblePageChannels {
     /// the Stress colours (FlexibleOverlayMesh.Subdivision — the dent's geometry is unchanged).
     public static func overlay(model: FlexibleStageModel, maxEdgeMM: Double? = nil,
                                maxTriangles: Int = FlexibleOverlayMesh.maxSubTriangles) -> FlexibleOverlayMesh? {
+        overlayJob(model: model, maxEdgeMM: maxEdgeMM, maxTriangles: maxTriangles).map { overlay($0) }
+    }
+
+    /// ★ notes30 FF1: the overlay's inputs (nil: no overlay — no part, or neither a map nor a sector).
+    static func overlayJob(model: FlexibleStageModel, maxEdgeMM: Double? = nil,
+                           maxTriangles: Int = FlexibleOverlayMesh.maxSubTriangles) -> FlexibleOverlayJob? {
         guard let part = model.project.viewerMesh else { return nil }
         let regions = model.regions
         let faces: [FlexibleOverlayFace] = model.loadedKeys.compactMap { k in
@@ -31,13 +52,18 @@ public enum FlexiblePageChannels {
         }
         let planes = FlexibleFacePieces.planes(of: regions, mesh: part)
         guard !faces.isEmpty || !planes.isEmpty else { return nil }
-        return FlexibleOverlayMesh.build(part: part, faces: faces, splitPlanes: planes, maxEdgeMM: maxEdgeMM, maxTriangles: maxTriangles)
+        return FlexibleOverlayJob(part: part, faces: faces, planes: planes, maxEdgeMM: maxEdgeMM, maxTriangles: maxTriangles)
+    }
+
+    /// ★ notes30 FF1: the overlay built from its inputs alone (any thread).
+    nonisolated static func overlay(_ j: FlexibleOverlayJob) -> FlexibleOverlayMesh {
+        FlexibleOverlayMesh.build(part: j.part, faces: j.faces, splitPlanes: j.planes, maxEdgeMM: j.maxEdgeMM, maxTriangles: j.maxTriangles)
     }
 
     /// ★ ROUND 7 (M2): which drawn part triangles stay still for which pressed key — the SOLID rest of a face only partly
     /// latticed (the triangles on a Flexible sector's own face, outside its cuts). nil: none (no Flexible sector pressed).
-    static func stillRule(regions: FlexibleRegions, mesh: ViewerMesh?, overlay: FlexibleOverlayMesh,
-                          keys: [FlexFaceKey]) -> ((FlexFaceKey, Int) -> Bool)? {
+    nonisolated static func stillRule(regions: FlexibleRegions, mesh: ViewerMesh?, overlay: FlexibleOverlayMesh,
+                                      keys: [FlexFaceKey]) -> ((FlexFaceKey, Int) -> Bool)? {
         var sections: [Int: (faces: Set<Int>, cuts: [RegionCut])] = [:]
         if let set = regions.flexible, let mesh {
             for k in keys { if let pc = set.piece(k.region) {
@@ -53,7 +79,7 @@ public enum FlexiblePageChannels {
     }
 
     /// ★ ROUND 7 (M2): the lattice sections' faint violet (the Squish page's "where a tap works").
-    public static let sectionTintAlpha: Float = 0.35
+    public nonisolated static let sectionTintAlpha: Float = 0.35
 
     /// Everything MetalMeshView reads for the map: per-vertex tints, the dent (mm per flat
     /// vertex, before the renderer's scale), the ONE exaggeration k, and whether it loops.
@@ -69,6 +95,64 @@ public enum FlexiblePageChannels {
         public var mapValues: [Float]? = nil
         /// The heat's top end (mm): the value the ramp's red is.
         public var heatScaleMM: Double = 0
+    }
+
+    /// ★ notes30 FF1: everything `channels` reads of the model, gathered on the main actor (plain values, copy-on-write).
+    struct Inputs: @unchecked Sendable {
+        var regions: FlexibleRegions
+        /// The part's region tints (later entries win) — the roles, the group colours, the sections' violet.
+        var regionTint: [(id: Int, tint: SIMD4<Float>)]
+        var partMesh: ViewerMesh?
+        var loadedKeys: [FlexFaceKey]
+        var stacks: [FlexFaceKey: FlexStackInfo]
+        var partUVT: [FlexFaceKey: [Double]]
+        var shown: FlexibleShownValues.Inputs
+        var frozenExaggeration: Double?
+        var noNumber: SIMD4<Float>
+        var ghost: SIMD4<Float>
+        var sectionViolet: SIMD4<Float>
+    }
+
+    /// ★ notes30 FF1: the gather (main actor). `deferStamps`: a Stamp face's spread left to the compute (the main page).
+    static func inputs(model: FlexibleStageModel, groupColours: Bool = true, roleMarks: Bool = true, sectionTints: Bool = false,
+                       deferStamps: Bool = false) -> Inputs {
+        // part regions: loaded / resting / selected / linked other end — by REGION, so a split
+        // sector is tinted on its own side of its cuts (FlexibleRegions).
+        // ★ ROUND 4 (D2): no "conflict" tint — two faces on one stack are a pinch (one group) or
+        // separate squeezes (two groups), never an error; with two or more squeeze groups a
+        // pressed face's own part takes its GROUP's colour (FlexibleSqueezeGroups.palette, never
+        // purple) — seen until its map quads cover it (the face list's dots carry it after)
+        // ★ ROUND 6 (his img1): `groupColours` false on BOTH pages — a pressed face with no map is the plain
+        // pressed colour; the group's colour is the Settings page's glass (FlexibleGroupWalls) and its dots
+        let regions = model.regions
+        let groups = model.squeezeGroups
+        var regionTint: [(id: Int, tint: SIMD4<Float>)] = []   // later entries win
+        // ★ ROUND 7 (M2, his img3 words): on the Squish page, where a tap works — every lattice piece of a face only partly
+        // inside a face-prism wears the face-prism violet, faint, FIRST (a role or the selection over it wins); the solid
+        // rest of the face stays the part's colour (the overlay cuts the face at the section's planes, so it stops there)
+        let violet = SIMD4<Float>(FlexibleStageStyle.facePrismTint, Self.sectionTintAlpha)
+        if sectionTints, let set = regions.flexible, !set.partialRoots.isEmpty {
+            for p in set.pieces where set.partialRoots[p.rootRegion] != nil && p.kind != .strip { regionTint.append((p.wireID, violet)) }
+        }
+        // ★ BATCH V ("Role colours off" on the MAIN page — his answer of 2026-10-09, now a view setting): `roleMarks` false —
+        // no pressed green, no resting cyan, no selected face or linked end on the part; only the dent heat on the maps. The
+        // Settings page keeps them.
+        for f in model.settings.faces where roleMarks {
+            var c = f.isLoaded ? FlexibleColours.loadedFace : FlexibleColours.restingFace
+            if groupColours, f.isLoaded, groups.count > 1, let g = groups.first(where: { $0.regions.contains(f.faceRegionID) }) {
+                c = FlexibleColours.token(model.groupColour(g), FlexibleColours.loadedFace.w)   // ★ S1: his chosen colour
+            }
+            regionTint.append((f.faceRegionID, c))
+        }
+        if roleMarks, let r = model.selectedRegion {
+            if let st = model.stack(r) { for l in st.exitRegions { regionTint.append((l.id, FlexibleColours.linkedEnd)) } }
+            regionTint.append((r, FlexibleColours.selectedFace))
+        }
+        return Inputs(regions: regions, regionTint: regionTint, partMesh: model.project.viewerMesh, loadedKeys: model.loadedKeys,
+                      stacks: model.stacks, partUVT: model.geometry.mapValues(\.partUVT),
+                      shown: FlexibleShownValues.inputs(model, deferStamps: deferStamps),
+                      frozenExaggeration: model.frozenExaggeration, noNumber: FlexibleColours.noNumber, ghost: FlexibleColours.ghost,
+                      sectionViolet: violet)
     }
 
     /// Per-column colours + the dent, from the model's current copies of core's results.
@@ -89,39 +173,22 @@ public enum FlexiblePageChannels {
                                 controlColumnColours: Bool = false, groupColours: Bool = true,
                                 roleMarks: Bool = true, heatRegions: Set<Int>? = nil, sectionTints: Bool = false,
                                 pressHeat: [FlexiblePressHeat.Entry] = []) -> Channels {
-        // part regions: loaded / resting / selected / linked other end — by REGION, so a split
-        // sector is tinted on its own side of its cuts (FlexibleRegions).
-        // ★ ROUND 4 (D2): no "conflict" tint — two faces on one stack are a pinch (one group) or
-        // separate squeezes (two groups), never an error; with two or more squeeze groups a
-        // pressed face's own part takes its GROUP's colour (FlexibleSqueezeGroups.palette, never
-        // purple) — seen until its map quads cover it (the face list's dots carry it after)
-        // ★ ROUND 6 (his img1): `groupColours` false on BOTH pages — a pressed face with no map is the plain
-        // pressed colour; the group's colour is the Settings page's glass (FlexibleGroupWalls) and its dots
-        let regions = model.regions
-        let groups = model.squeezeGroups
-        var regionTint: [(id: Int, tint: SIMD4<Float>)] = []   // later entries win
-        // ★ ROUND 7 (M2, his img3 words): on the Squish page, where a tap works — every lattice piece of a face only partly
-        // inside a face-prism wears the face-prism violet, faint, FIRST (a role or the selection over it wins); the solid
-        // rest of the face stays the part's colour (the overlay cuts the face at the section's planes, so it stops there)
-        if sectionTints, let set = regions.flexible, !set.partialRoots.isEmpty {
-            let c = SIMD4<Float>(FlexibleStageStyle.facePrismTint, Self.sectionTintAlpha)
-            for p in set.pieces where set.partialRoots[p.rootRegion] != nil && p.kind != .strip { regionTint.append((p.wireID, c)) }
-        }
-        // ★ BATCH V ("Role colours off" on the MAIN page — his answer of 2026-10-09, now a view setting): `roleMarks` false —
-        // no pressed green, no resting cyan, no selected face or linked end on the part; only the dent heat on the maps. The
-        // Settings page keeps them.
-        for f in model.settings.faces where roleMarks {
-            var c = f.isLoaded ? FlexibleColours.loadedFace : FlexibleColours.restingFace
-            if groupColours, f.isLoaded, groups.count > 1, let g = groups.first(where: { $0.regions.contains(f.faceRegionID) }) {
-                c = FlexibleColours.token(model.groupColour(g), FlexibleColours.loadedFace.w)   // ★ S1: his chosen colour
-            }
-            regionTint.append((f.faceRegionID, c))
-        }
-        if roleMarks, let r = model.selectedRegion {
-            if let st = model.stack(r) { for l in st.exitRegions { regionTint.append((l.id, FlexibleColours.linkedEnd)) } }
-            regionTint.append((r, FlexibleColours.selectedFace))
-        }
-        let partMesh = model.project.viewerMesh
+        channels(inputs(model: model, groupColours: groupColours, roleMarks: roleMarks, sectionTints: sectionTints),
+                 overlay: overlay, xray: xray, drawnLattice: drawnLattice, heat: heat, depthScaleMM: depthScaleMM,
+                 mapValues: mapValues, controlColumnColours: controlColumnColours, heatRegions: heatRegions,
+                 sectionTints: sectionTints, pressHeat: pressHeat)
+    }
+
+    /// ★ notes30 FF1: the compute — `channels(model:…)`'s own sum over the gathered `Inputs` alone (any thread). `shown`: the
+    /// values already made for this drawn lattice (the main page makes them once per picture), else made here.
+    nonisolated static func channels(_ i: Inputs, shown given: FlexibleShownValues? = nil, overlay: FlexibleOverlayMesh?, xray: Bool,
+                                     drawnLattice: FlexibleGeneratedLattice?, heat: Bool = true,
+                                     depthScaleMM: Double? = nil, mapValues: [Float]? = nil,
+                                     controlColumnColours: Bool = false, heatRegions: Set<Int>? = nil, sectionTints: Bool = false,
+                                     pressHeat: [FlexiblePressHeat.Entry] = []) -> Channels {
+        let regions = i.regions
+        let regionTint = i.regionTint
+        let partMesh = i.partMesh
         let tintOf: (Int, SIMD3<Double>) -> SIMD4<Float>? = { face, centroid in
             var out: SIMD4<Float>?
             for e in regionTint where regions.contains(e.id, face: face, centroid: centroid, mesh: partMesh) {
@@ -148,18 +215,18 @@ public enum FlexiblePageChannels {
                     out[v * 8] = col.x; out[v * 8 + 1] = col.y; out[v * 8 + 2] = col.z; out[v * 8 + 3] = col.w
                 }
             }
-            if xray { FlexibleOverlayMesh.markGhost(&out, colour: FlexibleColours.ghost) }
+            if xray { FlexibleOverlayMesh.markGhost(&out, colour: i.ghost) }
             return Channels(tints: n > 0 ? out : nil, dents: nil, exaggeration: 0, animated: false, legendLine: "")
         }
-        let shown = FlexibleShownValues(model: model, drawnLattice: drawnLattice)
+        let shown = given ?? FlexibleShownValues(i.shown, drawnLattice: drawnLattice, frozenExaggeration: i.frozenExaggeration)
         // ★ R7-E5: an edges group's heat (its presses' columns, FlexiblePressHeat) shares the ONE scale — its own top when no face
         // is heated beside it
         let pressTop = heat ? FlexiblePressHeat.top(pressHeat) : 0
-        let faceHeated = heatRegions.map { only in model.loadedKeys.contains { only.contains($0.region) } } ?? !model.loadedKeys.isEmpty
+        let faceHeated = heatRegions.map { only in i.loadedKeys.contains { only.contains($0.region) } } ?? !i.loadedKeys.isEmpty
         let scale = depthScaleMM ?? (pressTop > 0 ? (faceHeated ? Swift.max(shown.maxDepth, pressTop) : pressTop) : shown.maxDepth)
         var colours: [FlexFaceKey: [SIMD4<Float>]] = [:]
         var numbers: [FlexFaceKey: [Double?]] = [:]
-        for k in model.loadedKeys {
+        for k in i.loadedKeys {
             guard let vals = shown.values[k] else { continue }
             numbers[k] = vals.map { if case .depth(let d) = $0 { return d } else { return nil } }
             let start = overlay.flatStart[k]
@@ -172,24 +239,26 @@ public enum FlexiblePageChannels {
                 }
                 switch v {
                 case .depth(let mm): return FlexibleColours.depth(mm, max: scale)
-                case .noNumber: return FlexibleColours.noNumber
+                case .noNumber: return i.noNumber
                 case .solid: return SIMD4(0, 0, 0, 0)
                 }
             }
         }
         // ★ the value at every map vertex: the sim's (FE), else the corner mean of the shown numbers
-        let values = controlColumnColours ? nil : (mapValues ?? overlay.mapCornerValues(numbers, stacks: model.stacks))
+        let values = controlColumnColours ? nil : (mapValues ?? overlay.mapCornerValues(numbers, stacks: i.stacks))
         let vertexColour: ((Int) -> SIMD4<Float>?)? = values.map { vals in
             { v in v < vals.count && vals[v].isFinite ? FlexibleColours.depth(Double(vals[v]), max: scale) : nil }
         }
         // ★ R7-V (the Settings page's Heat view): only `heatRegions`' maps take the heat (nil: every pressed face's)
         let heated = heatRegions.map { only in colours.filter { only.contains($0.key.region) } } ?? colours
         var tints = overlay.tints(partTint: tintOf, columnColours: heat ? heated : [:], vertexColour: heat ? vertexColour : nil,
-                                  ghost: xray ? FlexibleColours.ghost : nil)
-        if heat, pressTop > 0 { FlexiblePressHeat.paint(&tints, overlay: overlay, model: model, entries: pressHeat, scale: scale) }   // ★ R7-E5
+                                  ghost: xray ? i.ghost : nil)
+        if heat, pressTop > 0 {   // ★ R7-E5
+            FlexiblePressHeat.paint(&tints, overlay: overlay, regions: regions, mesh: partMesh, entries: pressHeat, scale: scale)
+        }
         // ★ ROUND 7 (M2): the sections' violet reads through the X-ray ghost — flagged like the map (flags.y), not ghosted
         if sectionTints, regions.flexible?.partialRoots.isEmpty == false {
-            let violet = SIMD4<Float>(FlexibleStageStyle.facePrismTint, Self.sectionTintAlpha)
+            let violet = i.sectionViolet
             for t in 0..<overlay.keptFace.count {
                 let v0 = t * 3 * 8
                 guard v0 + 23 < tints.count,
@@ -210,10 +279,9 @@ public enum FlexiblePageChannels {
         // ★ ROUND 7 (M2): the solid rest of a face only partly latticed stays still (its triangles on the section's own face,
         // outside the section's cuts) — a Flexible sector only; his Surface sectors and whole faces ride their ramp as before
         let still = stillRule(regions: regions, mesh: partMesh, overlay: overlay, keys: Array(depths.keys))
-        let dents = overlay.displacements(depths: depths, stacks: model.stacks,
-                                          partUVT: model.geometry.mapValues(\.partUVT), still: still)
+        let dents = overlay.displacements(depths: depths, stacks: i.stacks, partUVT: i.partUVT, still: still)
         // ★ one k while the depth chip is dragged (FlexibleDepthChips freezes it on the model)
-        let k = model.frozenExaggeration ?? shown.exaggeration
+        let k = i.frozenExaggeration ?? shown.exaggeration
         return Channels(tints: tints, dents: dents, exaggeration: k, animated: shown.animated,
                         legendLine: "\(shown.label) · shown ×\(Int(k))", mapValues: values, heatScaleMM: scale)
     }

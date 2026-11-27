@@ -220,6 +220,8 @@ public final class LatticeLayoutPreview: ObservableObject {
     private var shownWhere: (token: Int, at: MapWhere)?
     private var nozzleSession: LatticeLayoutSession?
     private var latticeAtLay = LatticeSettings()
+    /// ★ v3: this lay's rough cut-open, as the engine made it (its scaffold's token): the landing holds the visible rim as it drew.
+    private var roughHeld: (token: Int, rough: LatticeBuildScaffold.Rough)?
     private var nozzlePath: String?
     private var stress = Stress()
     private var sessionStressKey: Int?   // the field the session holds (setDemand), by its key
@@ -393,7 +395,17 @@ public final class LatticeLayoutPreview: ObservableObject {
         // ★ notes30: a Live preview lay does none of it: the last lattice stays exactly as it is, no card, until this one lands
         if quiet { build.stop(); refresh.end() }
         else {
-            if !isOrganic || AppSettings.skipAllAnimations { build.layBegins() } else { build.stop() }
+            // ★ notes30 (his 11-26): "on fast parts, it runs as it is now - and on slow parts it runs with the scaffolding" —
+            // decided here from this part's last lay (or, a first lay, its size and cells); the solid view's walls come off floor
+            // by floor (X-ray: none); the switch armed for a strut lay (a lay still working a second after the ask: the scaffold)
+            if !isOrganic || AppSettings.skipAllAnimations {
+                // (a sheet lay keeps release 21's rise: its walls are drawn on its map, not swept strut by strut)
+                let arms = Self.armsScaffold(organic: isOrganic, quiet: quiet, skip: AppSettings.skipAllAnimations)
+                    && !LatticeSheets.isSheet(p.lattice.topologyID)
+                let plan = arms ? buildPlan(path: path, s, sheet: LatticeSheets.isSheet(p.lattice.topologyID))
+                                : LatticeBuildTimelapse.Plan(scaffold: false, expectedS: nil)
+                build.layBegins(walls: solid && !isOrganic, scaffold: plan.scaffold, mayScaffold: arms, expectedS: plan.expectedS)
+            } else { build.stop() }
             refresh.begin(refreshSteps(organic: isOrganic, path: path, up: Self.printUp(p),
                                        sheet: LatticeSheets.isSheet(p.lattice.topologyID)))   // ★ notes30: a sheet's own words
         }
@@ -825,6 +837,11 @@ public final class LatticeLayoutPreview: ObservableObject {
                 return
             }
             organicQuality = nil; organicNumbers = nil
+            // ★ notes30 (his 11-26, "open up the walls first"): the rough cut-open of the lattice's area and the scaffold on it,
+            // made before the lay (a coarse map of the domain's "where", on the domain the lay then keeps) — for a slow lay now,
+            // for a quick one in case it is still working a second after the ask
+            if build.wantsRough { await roughCut(session, s) }
+            guard !Task.isCancelled else { return }
             t0 = Date()
             let r = try await session.lay(s)
             guard !Task.isCancelled else { return }
@@ -841,7 +858,8 @@ public final class LatticeLayoutPreview: ObservableObject {
                 refresh.reached(Self.stepMap)
                 t0 = Date()
                 map = try? await Self.map(session, box, token: token,
-                                          cutSmooth: Self.cutSmoothWanted(lattice: latticeAtLay, printAccurate: printAccurate))
+                                          cutSmooth: Self.cutSmoothWanted(lattice: latticeAtLay, printAccurate: printAccurate),
+                                          hold: isSheet ? nil : rimHold())   // ★ v3: the scaffold's visible rim held
                 guard !Task.isCancelled else { return }
                 stepS[Self.stepMap] = Date().timeIntervalSince(t0)
             }
@@ -1398,12 +1416,16 @@ public final class LatticeLayoutPreview: ObservableObject {
         guard facts.lays, facts.touch > 0, facts.openLook > 0 else { return nil }
         let bead = p.printParams.strutLineWidthMM > 0 ? p.printParams.strutLineWidthMM : 0.45
         let thinnest = 2 * bead   // partWide's minStrutLines
-        let on = l.allowQuilt && (p.latticePageManual || l.isOrganic)
+        let manual = p.latticePageManual || l.isOrganic   // Auto lays neither Allow quilt nor Small cells (settings(_:))
+        let on = l.allowQuilt && manual
         var ae = l
         ae.stageMode = .aesthetic
+        let floor = thinnest / (on ? facts.touch : facts.openLook)
         return SolidReason.Depth(depthMM: 0, cellsAcross: Int(Swift.max(1, minCellsAcross(l))),
-                                 floorCellMM: thinnest / (on ? facts.touch : facts.openLook), quiltFloorCellMM: thinnest / facts.touch,
-                                 aestheticCellsAcross: Int(minCellsAcross(ae)), allowQuiltOn: on)
+                                 floorCellMM: floor, quiltFloorCellMM: thinnest / facts.touch,
+                                 aestheticCellsAcross: Int(minCellsAcross(ae)), allowQuiltOn: on,
+                                 thinFloorCellMM: thinFloor(thinnest: thinnest, bead: bead, touch: facts.touch, floor: floor),
+                                 smallCellsOn: l.smallCellsInThinWalls && manual)
     }
 
     nonisolated static func depthAsk(_ s: LatticeLayoutSession.Settings, lattice l: LatticeSettings,
@@ -1415,9 +1437,20 @@ public final class LatticeLayoutPreview: ObservableObject {
         let thinnest = Swift.max(1, s.minStrutLines) * s.beadMM
         var ae = l
         ae.stageMode = .aesthetic
+        let strut = facts.lays && facts.touch > 0 && !LatticeSheets.isSheet(s.topology)
         return SolidReason.Depth(depthMM: deepest, cellsAcross: Int(Swift.max(1, s.minCellsAcross)), floorCellMM: floorCellMM,
-                                 quiltFloorCellMM: facts.lays && facts.touch > 0 ? thinnest / facts.touch : 0,
-                                 aestheticCellsAcross: Int(minCellsAcross(ae)), allowQuiltOn: s.allowQuilt)
+                                 quiltFloorCellMM: strut ? thinnest / facts.touch : 0,
+                                 aestheticCellsAcross: Int(minCellsAcross(ae)), allowQuiltOn: s.allowQuilt,
+                                 thinFloorCellMM: strut ? thinFloor(thinnest: thinnest, bead: s.beadMM, touch: facts.touch,
+                                                                    floor: floorCellMM) : 0,
+                                 smallCellsOn: s.smallCellsInThinWalls)
+    }
+
+    /// ★ notes30 X2 (Small cells first): the smallest cell Small cells in thin walls lays in a wall that needs it — core's
+    /// lay_cells thin_floor_cell_mm: lattice_quilt_off_cell_mm (the thinnest strut and kQuiltOffGapLines = 1 printed line of air,
+    /// over the type's touch), never over the open look's floor.
+    nonisolated static func thinFloor(thinnest: Double, bead: Double, touch: Double, floor: Double) -> Double {
+        Swift.min(floor, (thinnest + bead) / touch)
     }
 
     /// ★ his ruling 11-14: why asked-for lattice is solid, and the fixes (after every layout: one coarse map).
@@ -1511,9 +1544,22 @@ public final class LatticeLayoutPreview: ObservableObject {
         acts = Array(acts.prefix(3))
         let popups = AppPopups.shared
         let title = SolidPopUp.title(r)
-        if r.offersThree, let first = acts.first {
+        if r.offersThree, SolidReason.controlThreeOffers, let first = acts.first {   // RED CONTROL: release 22's three buttons
             popups.choose(title, text, first: first, second: acts.count > 1 ? acts[1] : nil, third: acts.count > 2 ? acts[2] : nil,
                           dismiss: nil, why: SolidPopUp.offersWhy(r).map { (SolidPopUp.offersWhyTitle, $0) })
+        } else if r.offersThree {
+            // ★ notes30 X2 (his yes, 11-26): up to three offers (Small cells in thin walls first, where it lays), and Leave it
+            // solid last, the pop-up's dismiss word (it changes nothing: the pop-up closes)
+            let offered = r.fixes.filter { $0 != .leaveSolid }.prefix(3).map { f in
+                (title: f.title, run: { [weak self] in self?.takeFix(f) } as () -> Void)
+            }
+            let why = SolidPopUp.offersWhy(r).map { (SolidPopUp.offersWhyTitle, $0) }
+            if let first = offered.first {
+                popups.choose(title, text, first: first, second: offered.count > 1 ? offered[1] : nil,
+                              third: offered.count > 2 ? offered[2] : nil, dismiss: SolidReason.Fix.leaveSolid.title, why: why)
+            } else {
+                popups.choose(title, text, first: (SolidReason.Fix.leaveSolid.title, {}), second: nil, dismiss: nil, why: why)
+            }
         } else if acts.count >= 2 {
             popups.choose(title, text, first: acts[0], second: acts[1], third: acts.count > 2 ? acts[2] : nil, dismiss: "OK")
         } else {
@@ -1702,7 +1748,8 @@ public final class LatticeLayoutPreview: ObservableObject {
     /// The engine's map over the part's box with a voxel of air all round: about a million voxels at most, never finer than
     /// 0.35 mm.
     static func map(_ s: LatticeLayoutSession, _ box: (lo: SIMD3<Float>, hi: SIMD3<Float>), token: Int,
-                    smooth: Bool = false, cutSmooth: Bool = false) async throws -> (grid: LatticeLayoutSolidGrid, ms: Double) {
+                    smooth: Bool = false, cutSmooth: Bool = false,
+                    hold: LatticeBuildScaffold.Rough? = nil) async throws -> (grid: LatticeLayoutSolidGrid, ms: Double) {
         let (origin, voxel, dims) = mapGeometry(box)   // ★ notes24: shared with `mapAhead`
         let r = try await s.grid(origin: origin, voxel: voxel, dims: dims)
         // ★ his 11-19 note: Organic's cut edges are smooth lines, not the voxels' stair-steps
@@ -1712,6 +1759,15 @@ public final class LatticeLayoutPreview: ObservableObject {
         if cutSmooth, !smooth {
             let raw = r.rg
             rg = await Task.detached(priority: .userInitiated) { LatticeLayoutSolidGrid.cutSmoothed(raw, dims: dims) }.value
+        }
+        // ★ v3 "The cut-out must not change": the scaffold's rough cut-open on these very voxels, drawn by the same rule, holds
+        // the visible rim exactly as it drew it
+        if let h = hold, h.dims == dims, h.voxel == voxel, h.origin == origin, h.rg.count == r.rg.count {
+            let drawn = rg, cs = cutSmooth && !smooth
+            rg = await Task.detached(priority: .userInitiated) {
+                let early = smooth ? LatticeLayoutSolidGrid.smoothed(h.rg, dims: dims) : cs ? LatticeLayoutSolidGrid.cutSmoothed(h.rg, dims: dims) : h.rg
+                return LatticeBuildScaffold.heldRim(exact: drawn, rough: early, dims: dims).rg
+            }.value
         }
         var grid = LatticeLayoutSolidGrid(token: token, origin: origin, voxel: voxel, dims: dims, rg: rg, smooth: smooth || cutSmooth)
         // ★ SHEETS (builder E): the seam channels, so the sheet pass draws a blend band as the file prints it
@@ -2313,7 +2369,79 @@ extension LatticeLayoutPreview {
     func buildMeets(_ now: LatticeLayoutBarsInputs?, after old: LatticeLayoutBarsInputs?) {
         guard now?.token != old?.token else { return }
         guard let n = now else { build.stop(); return }
-        build.landed(token: n.token)
+        // ★ notes30: the frame from the landed lattice's box when none is fixed yet (the fast path), along the face he kept
+        let box = build.frame == nil ? LatticeLayoutBarsPass.box(n.bars) ?? n.sheets.flatMap(LatticeLayoutBarsPass.sheetBox) : nil
+        build.landed(token: n.token, box: box, printUp: n.printUp)
+    }
+
+    // MARK: ★ notes30 — fast parts as stand-solid-7s, slow parts with the scaffold (his 11-26)
+
+    /// ★ notes30: whether a lay may get the scaffold: a strut (or sheet) lay on screen with its animations — never Organic (its
+    /// own growth: his "I would much rather two different animations"), never a Live preview lay (quiet: no animation at all),
+    /// never with Skip all animations (the card). RED CONTROL `controlScaffoldAnyLay`: every lay armed.
+    static func armsScaffold(organic: Bool, quiet: Bool, skip: Bool) -> Bool {
+        controlScaffoldAnyLay || (!organic && !quiet && !skip)
+    }
+    nonisolated(unsafe) static var controlScaffoldAnyLay = false
+
+    /// ★ notes30: fast or slow, at the ask — this part's last lay time (its type's), else a first lay's estimate from the part's
+    /// box and its cells; plus the map the solid view (or a sheet) waits for.
+    func buildPlan(path: String, _ s: LatticeLayoutSession.Settings, sheet: Bool) -> LatticeBuildTimelapse.Plan {
+        let last = layWallS[timeKey(path, .exact)]   // (its session's opening counted in)
+        let lo = s.cellMM > 0 ? s.cellMM : s.cellMinMM, hi = s.cellMM > 0 ? s.cellMM : s.cellMaxMM
+        let opens = session == nil || sessionPath != path || session?.printUp != upAtLay
+        let estimate = last == nil ? LatticeBuildTimelapse.estimateS(box: box, cellLoMM: lo, cellHiMM: hi)
+            .map { $0 + (opens ? stepS[Self.stepOpen] ?? 0.8 : 0) } : nil
+        let mapS = solidWanted || sheet ? stepS[Self.stepMap] : nil
+        return LatticeBuildTimelapse.plan(lastLayS: last, mapS: mapS, estimateS: estimate)
+    }
+
+    /// ★ notes30: the rough cut-open's geometry over the part's box — the exact map's (`mapGeometry`) with a voxel
+    /// `LatticeBuildScaffold.roughVoxelScale` times larger: ★ v3 1, the exact map's very voxels (RED CONTROL: v2's 2).
+    nonisolated static func roughGeometry(_ box: (lo: SIMD3<Float>, hi: SIMD3<Float>)) -> (origin: SIMD3<Float>, voxel: Float, dims: SIMD3<Int32>) {
+        let ext = simd_max(box.hi - box.lo, SIMD3(repeating: 0.1))
+        let fine = Swift.max(0.35, Float(cbrt(Double(ext.x * ext.y * ext.z) / 1_000_000)))
+        let voxel = fine * LatticeBuildScaffold.roughVoxelScale
+        let dims = SIMD3<Int32>(Int32((ext.x / voxel).rounded(.up)) + 3, Int32((ext.y / voxel).rounded(.up)) + 3,
+                                Int32((ext.z / voxel).rounded(.up)) + 3)
+        return (box.lo - SIMD3(repeating: voxel), voxel, dims)
+    }
+
+    /// Tests: a rough cut-open handed out as if the engine had made it (nil: none).
+    nonisolated(unsafe) static var roughForTesting: ((LatticeLayoutSession.Settings) -> LatticeBuildScaffold.Rough?)?
+    /// Rough cut-opens asked of the engine (tests: none for a Live preview lay, Skip all animations or Organic).
+    nonisolated(unsafe) static var roughCutsAsked = 0
+
+    /// ★ notes30: the rough cut-open for `s` on the lay's session, before the lay, and the scaffold on it (made off the main
+    /// thread) handed to the timelapse. None made (no domain, a newer lay): the lay goes on as before.
+    private func roughCut(_ session: LatticeLayoutSession, _ s: LatticeLayoutSession.Settings) async {
+        guard let box else { return }
+        Self.roughCutsAsked += 1
+        let t0 = Date()
+        let rough: LatticeBuildScaffold.Rough?
+        if let f = Self.roughForTesting { rough = f(s) } else {
+            let g = Self.roughGeometry(box)
+            let made: (rg: [Int8], ms: Double)? = (try? await session.gridRough(s, origin: g.origin, voxel: g.voxel, dims: g.dims)) ?? nil
+            rough = made.map { LatticeBuildScaffold.Rough(origin: g.origin, voxel: g.voxel, dims: g.dims, rg: $0.rg) }
+        }
+        guard !Task.isCancelled, let rough, rough.isWhole, build.wantsRough else { return }
+        let axes = build.axes(printUp: session.printUp.map { SIMD3<Float>($0) })
+        let walls = solidWanted
+        let smooth = Self.cutSmoothWanted(lattice: latticeAtLay, printAccurate: printAccurate)   // ★ v3: the exact map's own rule
+        let made = await Task.detached(priority: .userInitiated) {
+            LatticeBuildScaffold.make(rough, up: axes.up, across: axes.across, walls: walls, cutSmooth: smooth)
+        }.value
+        layStages["roughMS"] = Self.ms(since: t0)
+        guard !Task.isCancelled, let made, build.wantsRough else { return }
+        roughHeld = (build.scaffoldToken, rough)
+        build.scaffoldArrived(LatticeBuildScaffold.drawing(made, token: build.scaffoldToken))
+    }
+    /// ★ v3 "The cut-out must not change": the rough cut-open the landed map holds its visible rim to — this lay's, once its
+    /// scaffold's walls have come off, on the exact map's own voxels; never with Print-accurate preview on (HIS RULE: the drawing
+    /// follows the print file — there the exact map is drawn as the file has it).
+    private func rimHold() -> LatticeBuildScaffold.Rough? {
+        guard !printAccurate, let h = roughHeld, h.token == build.scaffoldToken, build.scaffoldShown() else { return nil }
+        return h.rough
     }
 
     /// The refresh's steps in words (five at most) — the card's line — and how long each took the last time here.

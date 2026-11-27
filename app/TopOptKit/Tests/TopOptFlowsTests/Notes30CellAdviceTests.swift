@@ -83,7 +83,7 @@ final class Notes30CellAdviceTests: XCTestCase {
         XCTAssertTrue(text.contains("A wall there is 3 mm thick.") && text.contains("cells start at 4.74 mm"), "★ the numbers")
         XCTAssertEqual(narrow.fixes.last, .leaveSolid, "★ the pop-up's Leave it solid")
         XCTAssertEqual(narrow.fixes.first, .letWallsCutCells, "the wall's own fix first, as before")
-        XCTAssertEqual(SolidPopUp.title(narrow), "This needs 3 mm cells")
+        XCTAssertEqual(SolidPopUp.title(narrow), "This needs 1.5 mm cells", "a 3 mm wall in the 2 cells its lattice asks")   // ★ RE-PINNED (X2, Small cells first): core divides a wall into its cells across
         XCTAssertNotNil(SolidPopUp.offersWhy(narrow), "its (i)")
 
         let few = try XCTUnwrap(SolidReason.of(share: 1, nocell: [0, 0, 40, 0, 0], lattice: ae, depth: t, haveMM: [0, 0, 6, 0, 0]))

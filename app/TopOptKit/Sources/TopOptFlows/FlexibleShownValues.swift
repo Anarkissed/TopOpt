@@ -28,7 +28,8 @@ import TopOptKit
 /// One column's value on the overlay.
 enum FlexShownValue { case depth(Double), noNumber, solid }
 
-@MainActor
+// ★ notes30 FF1: no longer main-actor as a whole — the rule below is a pure function of `Inputs`, run on the Flexible page's
+// picture worker (FlexibleMainPicture); only the reads of the model (`inputs(_:)`, `init(model:)`) stay on the main actor.
 struct FlexibleShownValues {
     var values: [FlexFaceKey: [FlexShownValue]] = [:]
     var maxDepth = 0.0
@@ -67,14 +68,34 @@ struct FlexibleShownValues {
         var segments: [FlexFaceKey: FlexiblePinch.Segments] = [:]
         /// ★ ROUND 7, M1 VERIFY: the opened scene sets a face-prism (false: no lattice anywhere — nothing is shown).
         var facePrisms = true
+        /// ★ notes30 FF1: a Stamp face's spread NOT yet made (`inputs(_:deferStamps: true)` — the main page's gather): its
+        /// ingredients, made into `stampFootprints` on the picture worker (`resolvingStamps`), never on the main thread.
+        var stampJobs: [FlexFaceKey: FlexibleStampDentJob] = [:]
+
+        /// ★ notes30 FF1: the deferred spreads made (the same `stampDent` numbers, off the main thread).
+        func resolvingStamps() -> Inputs {
+            guard !stampJobs.isEmpty else { return self }
+            var r = self
+            for (k, j) in stampJobs { r.stampFootprints[k] = j.dent() }
+            r.stampJobs = [:]
+            return r
+        }
     }
 
-    static func inputs(_ m: FlexibleStageModel) -> Inputs {
+    /// ★ notes30 FF1: `deferStamps` — a Stamp face's spread is left as its ingredients (`Inputs.stampJobs`) for the picture
+    /// worker; false (every other caller): made here, as before.
+    @MainActor
+    static func inputs(_ m: FlexibleStageModel, deferStamps: Bool = false) -> Inputs {
         let settings = m.settings
         var feet: [FlexFaceKey: [Double]] = [:]
+        var jobs: [FlexFaceKey: FlexibleStampDentJob] = [:]
         // ★ BATCH M (M2): the stamp's DESIGNED squish — its footprint spread out, its foci merged
         // into one press (FlexibleStampSpread) — not the footprint's isolated pits
         for f in settings.loadedFaces where f.isStampShape {
+            if deferStamps {   // ★ notes30 FF1: its ingredients only
+                if let j = m.stampDentJob(f.faceRegionID) { jobs[FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)] = j }
+                continue
+            }
             if let foot = m.stampDent(f.faceRegionID) {
                 feet[FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)] = foot
             }
@@ -88,16 +109,25 @@ struct FlexibleShownValues {
                        showBuildable: m.showBuildable, editingDepth: m.frozenExaggeration != nil, stampFootprints: feet,
                        pinched: pinched, segments: m.segments)
         i.facePrisms = !m.noFacePrismKnown   // ★ M1 VERIFY
+        i.stampJobs = jobs   // ★ notes30 FF1
         return i
     }
 
+    @MainActor
     init(model m: FlexibleStageModel, drawnLattice: FlexibleGeneratedLattice? = nil) {
         self.init(Self.inputs(m), drawnLattice: drawnLattice)
         // one k while the depth chip is dragged
         if let k = m.frozenExaggeration { exaggeration = k }
     }
 
-    init(_ m: Inputs, drawnLattice: FlexibleGeneratedLattice?) {
+    /// ★ notes30 FF1: `init(model:)`'s sum over the gathered values (the depth chip's frozen k given as a value).
+    init(_ m: Inputs, drawnLattice: FlexibleGeneratedLattice?, frozenExaggeration: Double?) {
+        self.init(m, drawnLattice: drawnLattice)
+        if let k = frozenExaggeration { exaggeration = k }
+    }
+
+    init(_ given: Inputs, drawnLattice: FlexibleGeneratedLattice?) {
+        let m = given.resolvingStamps()   // ★ notes30 FF1 (a no-op unless the stamps were deferred)
         // ★ WHILE THE LATTICE IS DRAWN, THE MAP AND THE DENT ARE THE LATTICE'S: the exact
         // depth arrays its squish faces were built from, so the dent and the walls squish by
         // one set of numbers. ONLY WHERE THE LATTICE OWNS THE MAP (no stamp shown): a shown

@@ -53,7 +53,8 @@ final class DesignPrimitivesTests: XCTestCase {
     private func canonicalJob(_ m: AppModel) throws -> Data {
         let req = try XCTUnwrap(m.makeRunRequest())
         let raw = try RemoteRun.buildJobJSON(req)
-        let obj = try JSONSerialization.jsonObject(with: raw)
+        // ★ notes30: the four solid-skin keys are the only move (Notes30PrintSettingsTests); out here, the pin guards the rest
+        let obj = Notes30PrintSkins.without(try JSONSerialization.jsonObject(with: raw))
         return try JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys])
     }
     private func sha(_ d: Data) -> String { SHA256.hash(data: d).map { String(format: "%02x", $0) }.joined() }

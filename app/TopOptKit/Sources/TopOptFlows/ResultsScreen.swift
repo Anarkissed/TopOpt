@@ -1588,7 +1588,13 @@ public struct ResultsScreen: View {
         exportFailure = nil
         Self.exportAttemptProbe?("3mf")
         if Self.exportWriteFailsForTests { exportFailure = .file(CocoaError(.fileWriteNoPermission).localizedDescription); return }
+        // ★ notes30 (his word 11-26): the print settings he set go into the 3MF (ThreeMFPrintSettings)
+        let params = PrintFileKeep.openPrintParams()
         if let kept = PrintFileKeep.openFile(model.printFileIdentity, named: model.exportStem(for: model.selected)) {
+            do { try ThreeMFPrintSettings.stamp(kept, params: params) } catch {
+                exportFailure = .file(error.localizedDescription)
+                return
+            }
             stlExportURLs = [kept]
             return
         }
@@ -1596,6 +1602,7 @@ public struct ResultsScreen: View {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(model.exportThreeMFFilename)
         do {
             try data.write(to: url, options: .atomic)
+            try ThreeMFPrintSettings.stamp(url, params: params)
             stlExportURLs = [url]
         } catch {
             exportFailure = .file(error.localizedDescription)

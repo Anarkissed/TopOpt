@@ -124,6 +124,13 @@ public enum PrintFileKeep {
     /// The version whose Results are on screen (the open workspace's), for Results' Export. Set by the workspace as it opens.
     @MainActor public static var open: (() -> (folder: UUID, store: ProjectStore)?)?
 
+    /// ★ notes30 (his word 11-26): the open version's print settings, as its project keeps them — what Export writes into the
+    /// 3MF it hands out (ThreeMFPrintSettings). nil: no version open.
+    @MainActor static func openPrintParams() -> PrintParams? {
+        guard let o = open?() else { return nil }
+        return o.store.snapshot(id: o.folder)?.printParams
+    }
+
     /// Whether the open version keeps this result's print file (asked as Results draws: the answer is kept per file and folder).
     @MainActor static func openFile(exists id: Identity?) -> Bool {
         guard let id, let o = open?() else { return false }

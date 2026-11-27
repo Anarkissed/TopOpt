@@ -1405,7 +1405,7 @@ public final class LatticeFileExport: ObservableObject {
             state = .failed(why.line); return
         }
         let path = job.modelPath, demand = job.demand, tensor = job.tensor
-        let name = p.name, f = Flag()
+        let name = p.name, f = Flag(), params = p.printParams
         flag = f
         token &+= 1
         let t = token
@@ -1427,7 +1427,11 @@ public final class LatticeFileExport: ObservableObject {
                 let safe = name.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespaces)
                 let ext = r.report.isThreeMF ? "3mf" : "stl"   // ★ Organic cut 2: core's 3MF
                 let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(safe.isEmpty ? "Part" : safe) lattice.\(ext)")
-                saved = Result { try r.stl.write(to: url, options: .atomic); return url }
+                saved = Result {
+                    try r.stl.write(to: url, options: .atomic)
+                    if r.report.isThreeMF { try ThreeMFPrintSettings.stamp(url, params: params) }   // ★ notes30: his print settings
+                    return url
+                }
             }
             await MainActor.run { [weak self] in
                 guard let self, self.token == t else { return }

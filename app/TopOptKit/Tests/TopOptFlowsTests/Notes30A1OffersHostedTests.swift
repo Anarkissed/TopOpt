@@ -18,6 +18,7 @@ final class Notes30A1OffersHostedTests: XCTestCase {
 
     override func tearDown() {
         SolidReason.controlSmallerCellsAlways = false
+        SolidReason.controlThreeOffers = false
         WorkspacePlaceholder.controlDiagnosisNoCard = false
         FlexibleSaid.recording = false
         AppPopups.shared.current = nil
@@ -53,9 +54,11 @@ final class Notes30A1OffersHostedTests: XCTestCase {
         return AppPopups.recorded.last { titles.contains($0.title) }
     }
 
-    /// ★ 1. His pad, Structural, Allow quilt off: the centred pop-up says what the depth needs and offers exactly his three, each
-    /// a 44 pt button; its (i) opens the card over it and a tap anywhere gives it back; "Turn Allow quilt on" lays his pad (the
-    /// button is Lattice again). RED CONTROL (`controlSmallerCellsAlways`): release 21's pop-up — "use smaller cells", no offer.
+    /// ★ 1. His pad, Structural, Allow quilt off: the centred pop-up says what the depth needs and offers, each a 44 pt button,
+    /// ★ notes30 X2 (his yes, 11-26) Small cells in thin walls FIRST, then Allow quilt on and Switch to Aesthetic, and Leave it
+    /// solid last; its (i) opens the card over it and a tap anywhere gives it back; "Small cells in thin walls" lays his pad with
+    /// Allow quilt still off (the button is Lattice again). RED CONTROLS: release 21's pop-up (`controlSmallerCellsAlways`: "use
+    /// smaller cells", no offer) and release 22's three offers (`controlThreeOffers`).
     func testHisPadOffersHisThreeAndAllowQuiltLaysIt() throws {
         FlexibleSaid.recording = true
         let offersTitle = "This needs 4 mm cells", oldTitle = "This lattice can't be laid"
@@ -72,6 +75,16 @@ final class Notes30A1OffersHostedTests: XCTestCase {
         AppPopups.shared.current = nil
         SolidReason.controlSmallerCellsAlways = false
 
+        // RED CONTROL: release 22's three offers (no Small cells in thin walls)
+        SolidReason.controlThreeOffers = true
+        AppPopups.recorded = []
+        let (r22, _) = try stage()
+        _ = try XCTUnwrap(waitForPopUp(r22, titled: [offersTitle, oldTitle]), "RED CONTROL: the pop-up came")
+        XCTAssertEqual([AppPopups.shared.action?.title, AppPopups.shared.second?.title, AppPopups.shared.third?.title],
+                       ["Turn Allow quilt on", "Switch to Aesthetic", "Leave it solid"], "RED CONTROL: release 22's three")
+        AppPopups.shared.current = nil
+        SolidReason.controlThreeOffers = false
+
         AppPopups.recorded = []
         let (h, p) = try stage()
         let pop = try XCTUnwrap(waitForPopUp(h, titled: [offersTitle, oldTitle]), "★ the pop-up came")
@@ -79,17 +92,18 @@ final class Notes30A1OffersHostedTests: XCTestCase {
         XCTAssertEqual(pop.title, offersTitle, "★ what the depth needs")
         XCTAssertFalse(pop.text.contains("smaller cells"), "★ never the advice that cannot help")
         let popups = AppPopups.shared
+        // ★ notes30 X2 (his yes, 11-26): Small cells in thin walls FIRST, then Allow quilt and Aesthetic; Leave it solid last
         XCTAssertEqual([popups.action?.title, popups.second?.title, popups.third?.title],
-                       ["Turn Allow quilt on", "Switch to Aesthetic", "Leave it solid"], "★ exactly his three")
-        XCTAssertFalse(popups.dismissShown, "★ no fourth button")
+                       ["Small cells in thin walls", "Turn Allow quilt on", "Switch to Aesthetic"], "★ his four, Small cells first")
+        XCTAssertTrue(popups.dismissShown)
+        XCTAssertEqual(popups.dismissTitle, "Leave it solid", "★ Leave it solid last (it closes, changing nothing)")
         let card = try h.onScreen("appPopup", "★ the centred pop-up")
         XCTAssertEqual(card.midX, h.size.width / 2, accuracy: 2, "★ centred")
         XCTAssertEqual(card.midY, h.size.height / 2, accuracy: 2, "★ centred")
-        for k in ["appPopupChoice1", "appPopupChoice2", "appPopupChoice3"] {
+        for k in ["appPopupChoice1", "appPopupChoice2", "appPopupChoice3", "appPopupDismiss"] {
             let b = try h.probe(k, "★ \(k): a 44 pt button")
             XCTAssertTrue(card.contains(b), "\(k) inside the pop-up")
         }
-        XCTAssertNil(h.frames.all["appPopupDismiss"], "★ no OK")
         for k in ["new-engine-reason", "lane-new-engine-reason"] { XCTAssertNil(h.frames.all[k], "nothing at the bottom-centre") }
 
         // its (i): the card over it, then the pop-up back as it was
@@ -98,22 +112,24 @@ final class Notes30A1OffersHostedTests: XCTestCase {
         try h.tap("appPopupWhy", "the (i)", settle: 1)
         XCTAssertEqual(popups.current?.info, true, "★ the (i)'s card")
         XCTAssertEqual(popups.current?.title, SolidPopUp.offersWhyTitle)
+        XCTAssertTrue(popups.current?.text.hasPrefix("Small cells in thin walls:") ?? false, "★ its (i) says Small cells first")
         XCTAssertNotNil(h.frames.all["app-popup-tap-anywhere"] ?? h.frames.all["appPopup"], "the card is drawn")
         try h.tap("appPopupBackdrop", "a tap anywhere", settle: 1)
         XCTAssertEqual(popups.current?.id, id, "★ the pop-up is back")
-        XCTAssertEqual(popups.action?.title, "Turn Allow quilt on", "★ with its buttons")
+        XCTAssertEqual(popups.action?.title, "Small cells in thin walls", "★ with its buttons")
 
-        // "Turn Allow quilt on": Manual with it on, and his pad lays
+        // "Small cells in thin walls": Manual with it on, Allow quilt still off, and his pad lays
         let raised = LatticeLayoutPreview.solidPopUpsRaised
         AppPopups.recorded = []
-        try h.tap("appPopupChoice1", "★ Turn Allow quilt on", settle: 1)
-        XCTAssertTrue(p.latticePageManual && p.lattice.allowQuilt, "★ the Lattice page's Manual, Allow quilt on")
+        try h.tap("appPopupChoice1", "★ Small cells in thin walls", settle: 1)
+        XCTAssertTrue(p.latticePageManual && p.lattice.smallCellsInThinWalls, "★ the Lattice page's Manual, Small cells on")
+        XCTAssertFalse(p.lattice.allowQuilt, "★ its own switch: Allow quilt stays off")
         let end = Date().addingTimeInterval(240)
         while h.frames.all["latticeCannot"] != nil, Date() < end { h.pump(1) }
         h.pump(3)
         XCTAssertNil(h.frames.all["latticeCannot"], "★ his pad lays: the button is Lattice again")
         XCTAssertFalse(AppPopups.recorded.contains { [offersTitle, oldTitle].contains($0.title) }, "★ nothing says it can't be laid")
-        print("NOTES30-X2 HOSTED after Allow quilt: pop-ups \(AppPopups.recorded.map(\.title)), raised \(LatticeLayoutPreview.solidPopUpsRaised - raised)")
+        print("NOTES30-X2 HOSTED after Small cells: pop-ups \(AppPopups.recorded.map(\.title)), raised \(LatticeLayoutPreview.solidPopUpsRaised - raised)")
     }
 
     /// ★ 2. The warning triangle (his pad's Top face as Lattice 8 mm deep: too few of Structural's cells across it) opens the
