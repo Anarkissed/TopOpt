@@ -1409,7 +1409,7 @@ public struct WorkspacePlaceholder: View {
                     if !v.isEmpty { project.recordLatticeWallVerdicts(v) }
                 }
                 .onChange(of: project.latticePageManual) { m in   // ★ Organic: the page's Auto / Manual decides the ask (his 11-18)
-                    // ★ notes30: and Structural Auto's sizing (Auto sizes the struts by the law; Manual is his own)
+                    // ★ notes30: and Structural Auto's kept file (Auto draws the file it kept; Manual is his own)
                     if newEngineOn, LatticeLayoutPreview.organic(project.lattice)
                         || StructuralAuto.applies(project.lattice, pageManual: m) || StructuralAuto.applies(project.lattice, pageManual: !m) {
                         newEngineSettingsChanged()
@@ -1418,7 +1418,7 @@ public struct WorkspacePlaceholder: View {
                 .onChange(of: project.buildOrientation.plateUp) { _ in   // ★ notes29: another face kept stands the lattice another way
                     if newEngineOn { newEngineSettingsChanged() }
                 }
-                .onChange(of: project.force.safetyMarginValue) { _ in   // ★ notes30: Structural Auto sizes for his Safety margin (D1)
+                .onChange(of: project.force.safetyMarginValue) { _ in   // ★ notes30: Structural Auto's target is his Safety margin (D1)
                     if newEngineOn, StructuralAuto.applies(project) { newEngineSettingsChanged() }
                 }
                 .ignoresSafeArea()
@@ -2150,11 +2150,16 @@ public struct WorkspacePlaceholder: View {
         let base = newEngineStressBase
         guard strengthJob != nil, onMac, StructuralAuto.applies(project), let inputs = StructuralAuto.inputs(project, model: model),
               let stage = base.field, !stage.stressTensor.isEmpty,
-              let baseKey = StructuralAuto.baseKey(project, base: base, model: model),
-              let s0 = StructuralAutoStore.shared.round0(stage, baseKey: base.key, inputs) else { return nil }
-        StructuralAutoStore.shared.keep(project.id, baseKey: baseKey, nil)
-        let s = LatticeLayoutPreview.settings(project, referenceMPa: 1)
-        return .init(round0: s0, stage: stage, inputs: inputs, baseKey: baseKey, largestCellMM: s.cellMaxMM, lineMM: s.beadMM)
+              let baseKey = StructuralAuto.baseKey(project, base: base, model: model) else { return nil }
+        // ★ his rework: every press starts from today's lay — a file kept by an earlier press goes, and the drawing goes back to
+        // today's lay (what check 1's file is made from; the thickening reads its cells)
+        let hadKept = StructuralAutoStore.shared.kept(project.id, baseKey: baseKey) != nil
+        StructuralAutoStore.shared.keep(project.id, nil)
+        if hadKept, newEngineOn {
+            newEngine.update(project: project, on: true, solid: !surfaceXrayOn, stress: newEngineStress, live: latticeLiveHere)
+        }
+        return .init(stage: stage, inputs: inputs, baseKey: baseKey,
+                     settings: LatticeLayoutPreview.settings(project, referenceMPa: base.referenceMPa))
     }
 
     /// ★ notes30 STRUCTURAL AUTO: the chain landed. The drawing follows the round its print file kept, built by the short
@@ -2349,12 +2354,12 @@ public struct WorkspacePlaceholder: View {
         let fileRequest = request.withJobMode(LatticeFileButton.jobMode)
         if let config {
             if let auto, !organic {
-                // ★ notes30 STRUCTURAL AUTO: two checks (one when the first is close enough), the lightest passing file kept;
-                // round 1 reads the preview's own lattice map for the check's lattice voxels while it is round 0's
-                let preview = newEngine, round0Key = auto.round0.key
+                // ★ notes30 STRUCTURAL AUTO (his rework 11-27): today's lay checked; only the short struts thickened and checked
+                // again — from the preview's own layout of today's lay (what the first file was made from)
+                let preview = newEngine, todayKey = newEngineStressBase.key
                 run.runner = LatticeFileButton.structuralAutoRunner(
                     config: config, job: job, ask: auto, projectName: project.name, strengthJob: strengthJob, densityGCm3: density,
-                    lattice: { c in await preview.latticeMask(c, stressKey: round0Key) },
+                    layout: { c in await preview.structuralAutoLayout(c, stressKey: todayKey) },
                     onStep: { LatticeMacMake.shared.autoStep($0) }, onJob: { LatticeMacMake.shared.job($0) })
             } else {
             run.runner = organic

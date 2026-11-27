@@ -202,9 +202,9 @@ final class LatticePreviewStoreTests: XCTestCase {
         XCTAssertEqual(n(LatticeLayoutSolidGrid(token: 0, origin: .zero, voxel: 1, dims: .zero, rg: [])), 8)
         // ★ RE-PINNED (362 11-24: notes25 D10 added floorCellMM; the store now keeps it, format 2, and still reads 1)
         // ★ RE-PINNED 13 -> 15 (notes28 sheets, builder C): + sheets, sheetSeams — never an Organic lattice's, so not kept
-        // ★ RE-PINNED 15 -> 17 (notes30 STRUCTURAL AUTO, SA1): + touch, quiltedWhereShort, D2's glow on a CELL lay — never an
-        // Organic lattice's (Structural Auto never sizes a weave), so not kept
-        XCTAssertEqual(n(LatticeLayoutColours.Laid()), 17)
+        // ★ RE-PINNED 15 -> 16 (notes30 STRUCTURAL AUTO, SA1, his rework 11-27): + cellStrut, each cell's strut as laid (what the
+        // thickening round reads) — never an Organic lattice's (Structural Auto never thickens a weave), so not kept
+        XCTAssertEqual(n(LatticeLayoutColours.Laid()), 16)
         XCTAssertEqual(n(LatticeLayoutPreview.Timing(openMS: 0, readMS: 0, cellsMS: 0, barsMS: 0, bars: 0)), 7)
         XCTAssertEqual(n(LatticeOrganicLook.Limits(strutLowerMM: 0, strutUpperMM: 0, strutAutoMM: 0, cellLowerMM: 0, cellUpperMM: 0,
                                                    cellAutoMM: 0)), 8)

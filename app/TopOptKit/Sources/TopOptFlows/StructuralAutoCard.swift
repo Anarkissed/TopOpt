@@ -11,8 +11,8 @@
 // on every print-file card. When it lands the card goes and the finished lattice plays the short build (the timelapse he liked,
 // LatticeBuildTimelapse, through the preview's own entry point), with Live preview and Skip all animations keeping their rules.
 //
-// Also here: the Lattice page's row (Structural, Auto: "Sized for 150 %" with an (i), its tap the Safety margin's own menu)
-// and Results' "Sized by Auto" row with its (i).
+// Also here: the Lattice page's row (Structural, Auto: "Strengthened to 150 %" with an (i), its tap the Safety margin's own menu)
+// and Results' "Strengthened by Auto" row with its (i). (His rework, 11-27: the steps are the checks and the thickening of the struts the first check shows are short.)
 import SwiftUI
 import TopOptDesign
 
@@ -21,30 +21,29 @@ public enum StructuralAutoCopy {
     public static func percent(_ margin: Double) -> String { "\(Int((margin * 100).rounded())) %" }
     /// The card's title.
     public static let title = "Making the print file"
-    public static func sizing(_ margin: Double) -> String { "Sizing struts for \(percent(margin))" }
     public static func checking(_ n: Int, of total: Int) -> String { "Checking strength (\(n) of \(total))" }
-    public static let fineTuning = "Fine-tuning the struts"
+    public static let thickening = "Thickening short struts"
     public static let saving = "Saving the print file"
-    public static func sizingInfo(_ margin: Double) -> String {
-        "Each strut gets the least plastic that still holds \(times(margin)) your load, worked out on this iPad from the "
-            + "strength measured for this lattice type. Places that need more plastic get thicker struts; the rest stay thin."
-    }
-    public static func checkingInfo(_ n: Int, of total: Int) -> String {
+    public static func checkingInfo(_ n: Int, of total: Int, margin: Double) -> String {
         n == 1
-            ? "Your Mac makes the print file and runs the full strength check on it, the same check every print file gets."
-            : "Your Mac checks the fine-tuned lattice with the same full strength check. The lightest version that holds "
+            ? "Your Mac makes the print file and runs the full strength check on it, the same check every print file gets. "
+                + "If every strut holds \(times(margin)) your load, that file is the one."
+            : "Your Mac checks the thickened lattice with the same full strength check. The lighter version that holds "
                 + "your target is the one kept."
     }
-    public static let fineTuningInfo = "The first check shows how the load really spreads through this lattice: walls take "
-        + "some, the lattice takes the rest. Each strut is sized again from that, thinner where it had plastic to spare, "
-        + "thicker where it needs more."
-    public static func savingInfo(_ margin: Double) -> String {
-        "The lightest version that holds \(times(margin)) your load becomes this version's print file."
+    public static func thickeningInfo(_ margin: Double) -> String {
+        "The first check shows which struts fall short of \(times(margin)) your load. Only those get thicker, each just as far "
+            + "as the strength measured for this lattice type says it needs; every other strut stays exactly as it was."
     }
-    /// The one-check shortcut, said on the step it skipped.
-    public static let shortcutDone = "First check was close enough"
-    public static let shortcutInfo = "The first check already landed within 5 % of the lightest lattice that holds your target, "
-        + "so a second check would save almost nothing. Your print file is made from the first."
+    public static func savingInfo(_ margin: Double) -> String {
+        "The lighter version that holds \(times(margin)) your load becomes this version's print file."
+    }
+    /// The first check passed: said on the steps it made unneeded.
+    public static let firstPassed = "First check passed"
+    public static func firstPassedInfo(_ margin: Double) -> String {
+        "The lattice already holds \(times(margin)) your load everywhere, so no strut needs thickening. Your print file is "
+            + "made from it."
+    }
     static func times(_ m: Double) -> String {
         let r = (m * 100).rounded() / 100
         return (r == r.rounded() ? String(format: "%.0f", r) : r * 10 == (r * 10).rounded() ? String(format: "%.1f", r)
@@ -52,45 +51,38 @@ public enum StructuralAutoCopy {
     }
 
     // The Lattice page's row
-    public static func sizedFor(_ margin: Double) -> String { "Sized for \(percent(margin))" }
-    public static func sizedForInfo(_ margin: Double) -> String {
-        "Auto gives each strut the least plastic that still holds \(times(margin)) your load. Your Mac checks it, adjusts once, "
-            + "and checks again. Tap to change the Safety margin."
+    public static func strengthenedTo(_ margin: Double) -> String { "Strengthened to \(percent(margin))" }
+    public static func strengthenedToInfo(_ margin: Double) -> String {
+        "Auto lays the lattice and your Mac checks its strength. If any strut falls short of \(times(margin)) your load, only "
+            + "those struts get thicker and your Mac checks again. Tap to change the Safety margin."
     }
     public static let customMenu = "Custom"
-    /// ★ D2: where the quilt was let in (the struts glow on the part).
-    public static let quiltedLine = "Densest struts glow here"
-    public static func quiltedInfo(_ margin: Double, cells: Int) -> String {
-        "In \(cells) \(cells == 1 ? "cell" : "cells") even the densest open lattice is short of \(percent(margin)), so those "
-            + "struts grow past it, only as thick as they need and never a full quilt. They glow on the part; every other "
-            + "cell keeps a printed line of air between its struts."
-    }
 
     // Results' row
-    public static let sizedByAuto = "Sized by Auto"
-    public static func sizedByAutoValue(_ r: StructuralAuto.Record) -> String {
-        let s = Int((r.savedShare * 100).rounded())
-        return s > 0 ? "\(s) % lighter" : "\(r.rounds.count) \(r.rounds.count == 1 ? "check" : "checks")"
+    public static let strengthenedByAuto = "Strengthened by Auto"
+    public static func strengthenedValue(_ r: StructuralAuto.Record) -> String {
+        if r.rounds.count == 1 { return firstPassed }
+        let a = Int((r.addedShare * 100).rounded())
+        return a > 0 ? "\(a) % more plastic" : "\(r.rounds.count) checks"
     }
-    public static func sizedByAutoInfo(_ r: StructuralAuto.Record) -> String {
-        let n = r.rounds.count
-        var t = "Auto sized each strut for \(percent(r.margin)) of your load from the strength measured for this lattice type, "
-            + "then your Mac checked it \(n == 1 ? "once" : "\(n) times"). "
-        if r.keptRound > 0, r.savedShare > 0 {
-            t += "The fine-tuned lattice was kept: it uses \(Int((r.savedShare * 100).rounded())) % less plastic than the first. "
-        } else if n == 1 {
-            t += "The first check was already within 5 % of the lightest, so it was kept. "
+    public static func strengthenedInfo(_ r: StructuralAuto.Record) -> String {
+        if r.rounds.count == 1 { return firstPassedInfo(r.margin) }
+        var t = "Your Mac's first check found struts short of \(percent(r.margin)) of your load. Auto thickened "
+            + "\(r.thickenedCells) \(r.thickenedCells == 1 ? "cell" : "cells") there, each just as far as it needed, and your "
+            + "Mac checked again. "
+        if r.keptRound > 0 {
+            t += "The thickened lattice was kept: it uses \(Int((r.addedShare * 100).rounded())) % more plastic than the first. "
         } else {
-            t += "The first lattice was the lighter one that holds, so it was kept. "
+            t += "The first lattice was kept: it was the lighter one that holds, or the stronger one. "
         }
-        if r.quilted > 0 {
-            t += "\(r.quilted) \(r.quilted == 1 ? "cell needed" : "cells needed") struts past the open look to reach it; they are as "
-                + "thin as that allows."
+        if r.cappedCells > 0 {
+            t += "\(r.cappedCells) \(r.cappedCells == 1 ? "cell needed" : "cells needed") more than the densest open lattice; "
+                + "they are as thick as that allows."
         }
         return t
     }
 
-    // The pop-up when a spot stays short (3.6): one per cause, naming the fix that reaches the target.
+    // The pop-up when a spot stays short: one per cause, naming the fix that reaches the target.
     public static func shortTitle(_ cause: StructuralAuto.Short, margin: Double) -> String {
         switch cause {
         case .stiffWalls: return "Thicker walls reach \(percent(margin))"
@@ -104,8 +96,8 @@ public enum StructuralAutoCopy {
             return "Here the walls carry most of the load, so thicker struts beside them add plastic and little strength. "
                 + "Thicker walls, or more infill in them, reach \(percent(margin)). Results shows where."
         case .denseLattice:
-            return "A few places need more than even the densest lattice holds. A Protect skin or a solid area there reaches "
-                + "\(percent(margin)). Results shows where."
+            return "A few places need more than even the densest open lattice holds. A Protect skin or a solid area there "
+                + "reaches \(percent(margin)). Results shows where."
         case .solid:
             return "The lattice holds; the solid parts need more. More infill, or thicker walls, reach \(percent(margin)). "
                 + "Results shows the fix."
@@ -113,24 +105,11 @@ public enum StructuralAutoCopy {
     }
 }
 
-/// ★ notes30 D2: the last lay's cells laid past the quilt-off limit, for the part it was laid on (the Lattice page's line).
-@MainActor public final class StructuralAutoLaid: ObservableObject {
-    public static let shared = StructuralAutoLaid()
-    @Published public private(set) var quilted = 0
-    @Published public private(set) var path: String?
-    public func set(quilted: Int, path: String?) {
-        if self.quilted != quilted { self.quilted = quilted }
-        if self.path != path { self.path = path }
-    }
-    /// The cells quilted on the part at `path` (0 for another part).
-    public func quilted(for path: String?) -> Int { path != nil && path == self.path ? quilted : 0 }
-}
-
 /// The card's steps: their words and (i), which are done, the one under way. The bar is the share of steps done — it moves
 /// only when a step really ends.
 public struct StructuralAutoSteps: Equatable, Sendable {
     public struct Item: Equatable, Sendable {
-        public enum Kind: Equatable, Sendable { case sizing, check(Int), fineTune, saving }
+        public enum Kind: Equatable, Sendable { case check(Int), thicken, passed, saving }
         public var kind: Kind
         public var words: String
         public var info: String
@@ -140,20 +119,18 @@ public struct StructuralAutoSteps: Equatable, Sendable {
     public var current: Int
     public let margin: Double
 
-    /// The steps of one press: sizing (done on this iPad before the press), then the checks with a fine-tuning between each,
-    /// then the file.
+    /// The steps of one press (his rework, 11-27): the checks with a thickening of the short struts between each, then the file.
     public init(margin: Double, checks: Int = StructuralAuto.checksPerPress) {
         self.margin = margin
-        var it: [Item] = [Item(kind: .sizing, words: StructuralAutoCopy.sizing(margin), info: StructuralAutoCopy.sizingInfo(margin),
-                               done: true)]
+        var it: [Item] = []
         for n in 1...Swift.max(1, checks) {
-            if n > 1 { it.append(Item(kind: .fineTune, words: StructuralAutoCopy.fineTuning, info: StructuralAutoCopy.fineTuningInfo)) }
+            if n > 1 { it.append(Item(kind: .thicken, words: StructuralAutoCopy.thickening, info: StructuralAutoCopy.thickeningInfo(margin))) }
             it.append(Item(kind: .check(n), words: StructuralAutoCopy.checking(n, of: checks),
-                           info: StructuralAutoCopy.checkingInfo(n, of: checks)))
+                           info: StructuralAutoCopy.checkingInfo(n, of: checks, margin: margin)))
         }
         it.append(Item(kind: .saving, words: StructuralAutoCopy.saving, info: StructuralAutoCopy.savingInfo(margin)))
         items = it
-        current = 1
+        current = 0
     }
 
     /// The share of steps done (0 → 1).
@@ -162,9 +139,9 @@ public struct StructuralAutoSteps: Equatable, Sendable {
     /// What the runner says.
     public enum Event: Equatable, Sendable {
         case began(Item.Kind)
-        /// The chain stops before its last check: the steps not taken go. `close`: the one-check shortcut (check 1 already
-        /// within 5 % of the lightest), said in one ticked line.
-        case shortcut(close: Bool)
+        /// The chain stops before its last check: the steps not taken go. `passed`: check 1 passed (nothing to thicken), said
+        /// in one ticked line.
+        case shortcut(passed: Bool)
         case finished
     }
     public mutating func apply(_ e: Event) {
@@ -173,12 +150,12 @@ public struct StructuralAutoSteps: Equatable, Sendable {
             guard let i = items.firstIndex(where: { $0.kind == k }) else { return }
             for j in 0..<i { items[j].done = true }
             current = i
-        case .shortcut(let close):
+        case .shortcut(let passed):
             // the steps not taken go (those after the check under way, up to the file); the shortcut says why in one line
             let at = items.indices.contains(current) ? current : 0
             var it = items.enumerated().filter { i, item in i <= at || item.kind == .saving }.map(\.element)
-            if close, let s = it.firstIndex(where: { $0.kind == .saving }) {
-                it.insert(Item(kind: .fineTune, words: StructuralAutoCopy.shortcutDone, info: StructuralAutoCopy.shortcutInfo,
+            if passed, let s = it.firstIndex(where: { $0.kind == .saving }) {
+                it.insert(Item(kind: .passed, words: StructuralAutoCopy.firstPassed, info: StructuralAutoCopy.firstPassedInfo(margin),
                                done: true), at: s)
             }
             for j in it.indices where it[j].kind != .saving { it[j].done = true }

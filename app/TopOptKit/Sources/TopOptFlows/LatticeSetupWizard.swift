@@ -2717,8 +2717,6 @@ public struct LatticeSetupWizard: View {
     // whole part's, and the tab says so. The view switch (One cell │ In the part) moved over the canvas; it sets nothing.
 
     @State private var latticeTab = "part"
-    /// ★ notes30 D2: the last lay's quilted cells (Structural Auto), for the Part tab's line.
-    @ObservedObject private var autoLaid = StructuralAutoLaid.shared
     /// ★ His iPad note 11-10 (img08): his [Auto │ Manual] pick is the part's, kept every visit until Reset all. It was this
     /// page's own `@State` (false on every open), and Reset all never touched it.
     private var latticeManual: Bool {
@@ -3100,12 +3098,12 @@ public struct LatticeSetupWizard: View {
         rebuild()
     }
 
-    /// ★ notes30 STRUCTURAL AUTO (his D1, 11-26: "use the existing safety margin. Put the default at 150%"): "Sized for 150 %"
-    /// with its (i); the tap is the Safety margin's own menu (150 / 200 / 300, and Custom in steps of 25: 175 is there). The
+    /// ★ notes30 STRUCTURAL AUTO (his D1, 11-26: "use the existing safety margin. Put the default at 150%"; his rework 11-27):
+    /// "Strengthened to 150 %" with its (i); the tap is the Safety margin's own menu (150 / 200 / 300, and Custom in steps of 25: 175 is there). The
     /// one number, one place: it is the part's Safety margin, as the loads screen shows it.
     private var structuralAutoRow: some View {
         let m = project.force.safetyMarginValue
-        let caption = StructuralAutoCopy.sizedFor(m)
+        let caption = StructuralAutoCopy.strengthenedTo(m)
         let _ = LatticeCaptions.record(caption)
         return HStack(spacing: DS.Space.xs) {
             Menu {
@@ -3129,7 +3127,7 @@ public struct LatticeSetupWizard: View {
                 .contentShape(Rectangle())
             }
             .accessibilityIdentifier("structural-auto-sized-for")
-            AppInfoButton(title: caption, text: StructuralAutoCopy.sizedForInfo(m), id: "structural-auto-sized-for-info")
+            AppInfoButton(title: caption, text: StructuralAutoCopy.strengthenedToInfo(m), id: "structural-auto-sized-for-info")
         }
         .background(CornerPairStyle.publish("structuralAutoRow"))
     }
@@ -3146,17 +3144,8 @@ public struct LatticeSetupWizard: View {
         return AnyView(Group {
         if area == nil {
             AnyView(settingControl(.type, titled: true))
-            // ★ notes30 STRUCTURAL AUTO: what Auto sizes the struts for (his Safety margin, D1), under the type
-            if !latticeManual, StructuralAuto.applies(project.lattice, pageManual: false) {
-                AnyView(structuralAutoRow)
-                // ★ D2: where the quilt was let in, said in five words with the sentence in the (i)
-                let quilted = autoLaid.quilted(for: project.importedFile?.path)
-                if quilted > 0 {
-                    shortNote(StructuralAutoCopy.quiltedLine, info: "structural-auto-quilted",
-                              StructuralAutoCopy.quiltedInfo(project.force.safetyMarginValue, cells: quilted))
-                        .latticeID("structural-auto-quilted-note")
-                }
-            }
+            // ★ notes30 STRUCTURAL AUTO: what Auto strengthens the struts to (his Safety margin, D1), under the type
+            if !latticeManual, StructuralAuto.applies(project.lattice, pageManual: false) { AnyView(structuralAutoRow) }
             if latticeManual, !Self.controlHideSimulateStresses, !(organic && project.importedFile != nil) {
                 AnyView(simulateStressesSwitch)
             }

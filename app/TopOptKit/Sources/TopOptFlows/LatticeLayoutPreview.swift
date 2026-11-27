@@ -741,11 +741,6 @@ public final class LatticeLayoutPreview: ObservableObject {
         b.colours = LatticeLayoutColours.colours(laid, type: Self.lawType(latticeAtLay), grade: grade,
                                                  stress: field.map(LatticeLayoutColours.Stress.init(field:)),
                                                  lookup: grade ? cellLookup() : nil, oneColour: organic)
-        // ★ notes30 D2: where Structural Auto let the quilt in, those struts glow (the stress view keeps its own colours)
-        if field == nil, lastSettings?.demandIsRatio == true, laid.quiltedWhereShort > 0 {
-            let past = LatticeLayoutColours.pastQuiltLimit(laid, lineMM: lastSettings?.beadMM ?? 0.45)
-            for i in past.indices where past[i] && i < b.colours.count { b.colours[i] = LatticeLayoutColours.quiltGlow }
-        }
         var h = Hasher()
         key.forEach { h.combine($0) }
         b.colourKey = h.finalize()
@@ -891,8 +886,6 @@ public final class LatticeLayoutPreview: ObservableObject {
             }
             if r.laidAnything { problem = nil }   // ★ notes28: nothing laid is said after the reason is read (below)
             LatticeSheetsLaid.shared.set(r.sheetSeams, path: path)   // ★ SHEETS: the page's "Where regions meet" reads it
-            // ★ notes30 D2: the cells Structural Auto laid past the quilt-off limit (the Lattice page's line and (i) read it)
-            StructuralAutoLaid.shared.set(quilted: lastSettings?.demandIsRatio == true ? r.quiltedWhereShort : 0, path: path)
             layStages["readMS"] = r.msRead; layStages["cellsMS"] = r.msCells; layStages["barsMS"] = r.msBars   // ★ his 11-22
             laying = false; layProgress = nil
             layWallS[timeKey(path, .exact)] = (openMS + r.msRead + r.msCells + r.msBars) / 1000
@@ -2014,36 +2007,7 @@ public final class LatticeLayoutPreview: ObservableObject {
                 id += 1
             }
         }
-        var out = Self.partRest(s, p, nextID: id)
-        if StructuralAuto.applies(p) { Self.structuralAuto(&out) }   // ★ notes30 STRUCTURAL AUTO
-        return out
-    }
-
-    /// ★ notes30 STRUCTURAL AUTO (his 11-24 vision, his 11-26 D1-D3; StructuralAuto.swift): the struts follow the strut law
-    /// sized for his Safety margin — the stress result the page sends holds each place's strut / cell (core's demand_is_ratio),
-    /// read with reference 1 (core reads a field only with one), and D2's quilt where short (a place the densest open lattice
-    /// leaves short grows past the limit only as far as it needs). Cell size by stress goes: a ratio is not a stress (C22 would
-    /// halve every cell, and smaller cells only lower the densest open strut and raise the thinnest). An area's own By stress
-    /// stays By stress (sized); its Manual-only ends, response and target stress are not read on Auto.
-    static func structuralAuto(_ s: inout LatticeLayoutSession.Settings) {
-        s.byStress = true
-        s.perRegion = false
-        s.demandIsRatio = true
-        s.quiltWhereShort = StructuralAuto.quiltWhereShortWired
-        s.referenceMPa = 1
-        s.response = 1
-        s.cellsByStress = false
-        s.widthLightMM = 0
-        s.widthHeavyMM = 0
-        for i in s.regions.indices where !s.regions[i].noLattice {
-            s.regions[i].own.cellsByStress = s.regions[i].own.cellsByStress.map { _ in false }
-            s.regions[i].own.widthLightMM = nil
-            s.regions[i].own.widthHeavyMM = nil
-            s.regions[i].own.dialLight = nil
-            s.regions[i].own.dialHeavy = nil
-            s.regions[i].own.response = nil
-            s.regions[i].own.referenceMPa = nil
-        }
+        return Self.partRest(s, p, nextID: id)
     }
 
     /// Grade to (light) and Grade from (heavy) as core's dials (R10, read on the largest cell). ★ notes29: the page's percent
@@ -2415,10 +2379,16 @@ extension LatticeLayoutPreview {
         !live && !skipping && !laying && drawn && !organic
     }
 
-    /// Which voxels of the check's grid are lattice in the layout on screen (core's own map, `whereAt`), for round 1's sizing —
-    /// only while that layout was laid from `stressKey` (round 0, what the first print file was made from); nil otherwise.
-    public func latticeMask(_ c: StructuralAuto.CheckField, stressKey: Int) async -> [Bool]? {
-        guard !laying, stress.key == stressKey, bars != nil, let session else { return nil }
+    /// The thickening round's view of the layout on screen — what the first print file was made from, once it is laid from
+    /// `stressKey` (a lay still going is waited for, up to `waitS`; nil past it, or when another stress is on screen): its cells
+    /// (frames, corners, sizes, struts) and which voxels of the check's grid are lattice (core's own map, `whereAt`).
+    public func structuralAutoLayout(_ c: StructuralAuto.CheckField, stressKey: Int, waitS: Double = 60) async -> StructuralAuto.Layout? {
+        var waited = 0.0
+        while laying || bars == nil, waited < waitS {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            waited += 0.5
+        }
+        guard !laying, stress.key == stressKey, bars != nil, let session, let laid, !laid.cellStrut.isEmpty else { return nil }
         let n = c.nx * c.ny * c.nz
         guard n > 0 else { return nil }
         var pts = [SIMD3<Float>]()
@@ -2432,7 +2402,7 @@ extension LatticeLayoutPreview {
             }
         }
         guard let w = try? await session.whereAt(pts), w.count == n else { return nil }
-        return w.map { $0.why == .lattice }
+        return StructuralAuto.Layout(laid: laid, lattice: w.map { $0.why == .lattice })
     }
 
     // MARK: ★ notes29 — the timelapse and the refresh's steps

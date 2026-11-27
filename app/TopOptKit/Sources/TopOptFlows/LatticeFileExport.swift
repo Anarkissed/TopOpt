@@ -38,7 +38,6 @@ public enum LatticeFileJob {
         "byStress": "by_stress", "dialLight": "dial_light", "dialHeavy": "dial_heavy", "widthLightMM": "width_light_mm",
         "widthHeavyMM": "width_heavy_mm", "cellsByStress": "cells_by_stress", "referenceMPa": "reference_mpa",
         "percentile": "percentile", "response": "response", "maxStep": "max_step",
-        "demandIsRatio": "demand_is_ratio", "quiltWhereShort": "quilt_where_short",   // ★ notes30 (written only when on)
         "bedFloorMM": "organic_bed_floor_mm",   // the flat floor (Organic only; written only when on)
         "cellSearch": "cell_search/stretch_edges",   // K7, K8 (Auto only; written only when on)
         "sheetSeam": "sheet_seam", "autoByCell": "auto_by_cell",   // ★ SHEETS (written for a sheet type only)
@@ -236,10 +235,6 @@ public enum LatticeFileJob {
         if s.bedFloorMM > 0 { layout["organic_bed_floor_mm"] = s.bedFloorMM }
         // K7, K8: Auto's cells fitted to the square faces; written only when on, so every other job is the bytes it was
         if s.cellSearch { layout["cell_search"] = true; layout["stretch_edges"] = true }
-        // ★ notes30 STRUCTURAL AUTO: the stress result is each place's strut / cell (the app's sizing), and D2's quilt where
-        // short; written only when on, so every other job is the bytes it was
-        if s.demandIsRatio { layout["demand_is_ratio"] = true }
-        if s.quiltWhereShort { layout["quilt_where_short"] = true }
         // ★ SHEETS (the contract's job keys): "Where regions meet" and Auto's wall by the cell, for a sheet type only, so every
         // strut job is the bytes it was
         if LatticeTypeCatalog.sheetIDs.contains(s.topology) {

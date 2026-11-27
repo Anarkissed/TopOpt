@@ -199,7 +199,7 @@ Settings settings_from(const json::Value& in, const std::string& w) {
        "per_region", "dial", "dial_region", "dial_value", "strut_width_mm", "allow_quilt",
        "strength", "small_cells_in_thin_walls", "one_grid", "cell_search", "stretch_edges", "cells_by_stress", "bars", "join_loose", "skin", "skin_density", "skin_sink",
        "skin_width_mm", "skin_reach_cells", "drop_loose", "by_stress", "dial_light", "dial_heavy", "width_light_mm",
-       "width_heavy_mm", "reference_mpa", "percentile", "response", "demand_is_ratio", "quilt_where_short", "region_own", "max_step", "region_weave", "organic_spacing_mm",
+       "width_heavy_mm", "reference_mpa", "percentile", "response", "region_own", "max_step", "region_weave", "organic_spacing_mm",
        "organic_width_mm", "organic_spacing_min_mm", "organic_spacing_max_mm", "organic_spacing_exponent",
        "organic_shape_fit", "organic_mode", "organic_walls_out", "organic_ties", "organic_tie_swirl",
        "organic_foot_gap", "organic_stress_goal",
@@ -377,9 +377,6 @@ Settings settings_from(const json::Value& in, const std::string& w) {
   s.struts.dial_heavy = num(in, "dial_heavy", s.struts.dial_heavy, w);
   s.struts.width_light_mm = num(in, "width_light_mm", s.struts.width_light_mm, w);
   s.struts.width_heavy_mm = num(in, "width_heavy_mm", s.struts.width_heavy_mm, w);
-  // ★ notes30 STRUCTURAL AUTO: the demand is each place's strut / cell (the app's sizing), with D2's quilt where short
-  s.struts.demand_is_ratio = flag(in, "demand_is_ratio", s.struts.demand_is_ratio, w);
-  s.struts.quilt_where_short = flag(in, "quilt_where_short", s.struts.quilt_where_short, w);
   s.stress.reference_mpa = num(in, "reference_mpa", s.stress.reference_mpa, w);
   s.stress.percentile = num(in, "percentile", s.stress.percentile, w);
   s.stress.response = num(in, "response", s.stress.response, w);
@@ -1485,8 +1482,6 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
     r.highest_mpa = out.struts.highest_mpa;
     r.at_light = out.struts.at_light;
     r.at_heavy = out.struts.at_heavy;
-    r.struts_sized = by_stress && job.settings.struts.demand_is_ratio;   // ★ notes30
-    r.quilted_where_short = out.struts.quilted_where_short;
     std::vector<int> weave_regions;
     for (const Layout::Weave& w : out.layout.weave) weave_regions.push_back(w.region);
     r.weave_regions = weave_regions.size();
@@ -2184,14 +2179,9 @@ std::string file_result_json(const FileResult& r) {
   o += "],\n";
   std::snprintf(b, sizeof b,
                 "    \"by_stress\": %s, \"reference_mpa\": %.9g, \"highest_mpa\": %.9g, \"at_light\": %llu, "
-                "\"at_heavy\": %llu",
+                "\"at_heavy\": %llu},\n",
                 r.by_stress ? "true" : "false", r.reference_mpa, r.highest_mpa, count(r.at_light), count(r.at_heavy));
   o += b;
-  if (r.struts_sized) {   // ★ notes30 STRUCTURAL AUTO: only a sized job says it (every other report as before)
-    std::snprintf(b, sizeof b, ", \"struts_sized\": true, \"quilted_where_short\": %llu", count(r.quilted_where_short));
-    o += b;
-  }
-  o += "},\n";
   const MeshReport& m = r.made.mesh;
   std::snprintf(b, sizeof b,
                 "  \"mesh\": {\"triangles\": %llu, \"mm3\": %.9g, \"part_mm3\": %.9g, \"struts_mm3\": %.9g, "

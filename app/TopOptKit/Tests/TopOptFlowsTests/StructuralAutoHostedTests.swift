@@ -64,9 +64,9 @@ final class StructuralAutoHostedTests: XCTestCase {
             }
             XCTAssertTrue(box.said.contains(StructuralAutoCopy.title), "\(name): its title")
             // the steps move as the run says
-            mac.applyAuto(.began(.fineTune))
+            mac.applyAuto(.began(.thicken))
             h.pump(0.3)
-            XCTAssertEqual(mac.autoSteps?.fraction ?? 0, 0.4, accuracy: 1e-9, "\(name): check 1 ticked")
+            XCTAssertEqual(mac.autoSteps?.fraction ?? 0, 0.25, accuracy: 1e-9, "\(name): check 1 ticked")
             mac.ended()
             h.pump(0.5)
             XCTAssertNil(h.frames.all["structuralAutoCard"], "\(name): the card goes with its run")

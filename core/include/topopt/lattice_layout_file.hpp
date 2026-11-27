@@ -560,10 +560,6 @@ struct FileResult {
   bool by_stress = false;
   double reference_mpa = 0.0, highest_mpa = 0.0;
   std::size_t at_light = 0, at_heavy = 0;
-  // ★ notes30 STRUCTURAL AUTO: the struts were sized by the app (demand_is_ratio), and the cells D2 laid past the quilt-off
-  // limit (quilt_where_short). Written in the report only when sized (every other job's report as before, byte for byte).
-  bool struts_sized = false;
-  std::size_t quilted_where_short = 0;
   // Organic, Traced: the weave regions laid, the strands traced for them, the bars of those regions, the trace's time,
   // and the shallow-bar table (filled once the file is made).
   std::size_t weave_regions = 0, strands = 0, weave_bars = 0;
