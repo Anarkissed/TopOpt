@@ -86,6 +86,8 @@ std::size_t g_engine_unresolved = 0;
 // edges masked the same way, at patch radius 2.5 and 3.5 voxels, and its unresolved counts.
 double g_patch[2] = {0.0, 0.0};
 std::size_t g_patch_unresolved[2] = {0, 0};
+double g_quad[2] = {0.0, 0.0};  // the quadratic patch (order 2) at radius 3.5 and 4.5
+std::size_t g_quad_unresolved[2] = {0, 0}, g_quad_dropped[2] = {0, 0};
 
 // The peak von Mises over voxels / the far stress, for the ellipse with short
 // semi-axis `b_voxels` and stiffness E x fill^penalty in the voxels the hole cuts.
@@ -207,6 +209,8 @@ double peak_ratio(int b_voxels, double penalty, bool* ok) {
   }
   g_patch[0] = g_patch[1] = 0.0;
   g_patch_unresolved[0] = g_patch_unresolved[1] = 0;
+  g_quad[0] = g_quad[1] = 0.0;
+  g_quad_unresolved[0] = g_quad_unresolved[1] = g_quad_dropped[0] = g_quad_dropped[1] = 0;
   if (res.stress_tensor_field.size() == 6 * density.size()) {
     std::vector<double> tf = res.stress_tensor_field;  // the loaded edges masked
     for (int k = 0; k < g.nz; ++k)
@@ -220,6 +224,14 @@ double peak_ratio(int b_voxels, double penalty, bool* ok) {
           topopt::stress_recovered_at_surface(g, tf, density, nullptr, radii[q]);
       g_patch[q] = sr.peak / kFarStress;
       g_patch_unresolved[q] = sr.unresolved;
+    }
+    const double quad_radii[2] = {3.5, 4.5};
+    for (int q = 0; q < 2; ++q) {
+      const topopt::SurfaceRecovery sr = topopt::stress_recovered_at_surface(
+          g, tf, density, nullptr, quad_radii[q], 2);
+      g_quad[q] = sr.peak / kFarStress;
+      g_quad_unresolved[q] = sr.unresolved;
+      g_quad_dropped[q] = sr.squares_dropped;
     }
   }
   return res.max_von_mises / kFarStress;
@@ -243,6 +255,8 @@ int main(int argc, char** argv) {
   std::size_t engine_unresolved[3][4] = {};
   double patch[2][3][4] = {};
   std::size_t patch_unresolved[2][3][4] = {};
+  double quad[2][3][4] = {};
+  std::size_t quad_unresolved[2][3][4] = {}, quad_dropped[2][3][4] = {};
   for (int p = 0; p < 3; ++p) {
     std::printf("%-20s", kName[p]);
     int bi = 0;
@@ -262,6 +276,9 @@ int main(int argc, char** argv) {
       for (int q = 0; q < 2; ++q) {
         patch[q][p][bi] = g_patch[q];
         patch_unresolved[q][p][bi] = g_patch_unresolved[q];
+        quad[q][p][bi] = g_quad[q];
+        quad_unresolved[q][p][bi] = g_quad_unresolved[q];
+        quad_dropped[q][p][bi] = g_quad_dropped[q];
       }
       ++bi;
     }
@@ -285,6 +302,14 @@ int main(int argc, char** argv) {
       for (int q = 0; q < 4; ++q)
         std::printf("  %+.1f (unresolved %zu)", 100.0 * (patch[pr][p][q] / kReference - 1.0),
                     patch_unresolved[pr][p][q]);
+      std::printf("\n");
+    }
+    for (int pr = 0; pr < 2; ++pr) {
+      std::printf("[patch] %-20s QUADRATIC patch (order 2), radius %.1f, percent against the reference, b = 3, 4, 5, 6:",
+                  kName[p], pr == 0 ? 3.5 : 4.5);
+      for (int q = 0; q < 4; ++q)
+        std::printf("  %+.1f (unresolved %zu, squares dropped %zu)", 100.0 * (quad[pr][p][q] / kReference - 1.0),
+                    quad_unresolved[pr][p][q], quad_dropped[pr][p][q]);
       std::printf("\n");
     }
   }

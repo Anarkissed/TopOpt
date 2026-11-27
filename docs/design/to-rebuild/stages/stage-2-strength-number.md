@@ -866,3 +866,19 @@ It is WORSE on every stress raiser, and the bigger patch is worse still: a strai
 
 NEXT, one more form before reporting the pair to the reviewer: the same patch with a QUADRATIC fit (the published method uses a full polynomial; the conditions then tie the curve down instead of the curve being absent), radius 3.5. If that does not bring the held-out plate inside 5 % from a stated radius, the honest result is that at this grid no reading does, and the bar is met only by a radius-in-voxels limit (A-08) set higher than 3.
 
+### Candidate two with a QUADRATIC fit: no better (2026-11-27 13:05; `order = 2` of `stress_recovered_at_surface`; a builder's code, built and run once)
+
+A full quadratic per component with equilibrium (12 conditions) and zero traction (3); the pure-square term of a direction is dropped where the patch has fewer than three layers that way (the two-voxel-thick test plates: always z). Percent against the exact value, real stiffness, patch radius 3.5 / 4.5:
+
+| shape | quadratic patch | linear patch (3.5) | candidate one (the carry) |
+|---|---|---|---|
+| ring, bore 3 / 4 / 5 / 6 | -35 / -35; -24 / -13; -18 / -12; -9 / -9 (60 to 90 points unresolved at bore 3, none from 5) | -35 / -24 / -20 / -16 | -13 / -4.9 / -4.3 / +1.3 |
+| plate with a round hole, 3 / 4 / 5 / 6 | -43 / -43; -31 / -31; -26 / -27; -20 / -28 | -43 / -31 / -27 / -28 | -29 / -14 / -14 / -9 |
+| ellipse (today's law rows) | -41 / -36 / -33 / -25 | the same | -33 / -20 / -17 / +2 |
+
+On the plate and the ellipse the patch's value IS the hottest full voxel's own stress: every surface reading it made came out BELOW that. On the cut-skin beam it is erratic at radius 3.5 (0.50 where the carry reads 0.92). Candidate one's and the linear patch's rows are unchanged. So, of everything tried on this grid, candidate one (real stiffness, the straight-line carry, each face on its own normal) is the best reading, and it does not meet the 5 % bar beside a hole of 3 to 6 voxels of radius.
+
+NOT OBTAINED: how large a hole must be for candidate one to be within 5 %. The plate test at radii 8, 10, 12, 16 voxels (now behind `--large`, never in the suite) returned empty fields: those solves did not converge inside the cap on plates that wide and two voxels thick. A thicker plate or another solver setting is needed to answer it.
+
+DESK RESEARCH in hand for the next step (four researchers, 2026-11-27; `reports/Voxel stress on small thin parts.md`, local, not committed): (i) the straight line itself accounts for most of the miss beside a hole (the exact Kirsch field sampled at voxel centres and carried in a straight line reads 6.5 to 16.5 % low at 6 and 3 voxels of radius: the researcher's own calculation, to be checked); a carry that knows the surface's curvature is the indicated fix; (ii) a direction-aware stiffness for cut voxels ("laminate composite voxel", Kabel, Merkert, Schneider 2015; Lendvai and Schneider 2024, doi:10.1002/nme.7459) in place of E x fill; (iii) for thin members, membrane and bending stress from SECTION FORCES (exact by equilibrium; welded-joint practice), and an incompatible-modes hexahedron for bending with one or two voxels through; (iv) printed PLA is nearly notch-insensitive in static loading with a material length of 2.4 to 4.6 mm (Susmel and Ahmed 2018; Ahmed and Susmel 2019, read in full by the researcher), which supports the size form over any surface peak; no data found for filament-printed PA6.
+

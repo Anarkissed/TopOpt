@@ -328,12 +328,14 @@ SurfaceRecovery stress_recovered_at_surface(const VoxelGrid& grid,
                                             const std::vector<double>& stress_tensor,
                                             const std::vector<double>& density,
                                             const std::vector<char>* loaded,
-                                            double patch_radius_voxels) {
+                                            double patch_radius_voxels, int order) {
   const std::size_t n = grid.voxel_count();
   if (stress_tensor.size() != 6 * n || density.size() != n ||
       (loaded != nullptr && loaded->size() != n))
     throw std::invalid_argument(
         "stress_recovered_at_surface: stress_tensor / density / loaded size != voxel_count");
+  if (order != 1 && order != 2)
+    throw std::invalid_argument("stress_recovered_at_surface: order must be 1 or 2");
   auto full = [&](int i, int j, int k) {
     if (i < 0 || j < 0 || k < 0 || i >= grid.nx || j >= grid.ny || k >= grid.nz) return false;
     const std::size_t v = grid.index(i, j, k);
@@ -354,6 +356,113 @@ SurfaceRecovery stress_recovered_at_surface(const VoxelGrid& grid,
     ++out.unresolved;
     out.peak_unresolved = std::max(out.peak_unresolved, value);
     out.peak = std::max(out.peak, value);
+  };
+  // ORDER 2: each component a full quadratic in d (terms 0: 1; 1-3: dx, dy, dz; 4-6:
+  // dx^2, dy^2, dz^2; 7: dx dy; 8: dy dz; 9: dz dx). A direction in which the patch's
+  // centres take fewer than 3 distinct values (a plate two voxels thick) cannot tell
+  // its square from a constant and a slope: that pure-square term is left out.
+  auto term_value = [](int t, const double* d) {
+    switch (t) {
+      case 0: return 1.0;
+      case 1: case 2: case 3: return d[t - 1];
+      case 4: case 5: case 6: return d[t - 4] * d[t - 4];
+      case 7: return d[0] * d[1];
+      case 8: return d[1] * d[2];
+      default: return d[2] * d[0];
+    }
+  };
+  // d(term t)/d(x_ax) as coefficients over [1, dx, dy, dz].
+  auto term_derivative = [](int t, int ax, double* r) {
+    r[0] = r[1] = r[2] = r[3] = 0.0;
+    if (t >= 1 && t <= 3) {
+      if (t - 1 == ax) r[0] = 1.0;
+    } else if (t >= 4 && t <= 6) {
+      if (t - 4 == ax) r[1 + ax] = 2.0;
+    } else if (t == 7) {
+      if (ax == 0) r[2] = 1.0;
+      if (ax == 1) r[1] = 1.0;
+    } else if (t == 8) {
+      if (ax == 1) r[3] = 1.0;
+      if (ax == 2) r[2] = 1.0;
+    } else if (t == 9) {
+      if (ax == 2) r[1] = 1.0;
+      if (ax == 0) r[3] = 1.0;
+    }
+  };
+  // Voigt index of sigma_ij.
+  static const int kVoigt[3][3] = {{0, 3, 5}, {3, 1, 4}, {5, 4, 2}};
+  auto recover_quadratic = [&](std::size_t v, std::size_t v_near, const double* nv) {
+    int terms[10];
+    int nt = 0;
+    for (int t = 0; t < 4; ++t) terms[nt++] = t;
+    for (int e = 0; e < 3; ++e) {
+      std::vector<double> vals;
+      vals.reserve(patch.size());
+      for (const PatchVoxel& p : patch) vals.push_back(p.d[e]);
+      std::sort(vals.begin(), vals.end());
+      int distinct = vals.empty() ? 0 : 1;
+      for (std::size_t q = 1; q < vals.size(); ++q)
+        if (vals[q] - vals[q - 1] > 1e-6) ++distinct;
+      if (distinct >= 3) terms[nt++] = 4 + e;
+      else ++out.squares_dropped;
+    }
+    for (int t = 7; t < 10; ++t) terms[nt++] = t;
+    Eigen::MatrixXd M = Eigen::MatrixXd::Zero(nt, nt);
+    Eigen::MatrixXd R = Eigen::MatrixXd::Zero(nt, 6);
+    Eigen::VectorXd phi(nt);
+    for (const PatchVoxel& p : patch) {
+      for (int q = 0; q < nt; ++q) phi(q) = term_value(terms[q], p.d);
+      M.noalias() += phi * phi.transpose();
+      for (int comp = 0; comp < 6; ++comp) R.col(comp) += phi * stress_tensor[6 * p.v + comp];
+    }
+    // Well conditioned: the smallest eigenvalue of the scatter of the non-constant
+    // terms (per voxel) at least 0.01.
+    const double count = static_cast<double>(patch.size());
+    const Eigen::VectorXd mean = M.block(1, 0, nt - 1, 1) / count;
+    const Eigen::MatrixXd scatter =
+        M.block(1, 1, nt - 1, nt - 1) / count - mean * mean.transpose();
+    const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(scatter, Eigen::EigenvaluesOnly);
+    if (!(es.eigenvalues()(0) >= 0.01)) {
+      fall_back(vm_of(v_near));
+      return;
+    }
+    const Eigen::LDLT<Eigen::MatrixXd> Mf(M);
+    const int nu = 6 * nt;  // component c, term q at c * nt + q
+    Eigen::VectorXd z0(nu);
+    for (int comp = 0; comp < 6; ++comp) z0.segment(comp * nt, nt) = Mf.solve(R.col(comp));
+    const bool free_surface = loaded == nullptr || (*loaded)[v] == 0;
+    const int m = free_surface ? 15 : 12;
+    Eigen::MatrixXd C = Eigen::MatrixXd::Zero(m, nu);
+    // Equilibrium everywhere: sum_j d(sigma_ij)/d(x_j) = 0, its constant and its three
+    // linear coefficients, for each direction i.
+    double r4[4];
+    for (int i = 0; i < 3; ++i)
+      for (int j = 0; j < 3; ++j) {
+        const int comp = kVoigt[i][j];
+        for (int q = 0; q < nt; ++q) {
+          term_derivative(terms[q], j, r4);
+          for (int coef = 0; coef < 4; ++coef) C(4 * i + coef, comp * nt + q) += r4[coef];
+        }
+      }
+    if (free_surface)  // no traction at the point: sigma_ij(x_s) n_j = 0 (term 0 is the constant)
+      for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j) C(12 + i, kVoigt[i][j] * nt) += nv[j];
+    Eigen::MatrixXd W(nu, m);
+    for (int row = 0; row < m; ++row)
+      for (int comp = 0; comp < 6; ++comp)
+        W.block(comp * nt, row, nt, 1) = Mf.solve(C.block(row, comp * nt, 1, nt).transpose());
+    const Eigen::MatrixXd S = C * W;
+    const Eigen::VectorXd lambda = S.completeOrthogonalDecomposition().solve(C * z0);
+    const Eigen::VectorXd z = z0 - W * lambda;
+    double sig[6];
+    for (int comp = 0; comp < 6; ++comp) sig[comp] = z(comp * nt);
+    const double reading = von_mises6(sig);
+    if (!std::isfinite(reading)) {
+      fall_back(vm_of(v_near));
+      return;
+    }
+    ++out.surface_points;
+    out.peak = std::max(out.peak, reading);
   };
   auto recover = [&](int i, int j, int k, std::size_t v, const double* nv, double t_surf) {
     const double xs[3] = {i + 0.5 + t_surf * nv[0], j + 0.5 + t_surf * nv[1],
@@ -378,8 +487,12 @@ SurfaceRecovery stress_recovered_at_surface(const VoxelGrid& grid,
             v_near = u;
           }
         }
-    if (patch.size() < 8) {
+    if (patch.size() < (order == 2 ? 20u : 8u)) {
       fall_back(vm_of(v_near));
+      return;
+    }
+    if (order == 2) {
+      recover_quadratic(v, v_near, nv);
       return;
     }
     // The shared normal matrix M = sum phi phi^T, phi = [1, d], and the right-hand sides.

@@ -59,6 +59,8 @@ std::size_t g_engine_unresolved = 0;
 // edges masked the same way, at patch radius 2.5 and 3.5 voxels, and its unresolved counts.
 double g_patch[2] = {0.0, 0.0};
 std::size_t g_patch_unresolved[2] = {0, 0};
+double g_quad[2] = {0.0, 0.0};  // the quadratic patch (order 2) at radius 3.5 and 4.5
+std::size_t g_quad_unresolved[2] = {0, 0}, g_quad_dropped[2] = {0, 0};
 
 constexpr double kFarStress = 10.0;   // MPa
 constexpr double kTiltDeg = 30.0;
@@ -199,6 +201,8 @@ double peak_ratio(int radius_voxels, bool exact_fill, double penalty, bool* ok,
   }
   g_patch[0] = g_patch[1] = 0.0;
   g_patch_unresolved[0] = g_patch_unresolved[1] = 0;
+  g_quad[0] = g_quad[1] = 0.0;
+  g_quad_unresolved[0] = g_quad_unresolved[1] = g_quad_dropped[0] = g_quad_dropped[1] = 0;
   if (res.stress_tensor_field.size() == 6 * density.size()) {
     std::vector<double> tf = res.stress_tensor_field;  // the loaded edges masked
     for (int k = 0; k < g.nz; ++k)
@@ -212,6 +216,14 @@ double peak_ratio(int radius_voxels, bool exact_fill, double penalty, bool* ok,
           topopt::stress_recovered_at_surface(g, tf, density, nullptr, radii[q]);
       g_patch[q] = sr.peak / kFarStress;
       g_patch_unresolved[q] = sr.unresolved;
+    }
+    const double quad_radii[2] = {3.5, 4.5};
+    for (int q = 0; q < 2; ++q) {
+      const topopt::SurfaceRecovery sr = topopt::stress_recovered_at_surface(
+          g, tf, density, nullptr, quad_radii[q], 2);
+      g_quad[q] = sr.peak / kFarStress;
+      g_quad_unresolved[q] = sr.unresolved;
+      g_quad_dropped[q] = sr.squares_dropped;
     }
   }
   return res.max_von_mises / kFarStress;
@@ -240,6 +252,9 @@ int main(int argc, char** argv) {
     const std::size_t engine_unresolved = g_engine_unresolved;
     const double patch[2] = {g_patch[0], g_patch[1]};
     const std::size_t patch_unresolved[2] = {g_patch_unresolved[0], g_patch_unresolved[1]};
+    const double quad[2] = {g_quad[0], g_quad[1]};
+    const std::size_t quad_unresolved[2] = {g_quad_unresolved[0], g_quad_unresolved[1]};
+    const std::size_t quad_dropped[2] = {g_quad_dropped[0], g_quad_dropped[1]};
     if (!ok1 || !ok2 || !ok3) ++failures;
     std::printf("%-12d %9.3f %14.3f %16.3f %14.3f %9.3f %9.3f %9.3f\n", r,
                 kHoleRadiusMm / r, row.ratio_binary, row.ratio_fill, row.ratio_fill_linear,
@@ -250,7 +265,30 @@ int main(int argc, char** argv) {
                 "radius 2.5: %+.1f %%, unresolved %zu; radius 3.5: %+.1f %%, unresolved %zu\n",
                 r, 100.0 * (patch[0] / kTextbook - 1.0), patch_unresolved[0],
                 100.0 * (patch[1] / kTextbook - 1.0), patch_unresolved[1]);
+    std::printf("[patch] hole radius %d voxels: QUADRATIC patch (order 2): radius 3.5: %+.1f %%, unresolved %zu, squares dropped %zu; "
+                "radius 4.5: %+.1f %%, unresolved %zu, squares dropped %zu\n",
+                r, 100.0 * (quad[0] / kTextbook - 1.0), quad_unresolved[0], quad_dropped[0],
+                100.0 * (quad[1] / kTextbook - 1.0), quad_unresolved[1], quad_dropped[1]);
     rows.push_back(row);
+  }
+  // WHERE IS A HOLE "RESOLVED" for the carry (the reviewer's bar of 2026-11-27: never
+  // more than 5 % under where the feature is resolved)? The same reading at larger
+  // hole radii, real stiffness only. Printed, never judged.
+  // ONLY with `--large` (never in the suite): on 2026-11-27 these four solves did not
+  // converge inside the cap on plates this wide and only two voxels thick (the fields
+  // came back empty, every figure read -100 %), and took 15 minutes doing it.
+  const bool large = argc > 1 && std::strcmp(argv[1], "--large") == 0;
+  for (int r : {8, 10, 12, 16}) {
+    if (!large) break;
+    bool ok = false;
+    double unused[3] = {0.0, 0.0, 0.0};
+    const double one_voxel = peak_ratio(r, true, 1.0, &ok, unused);
+    std::printf("[carry] hole radius %d voxels: ENGINE carry (E x fill) %+.1f %%, unresolved %zu; the one-voxel reading %+.1f %%; "
+                "linear patch 2.5: %+.1f %%; quadratic patch 4.5: %+.1f %%\n",
+                r, 100.0 * (g_engine_carry / kTextbook - 1.0), g_engine_unresolved,
+                100.0 * (one_voxel / kTextbook - 1.0), 100.0 * (g_patch[0] / kTextbook - 1.0),
+                100.0 * (g_quad[1] / kTextbook - 1.0));
+    std::fflush(stdout);
   }
   auto band = [&](double Row::*f, const char* name) {
     double lo = 1e300, hi = 0.0, worst = 0.0;

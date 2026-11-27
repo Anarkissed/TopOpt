@@ -93,6 +93,8 @@ std::size_t g_engine_unresolved = 0;
 // pressure at patch radius 2.5 and 3.5 voxels, and its unresolved counts.
 double g_patch[2] = {0.0, 0.0};
 std::size_t g_patch_unresolved[2] = {0, 0};
+double g_quad[2] = {0.0, 0.0};  // the quadratic patch (order 2) at radius 3.5 and 4.5
+std::size_t g_quad_unresolved[2] = {0, 0}, g_quad_dropped[2] = {0, 0};
 
 double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* area_error,
                   double* over_size = nullptr) {
@@ -242,6 +244,8 @@ double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* are
   }
   g_patch[0] = g_patch[1] = 0.0;
   g_patch_unresolved[0] = g_patch_unresolved[1] = 0;
+  g_quad[0] = g_quad[1] = 0.0;
+  g_quad_unresolved[0] = g_quad_unresolved[1] = g_quad_dropped[0] = g_quad_dropped[1] = 0;
   if (res.stress_tensor_field.size() == 6 * density.size()) {
     // The bore carries the pressure: every voxel with material whose centre is within
     // 1.5 voxels of the inner radius. The outer face is free.
@@ -260,6 +264,14 @@ double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* are
           g, res.stress_tensor_field, density, &bore, radii[q]);
       g_patch[q] = sr.peak / kPressure;
       g_patch_unresolved[q] = sr.unresolved;
+    }
+    const double quad_radii[2] = {3.5, 4.5};
+    for (int q = 0; q < 2; ++q) {
+      const topopt::SurfaceRecovery sr = topopt::stress_recovered_at_surface(
+          g, res.stress_tensor_field, density, &bore, quad_radii[q], 2);
+      g_quad[q] = sr.peak / kPressure;
+      g_quad_unresolved[q] = sr.unresolved;
+      g_quad_dropped[q] = sr.squares_dropped;
     }
   }
   return res.max_von_mises / kPressure;
@@ -298,6 +310,10 @@ int main(int argc, char** argv) {
                 "radius 2.5: %+.1f %%, unresolved %zu; radius 3.5: %+.1f %%, unresolved %zu\n",
                 r, 100.0 * (g_patch[0] / kTextbook - 1.0), g_patch_unresolved[0],
                 100.0 * (g_patch[1] / kTextbook - 1.0), g_patch_unresolved[1]);
+    std::printf("[patch] inner radius %d voxels: QUADRATIC patch (order 2): radius 3.5: %+.1f %%, unresolved %zu, squares dropped %zu; "
+                "radius 4.5: %+.1f %%, unresolved %zu, squares dropped %zu\n",
+                r, 100.0 * (g_quad[0] / kTextbook - 1.0), g_quad_unresolved[0], g_quad_dropped[0],
+                100.0 * (g_quad[1] / kTextbook - 1.0), g_quad_unresolved[1], g_quad_dropped[1]);
     row.area_error = std::max({std::fabs(e1), std::fabs(e2), std::fabs(e3)});
     if (!ok1 || !ok2 || !ok3) ++failures;
     std::printf("%-12d %9.3f %14.3f %16.3f %14.3f %9.3f %9.3f %9.3f %10.2f\n", r,

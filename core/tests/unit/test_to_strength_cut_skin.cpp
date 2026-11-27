@@ -52,6 +52,7 @@ struct Out {
   // The patch recovery of the tensor (stress_recovered_at_surface), mid-span only, at
   // patch radius 2.5 and 3.5 voxels, / true surface stress.
   double patch25 = 0.0, patch35 = 0.0;
+  double quad35 = 0.0, quad45 = 0.0;  // the quadratic patch (order 2) at radius 3.5 and 4.5
   bool ok = false;
 };
 
@@ -176,6 +177,8 @@ Out bend(int core, double fill, double skin_density, double penalty) {
             for (int c = 0; c < 6; ++c) mid_tensor[6 * g.index(i, j, k) + c] = 0.0;
     o.patch25 = topopt::stress_recovered_at_surface(g, mid_tensor, density, nullptr, 2.5).peak / surface;
     o.patch35 = topopt::stress_recovered_at_surface(g, mid_tensor, density, nullptr, 3.5).peak / surface;
+    o.quad35 = topopt::stress_recovered_at_surface(g, mid_tensor, density, nullptr, 3.5, 2).peak / surface;
+    o.quad45 = topopt::stress_recovered_at_surface(g, mid_tensor, density, nullptr, 4.5, 2).peak / surface;
   }
   return o;
 }
@@ -203,10 +206,10 @@ int main() {
           continue;
         }
         std::printf("[cut skin]   %s  curvature %.3f (%+.0f %%)   peak %.3f (%+.0f %%)   material-stress peak %.3f   "
-                    "carried to the true surface %.3f (%+.0f %%)   engine carry %.3f (%+.0f %%), unresolved %zu   patch2.5 %.3f, patch3.5 %.3f\n",
+                    "carried to the true surface %.3f (%+.0f %%)   engine carry %.3f (%+.0f %%), unresolved %zu   patch2.5 %.3f, patch3.5 %.3f   patch2 3.5 %.3f, 4.5 %.3f\n",
                     md.name, o.curvature, 100.0 * (o.curvature - 1.0), o.peak, 100.0 * (o.peak - 1.0),
                     o.peak_material, o.at_surface, 100.0 * (o.at_surface - 1.0), o.engine_carry,
-                    100.0 * (o.engine_carry - 1.0), o.engine_unresolved, o.patch25, o.patch35);
+                    100.0 * (o.engine_carry - 1.0), o.engine_unresolved, o.patch25, o.patch35, o.quad35, o.quad45);
         std::fflush(stdout);
       }
     }

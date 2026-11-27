@@ -134,18 +134,23 @@ SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<
 // yz, zx], true shear (FixedDesignAnalysis::stress_tensor_field). The peak is the
 // largest reading or full-voxel von Mises. A patch of fewer than 8 voxels, or one not
 // spread in all three directions, is `unresolved`: it reads the nearest full voxel in
-// the patch (or the surface voxel itself). Throws std::invalid_argument on a size mismatch.
+// the patch (or the surface voxel itself). `order` 2 fits a full quadratic instead (needs 20
+// voxels; equilibrium held at every point; a direction with fewer than 3 distinct centre
+// values drops its pure-square term). Throws std::invalid_argument on a size mismatch
+// or an order other than 1 or 2.
 struct SurfaceRecovery {
   double peak = 0.0;               // largest von Mises: recovered at the surface, or in a full voxel
   std::size_t surface_points = 0;  // surface points where the fit was made
   std::size_t unresolved = 0;      // too few full voxels in the patch (fell back to the nearest full voxel's von Mises)
   double peak_unresolved = 0.0;
+  std::size_t squares_dropped = 0;  // order 2: pure-square terms left out (a direction with < 3 distinct centre values)
 };
 SurfaceRecovery stress_recovered_at_surface(const VoxelGrid& grid,
                                             const std::vector<double>& stress_tensor,
                                             const std::vector<double>& density,
                                             const std::vector<char>* loaded = nullptr,
-                                            double patch_radius_voxels = 2.5);
+                                            double patch_radius_voxels = 2.5,
+                                            int order = 1);
 
 // The largest reading of stress_over_size (0 when nothing is printed).
 double peak_stress_over_size(const VoxelGrid& grid, const std::vector<double>& field,
