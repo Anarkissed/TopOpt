@@ -44,7 +44,12 @@ inline bool to_stage1_on() { return face_load_mode() != FaceLoadMode::Voxel; }
 //             together: never more than 5 % below the textbook at any
 //             resolution (reviewer, 2026-11-26). A material with no published
 //             length says so and keeps today's solve and reading whole.
-enum class StrengthMode { Today, Stiff, Size };
+//   "surface" : as "size" in everything, EXCEPT that wherever "size" falls back to
+//             today's solve and one-voxel reading (a size under the switch point:
+//             the whole part; thin members: those voxels) it reads the real-
+//             stiffness solve at the TRUE SURFACE instead (stress_carried_to_surface,
+//             shape 1; the reviewer's ruling 2026-11-27).
+enum class StrengthMode { Today, Stiff, Size, Surface };
 
 inline StrengthMode strength_mode() {
   const char* v = std::getenv("TOPOPT_STRENGTH");
@@ -52,6 +57,7 @@ inline StrengthMode strength_mode() {
   const std::string m(v);
   if (m == "stiff") return StrengthMode::Stiff;
   if (m == "size") return StrengthMode::Size;
+  if (m == "surface") return StrengthMode::Surface;
   return StrengthMode::Today;
 }
 

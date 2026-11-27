@@ -969,3 +969,14 @@ For the reviewer with the rest; nothing changed in code.
 
 HOW I READ (a), stated to the reviewer so it can correct me: the size form (the ball) stays where it applies; the surface carry on a real-stiffness solve takes the place of the ONE-VOXEL reading wherever the code falls back to it today (a material length under 1.75 voxels; thin members), in the one function both judges call (`analyze_fixed_design`). Order of work: (A1) the reading in `analyze_fixed_design` behind `TOPOPT_STRENGTH=surface`, the tight limit at 4 voxels, the counts for the readout, the ring pinned as a test; (B) section-force stress measured on the cut-skin beam and a member in tension; (A2) the drawn faces' fills in the loop; then the five measurements.
 
+### A1 BUILT: `TOPOPT_STRENGTH=surface`, the surface reading inside the one judge function (2026-11-27 15:30; a builder's code to my design, two builds, the four tests run)
+
+`StrengthMode::Surface` does everything `Size` does, and wherever `Size` falls back to today's solve and the one-voxel reading it reads the REAL-STIFFNESS solve with `stress_carried_to_surface(..., shape 1)`: over the thin-member voxels only (a mask) when the ball covers the rest, over the whole part when the material's size is under the switch point. Every new line in `analyze.cpp` sits under the new mode; `Today`, `Stiff` and `Size` are untouched (all earlier printed values identical). New: `kSurfaceResolvedRadiusVoxels = 4`, `kSurfaceResolvedThroughVoxels = 8`; a tight point is counted even when it is loaded; the curvature fit uses only points facing the same way (it had mixed in the far face of a thin beam); `FixedDesignAnalysis::surface_tight_points / surface_unresolved_points / surface_loaded_points / surface_read_peak / surface_thin_voxels` for the readout.
+
+Measured with the limit at 4:
+- The ring, loaded bore PINNED as a test (`--gate`: within -6 to +3 % at bores 4, 5, 6): -4.9 / -4.3 / +1.3 %, passes.
+- Plate with a hole, radius 3 / 4 / 5 / 6: -28.9 (tight) / -13.8 (TIGHT: 36 points; the radius-4 hole sits on the limit and is flagged, where at a limit of 2.5 it read +3.2) / -4.2 / -1.0. Ellipse: flagged below, -5.2 % at tip radius 3.
+- THE JUDGE on the cut-skin beam (the whole part, its loaded ends included) against the true surface stress: 8 voxels through 0.96 to 1.01; 16 through 0.99; 4 through 1.00 to 1.17 and 2 through 0.50 to 0.79, where the reading comes from the beam's LOADED ENDS, not the span (the span alone reads 0.87 to 0.92 at 4 and 0.24 to 0.27 at 2: ledger A-06, unchanged).
+
+NOT DONE YET: (1) the CLI sets the stress-reading size only when the mode is `Size` (three CLI files), so `surface` does not reach a run from the command line until that one condition is widened: next; (2) `surface_thin_voxels` is filled only where member widths are already measured; (3) nothing reports the counts yet; (4) A2 (the drawn faces' fills in the loop) and the reviewer's five measurements.
+

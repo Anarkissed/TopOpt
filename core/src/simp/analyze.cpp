@@ -424,8 +424,11 @@ FixedDesignAnalysis analyze_fixed_design(
   double max_von_mises_eff = 0.0;
   // TO rebuild stage 2: the wall-aware stress per voxel, kept only when it is to
   // be read over a size (empty otherwise, so today's path allocates nothing).
+  // TOPOPT_STRENGTH=surface does everything "size" does; it differs only where "size"
+  // falls back to today's one-voxel reading (every new line sits under surface_mode).
+  const bool surface_mode = strength_mode() == StrengthMode::Surface;
   const bool read_over_size =
-      strength_mode() == StrengthMode::Size &&
+      (strength_mode() == StrengthMode::Size || surface_mode) &&
       stress_is_read_over_size(knockdown.stress_reading_mm, grid.spacing);
   std::vector<double> von_mises_eff_field;
   if (read_over_size && knockdown.width_aware)
@@ -649,6 +652,10 @@ FixedDesignAnalysis analyze_fixed_design(
       const std::vector<double> across_today = interlayer_tension_field(grid, stress, build_dir);
       double m_vm = 0.0, m_eff = 0.0, m_across = 0.0;
       std::size_t thick = 0, thin = 0;
+      // SURFACE: the voxels of thin members, read at the true surface below.
+      std::vector<char> thin_only;
+      if (surface_mode) thin_only.assign(grid.voxel_count(), 0);
+      std::size_t surface_thin = 0;
       for (int k = 0; k < grid.nz; ++k)
         for (int j = 0; j < grid.ny; ++j)
           for (int i = 0; i < grid.nx; ++i) {
@@ -662,18 +669,65 @@ FixedDesignAnalysis analyze_fixed_design(
               if (!r_eff.empty()) m_eff = std::max(m_eff, r_eff[idx]);
             } else if (printed) {
               ++thin;
-              m_vm = std::max(m_vm, out.von_mises_field[idx]);
+              if (!surface_mode) m_vm = std::max(m_vm, out.von_mises_field[idx]);
               if (!von_mises_eff_field.empty()) m_eff = std::max(m_eff, von_mises_eff_field[idx]);
             }
             if (w >= kStressThinMemberSizes * across_size) m_across = std::max(m_across, r_across[idx]);
             else if (printed) m_across = std::max(m_across, across_today[idx]);
+            if (surface_mode) {
+              if (!(w >= kStressThinMemberSizes * size)) thin_only[idx] = 1;
+              if (printed && w < kSurfaceResolvedThroughVoxels * grid.spacing) ++surface_thin;
+            }
           }
+      if (surface_mode) {
+        // SURFACE: the thin members' voxels are read on the real-stiffness solve at the
+        // true surface (shape 1), not by today's solve at one voxel.
+        const SurfaceCarry sc_surf =
+            stress_carried_to_surface(grid, vm_real, density, 1, &thin_only);
+        m_vm = std::max(m_vm, sc_surf.peak);
+        out.surface_tight_points = sc_surf.tight_points;
+        out.surface_unresolved_points = sc_surf.unresolved;
+        out.surface_loaded_points = sc_surf.loaded_points;
+        out.surface_read_peak = sc_surf.peak;
+        out.surface_thin_voxels = surface_thin;
+      }
       max_von_mises = m_vm;
       if (!von_mises_eff_field.empty()) max_von_mises_eff = m_eff;
       if (max_interlayer > 0.0) max_interlayer = m_across;
       size_form_used = thick > 0;
       out.stress_thin_member_voxels = thin;
       out.stress_thick_member_voxels = thick;
+    }
+  }
+  // SURFACE, the whole part under the switch point (where "size" keeps today's solve
+  // and one-voxel reading whole): the real-stiffness solve read at the true surface.
+  if (surface_mode && !read_over_size) {
+    SimpParams real = params;
+    real.penalty = 1.0;
+    bool solved = true;
+    SimpCompliance sc_real;
+    try {
+      sc_real = simp_compliance(grid, real, density, B, loads, cg_tolerance, cg_max_iterations,
+                                /*initial_guess=*/nullptr, /*solver=*/nullptr, solver_kind);
+    } catch (const SolverNonConvergence&) {
+      solved = false;  // today's reading stands, whole
+    }
+    if (solved) {
+      std::vector<double> vm_real;
+      material_stress(sc_real.solution, vm_real, nullptr);
+      out.von_mises_material_field = vm_real;
+      const SurfaceCarry sc_surf = stress_carried_to_surface(grid, vm_real, density, 1);
+      max_von_mises = sc_surf.peak;
+      out.surface_tight_points = sc_surf.tight_points;
+      out.surface_unresolved_points = sc_surf.unresolved;
+      out.surface_loaded_points = sc_surf.loaded_points;
+      out.surface_read_peak = sc_surf.peak;
+      // Member widths exist on this path only in the wall-aware posture.
+      if (!member_width_mm.empty())
+        for (std::size_t idx = 0; idx < density.size(); ++idx)
+          if (density[idx] > kIso && grid.tags[idx] != VoxelTag::Empty &&
+              member_width_mm[idx] < kSurfaceResolvedThroughVoxels * grid.spacing)
+            ++out.surface_thin_voxels;
     }
   }
   (void)max_interlayer_one_voxel;

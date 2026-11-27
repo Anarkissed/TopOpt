@@ -53,7 +53,13 @@ struct Out {
   // patch radius 2.5 and 3.5 voxels, / true surface stress.
   double patch25 = 0.0, patch35 = 0.0;
   double quad35 = 0.0, quad45 = 0.0;
-  double carry2 = 0.0;  // the curvature-shaped carry (shape 1)  // the quadratic patch (order 2) at radius 3.5 and 4.5
+  double carry2 = 0.0;  // the curvature-shaped carry (shape 1)
+  // The one judge under TOPOPT_STRENGTH=surface (E x fill rows only): its max_von_mises
+  // / true surface stress (the loaded ends included: the judge cannot mask them), its
+  // tight and unresolved counts, and the same solve's material field read at the
+  // surface (shape 1) at mid-span only, as the engine-carry row is.
+  double judge = 0.0, judge_mid = 0.0;
+  std::size_t judge_tight = 0, judge_unresolved = 0;  // the quadratic patch (order 2) at radius 3.5 and 4.5
   bool ok = false;
 };
 
@@ -170,6 +176,25 @@ Out bend(int core, double fill, double skin_density, double penalty) {
     o.engine_unresolved = sc.unresolved;
     o.carry2 = topopt::stress_carried_to_surface(g, mid_field, density, 1).peak / surface;
   }
+  if (penalty == 1.0 && skin_density >= 0.0) {
+    setenv("TOPOPT_STRENGTH", "surface", 1);
+    const topopt::FixedDesignAnalysis rs = topopt::analyze_fixed_design(
+        g, params, density, bcs, loads, m, Vec3{0.0, 0.0, 1.0}, 1e-9, 60000,
+        topopt::SolverKind::MultigridCG_Matfree, 0.0, knockdown, true, static_cast<double>(n));
+    unsetenv("TOPOPT_STRENGTH");
+    o.judge = rs.max_von_mises / surface;
+    o.judge_tight = rs.surface_tight_points;
+    o.judge_unresolved = rs.surface_unresolved_points;
+    if (rs.von_mises_material_field.size() == n) {
+      std::vector<double> mf = rs.von_mises_material_field;
+      for (int k = 0; k < g.nz; ++k)
+        for (int j = 0; j < g.ny; ++j)
+          for (int i = 0; i < g.nx; ++i)
+            if (i < g.nx / 4 || i >= 3 * g.nx / 4 || k < 2 || k >= g.nz - 2)
+              mf[g.index(i, j, k)] = 0.0;
+      o.judge_mid = topopt::stress_carried_to_surface(g, mf, density, 1).peak / surface;
+    }
+  }
   if (res.stress_tensor_field.size() == 6 * n) {
     std::vector<double> mid_tensor = res.stress_tensor_field;  // the same mask as the carry
     for (int k = 0; k < g.nz; ++k)
@@ -208,10 +233,14 @@ int main() {
           continue;
         }
         std::printf("[cut skin]   %s  curvature %.3f (%+.0f %%)   peak %.3f (%+.0f %%)   material-stress peak %.3f   "
-                    "carried to the true surface %.3f (%+.0f %%)   engine carry %.3f (%+.0f %%), unresolved %zu   patch2.5 %.3f, patch3.5 %.3f   patch2 3.5 %.3f, 4.5 %.3f   carry2 %.3f\n",
+                    "carried to the true surface %.3f (%+.0f %%)   engine carry %.3f (%+.0f %%), unresolved %zu   patch2.5 %.3f, patch3.5 %.3f   patch2 3.5 %.3f, 4.5 %.3f   carry2 %.3f",
                     md.name, o.curvature, 100.0 * (o.curvature - 1.0), o.peak, 100.0 * (o.peak - 1.0),
                     o.peak_material, o.at_surface, 100.0 * (o.at_surface - 1.0), o.engine_carry,
                     100.0 * (o.engine_carry - 1.0), o.engine_unresolved, o.patch25, o.patch35, o.quad35, o.quad45, o.carry2);
+        if (md.penalty == 1.0 && md.skin >= 0.0)
+          std::printf("   JUDGE(surface) %.3f, tight %zu, unresolved %zu (its field at mid-span only, at the surface: %.3f)",
+                      o.judge, o.judge_tight, o.judge_unresolved, o.judge_mid);
+        std::printf("\n");
         std::fflush(stdout);
       }
     }

@@ -52,6 +52,13 @@ inline constexpr double kStressSizeSwitchVoxels = 1.75;
 // and reads low. Where the member is thinner than this many sizes, that voxel is
 // read at one voxel by today's form instead.
 inline constexpr double kStressThinMemberSizes = 2.0;
+// THE RESOLVED LIMITS of the surface reading (the reviewer's ruling 2026-11-27):
+// a concave surface of radius under this many voxels is a stress raiser too tight
+// for the grid (stress_carried_to_surface keeps the straight line there and counts
+// it tight), and a member under kSurfaceResolvedThroughVoxels voxels through is
+// too thin for the grid to resolve its stress (counted for the readout).
+inline constexpr double kSurfaceResolvedRadiusVoxels = 4.0;
+inline constexpr double kSurfaceResolvedThroughVoxels = 8.0;
 inline bool stress_is_read_over_size(double reading_mm, double voxel_mm) {
   return reading_mm > 0.0 && voxel_mm > 0.0 && reading_mm >= kStressSizeSwitchVoxels * voxel_mm;
 }
@@ -119,7 +126,7 @@ struct SurfaceCarry {
   double peak_unresolved = 0.0;      // the largest fallback value among those
   std::size_t curved_points = 0;     // shape 1: cut-face points carried by the curvature-shaped form
   std::size_t curved_concave = 0;    // of those, the ones whose centre of curvature lies in the air
-  std::size_t tight_points = 0;      // shape 1: concave cut-face points with R < 2.5 voxels (a stress raiser too tight for the grid)
+  std::size_t tight_points = 0;      // shape 1: concave cut-face points with R < kSurfaceResolvedRadiusVoxels (a stress raiser too tight for the grid)
   std::size_t capped_points = 0;     // shape 1: curved readings capped at 1.5 x the straight line
   std::size_t loaded_points = 0;     // shape 1: cut-face points kept on the line because the surface voxel or the first full voxel is tagged Load
 };
@@ -127,12 +134,16 @@ struct SurfaceCarry {
 // (flat faces and convex points keep the line): the surface's curvature fitted from the
 // cut-face points within 3 voxels, median-smoothed over 2 voxels, and the two voxels'
 // stress carried with A + B / r^2, r from the centre of curvature (Kirsch-like). R over
-// 40 voxels is flat; R under 2.5 keeps the line and counts as `tight_points`; a curved
+// 40 voxels is flat; R under kSurfaceResolvedRadiusVoxels keeps the line and counts as `tight_points`; a curved
 // reading over 1.5 x the straight line is capped there (`capped_points`). A cut-face point
 // whose surface voxel or first full voxel is tagged VoxelTag::Load keeps the line
 // (`loaded_points`): the curved form is for FREE surfaces.
+// `only` (per voxel, optional): read a surface point only where its surface voxel has
+// only[v] != 0, and the full-voxel peak only over those voxels (the curvature still comes
+// from every cut-face point). Absent = every voxel, as before.
 SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<double>& field,
-                                       const std::vector<double>& density, int shape = 0);
+                                       const std::vector<double>& density, int shape = 0,
+                                       const std::vector<char>* only = nullptr);
 
 // THE STRESS AT THE TRUE SURFACE, by a patch recovery of the stress TENSOR (second
 // candidate, measured in the tests' `[patch]` rows; the engine does not call it).

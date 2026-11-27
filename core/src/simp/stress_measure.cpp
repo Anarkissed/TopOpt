@@ -265,10 +265,12 @@ double von_mises6(const double* s) {
 }  // namespace
 
 SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<double>& field,
-                                       const std::vector<double>& density, int shape) {
+                                       const std::vector<double>& density, int shape,
+                                       const std::vector<char>* only) {
   const std::size_t n = grid.voxel_count();
-  if (field.size() != n || density.size() != n)
-    throw std::invalid_argument("stress_carried_to_surface: field / density size != voxel_count");
+  if (field.size() != n || density.size() != n || (only != nullptr && only->size() != n))
+    throw std::invalid_argument("stress_carried_to_surface: field / density / only size != voxel_count");
+  auto read_here = [&](std::size_t v) { return only == nullptr || (*only)[v] != 0; };
   if (shape != 0 && shape != 1)
     throw std::invalid_argument("stress_carried_to_surface: shape must be 0 or 1");
   // SHAPE 1: the true-surface positions of every CUT-face point, bucketed in cells of
@@ -329,6 +331,10 @@ SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<
             const double d[3] = {cut_points[q].x[0] - xs[0], cut_points[q].x[1] - xs[1],
                                  cut_points[q].x[2] - xs[2]};
             if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > kCurvReach * kCurvReach) continue;
+            // Only the same face: a point facing away (the far face of a thin member,
+            // within reach across it) is not on this surface.
+            const double* nq = cut_points[q].n;
+            if (!(nq[0] * nv[0] + nq[1] * nv[1] + nq[2] * nv[2] > 0.0)) continue;
             local.push_back({d[0] * u[0] + d[1] * u[1] + d[2] * u[2],
                              d[0] * w[0] + d[1] * w[1] + d[2] * w[2],
                              d[0] * nv[0] + d[1] * nv[1] + d[2] * nv[2]});
@@ -413,7 +419,11 @@ SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<
             for (std::size_t o : it->second) {
               const double d[3] = {cut_points[o].x[0] - xs[0], cut_points[o].x[1] - xs[1],
                                    cut_points[o].x[2] - xs[2]};
-              if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= 4.0) near.push_back(raw_k[o]);
+              const double* no = cut_points[o].n;
+              const double* nself = cut_points[q].n;
+              if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= 4.0 &&
+                  no[0] * nself[0] + no[1] * nself[1] + no[2] * nself[2] > 0.0)
+                near.push_back(raw_k[o]);  // the same face only, as in the fit
             }
           }
       std::sort(near.begin(), near.end());
@@ -436,17 +446,21 @@ SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<
     const double c[3] = {i + 0.5, j + 0.5, k + 0.5};
     const bool is_cut = density[v] < kFullVoxel;
     // SHAPE 1 uses the curved form only where the surface is CONCAVE (k > 0: the centre
-    // of curvature in the air) with 2.5 <= R <= 40 voxels; under 2.5 it is a stress
-    // raiser too tight for the grid (counted, straight line).
+    // of curvature in the air) with kSurfaceResolvedRadiusVoxels <= R <= 40 voxels; a
+    // smaller R is a stress raiser too tight for the grid (counted, straight line).
     double R_curved = 0.0;
+    double kc = 0.0;
+    if (shape == 1 && is_cut) kc = smoothed_k[cut_counter++];  // every cut point, read or not
+    if (!read_here(v)) return;  // `only`: this surface voxel is not read
     if (shape == 1 && is_cut) {
-      const double kc = smoothed_k[cut_counter++];
       // A LOADED face (the surface voxel tagged Load) keeps the line: the solve's stress
-      // behind a loaded cut face is too steep for the curved form.
-      if (grid.tags[v] == VoxelTag::Load) ++out.loaded_points;
-      else if (kc >= 1.0 / 40.0) {
-        if (1.0 / kc < 2.5) ++out.tight_points;
-        else R_curved = 1.0 / kc;
+      // behind a loaded cut face is too steep for the curved form. A tight radius is
+      // counted tight whether or not the face is loaded (a point may count in both).
+      const bool loaded_here = grid.tags[v] == VoxelTag::Load;
+      if (loaded_here) ++out.loaded_points;
+      if (kc >= 1.0 / 40.0) {
+        if (1.0 / kc < kSurfaceResolvedRadiusVoxels) ++out.tight_points;
+        else if (!loaded_here) R_curved = 1.0 / kc;
       }
     }
     bool have_a = false, have_b = false;
@@ -508,8 +522,13 @@ SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<
     }
   };
   for_each_surface_point(
-      grid, density, [&](std::size_t v) { out.peak = std::max(out.peak, field[v]); }, carry,
+      grid, density,
       [&](std::size_t v) {
+        if (read_here(v)) out.peak = std::max(out.peak, field[v]);
+      },
+      carry,
+      [&](std::size_t v) {
+        if (!read_here(v)) return;
         ++out.unresolved;
         out.peak_unresolved = std::max(out.peak_unresolved, field[v]);
         out.peak = std::max(out.peak, field[v]);

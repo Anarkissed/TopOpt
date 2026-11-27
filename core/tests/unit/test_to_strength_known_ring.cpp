@@ -336,6 +336,16 @@ int main(int argc, char** argv) {
                 "(straight line %+.1f), curved points %zu, of them concave %zu, tight %zu, capped %zu, loaded %zu\n",
                 r, 100.0 * (g_carry2 / kTextbook - 1.0), 100.0 * (g_engine_carry / kTextbook - 1.0),
                 g_carry2_curved, g_carry2_concave, g_carry2_tight, g_carry2_capped, g_carry2_loaded);
+    // THE LOADED FACE, PINNED (the reviewer, 2026-11-27: "pin it with the ring as a
+    // test"): with the bore tagged Load the surface reading keeps the straight line
+    // there, measured -4.9 / -4.3 / +1.3 % at bores 4 / 5 / 6. Gated: -6 % .. +3 %.
+    if (r >= 4) {
+      const double off = 100.0 * (g_carry2 / kTextbook - 1.0);
+      const bool in = off >= -6.0 && off <= 3.0;
+      std::printf("[carry2] inner radius %d voxels: loaded bore within -6 .. +3 %% of the textbook: %s (%+.1f %%)%s\n",
+                  r, in ? "PASS" : "FAIL", off, gate ? "" : " (measure only)");
+      if (gate && !in) ++failures;
+    }
     std::printf("[patch] inner radius %d voxels: tensor patch recovery (E x fill, bore loaded), percent against the textbook: "
                 "radius 2.5: %+.1f %%, unresolved %zu; radius 3.5: %+.1f %%, unresolved %zu\n",
                 r, 100.0 * (g_patch[0] / kTextbook - 1.0), g_patch_unresolved[0],

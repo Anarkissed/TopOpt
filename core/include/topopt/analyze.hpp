@@ -182,6 +182,15 @@ struct FixedDesignAnalysis {
   // today's one-voxel reading because their member is thinner than
   // kStressThinMemberSizes sizes.
   std::size_t stress_thick_member_voxels = 0, stress_thin_member_voxels = 0;
+  // TO rebuild stage 2, TOPOPT_STRENGTH=surface only (0 otherwise): the surface
+  // reading's counts (stress_measure.hpp, SurfaceCarry) for the readout: concave
+  // points too tight for the grid, points with too few full voxels behind them,
+  // points on a loaded face; the largest value the surface reading gave; and the
+  // printed voxels whose member is under kSurfaceResolvedThroughVoxels voxels through
+  // (0 where no member width was measured on that path).
+  std::size_t surface_tight_points = 0, surface_unresolved_points = 0, surface_loaded_points = 0;
+  double surface_read_peak = 0.0;
+  std::size_t surface_thin_voxels = 0;
   double max_interlayer_tension = 0.0;
   StressMargin margin;  // SOLID margin (the reported/displayed value)
   V3Report v3;          // §7 V3 suite on the fixed density (min-feature count, mesh, ...)
