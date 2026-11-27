@@ -103,6 +103,9 @@ FOR HIM, NEXT TIME HE ASKS (plain words; written 2026-11-27 01:10; keep current)
 - DECIDED BY HIM 2026-11-27: "finish fast, then keep going finer" is in the plan (02-plan.md, after the stages table; built with stage 6, shown in stage 9). The printed test for small PLA parts: yes, but the rig "won't be for a while"; whether the averaged reading ships for small parts before that print is for the reviewer.
 - THE CRASH: the app crashed at 13:15 on 11-26 because the Mac was overloaded; part of that was my four runs at once. New rules since: one small job at a time outside the heavy-job slot, a memory check before every job, every job stops itself if the Mac starts swapping. My guard has stopped my own jobs four times since, as it should.
 
+01:30. B5 (my lock, since 01:03): its FIRST run (the bracket at res 96, switch off) was STOPPED BY MY GUARD at 01:17, 14 minutes in, on the swapouts clause with 54 % of memory free (two of four versions done: lost). The script went on to the next run. That is six stops on that clause with memory plentiful (59, 59, 46, 54 % free): on this Mac the swapout counter rises on other apps' background housekeeping. ASKED the reviewer (TORebuildGroup): count the swapouts clause only when free is also under 30 %; the hard floors stay. Rule kept as written until ruled. The lost run is owed again at the end of B5.
+The scenario regression: the breaking merge moved `simp_scenarios_compliance` and the solve functions out of `simp.cpp` into `to_solve.cpp` (421 lines out, 481 in) and changed `multigrid.cpp`, `matfree.cpp`, `recycle.cpp`, `geneo.cpp`: all TOSolver's files. With TOSolver; no word yet.
+
 A. Already agreed:
 - A1. Stage 1 report to the reviewer once the two lock runs are recorded (draft at the top of `stages/stage-1-true-loads.md`).
 - A2. The pad's one number: tables and PICTURES of the shapes around the fixed faces from the two sweeps; a recommended curve strength for him in the morning.
