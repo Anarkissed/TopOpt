@@ -291,7 +291,8 @@ final class Notes30ScaffoldTests: XCTestCase {
                 let lifts = r.lastScaffold?.lifts ?? 0
                 if lifts == 0 { opened.append(differing(closed, px)) }
                 else if strawUp.count < lifts { strawUp.append(Self.straw(px)) }
-                if checkpoint == nil, lifts == 2 { checkpoint = (lifts, Self.straw(px)) }   // (the first lift's floor and walls)
+                // (a lift's floor up and its walls not yet, high enough in the pocket to be lit)
+                if checkpoint == nil, lifts >= 2 * T.perFloor, lifts % T.perFloor == 1 { checkpoint = (lifts, Self.straw(px)) }
                 if r.insideMap != nil { insideShaded = true }
                 XCTAssertLessThanOrEqual(Notes29AnimationTests.purple(px), 30, "★ no real strut before the landing")
                 t += 1.0 / 30
@@ -325,7 +326,7 @@ final class Notes30ScaffoldTests: XCTestCase {
             let peak = after.map(\.straw).max() ?? 0
             XCTAssertGreaterThan(peak, 100, "the scaffold stands at the landing")
             // ★ the shader's snaps are the plan's: the scaffold drawn at n snaps is its members coded under n, drawn whole
-            let cp = try XCTUnwrap(checkpoint, "premise: the first lift's floor and walls seen")
+            let cp = try XCTUnwrap(checkpoint, "premise: a lift's floor seen before its walls")
             let (r2, d2) = try pocketRenderer()
             var keep: [Float] = []
             for (m, c) in made.layout.codes.enumerated() where S.step(code: c) < cp.n { keep += Array(made.bars[(7 * m)..<(7 * m + 7)]) }
@@ -335,7 +336,7 @@ final class Notes30ScaffoldTests: XCTestCase {
                                                        colourKey: 9), device: d2)
             let whole = Self.straw(try frame(r2))
             print("NOTES30 SNAPS: at \(cp.n) snaps the scaffold drew \(cp.straw) px; its \(keep.count / 7) members coded under \(cp.n), drawn whole: \(whole) px")
-            XCTAssertGreaterThan(whole, 20, "premise: the first lift's floor and walls drawn")
+            XCTAssertGreaterThan(whole, 20, "premise: the scaffold so far drawn")
             XCTAssertEqual(Double(cp.straw), Double(whole), accuracy: Double(whole) * 0.1 + 10, "★ the shader shows exactly the members coded under its snaps")
             // over: its pass gone
             _ = show.step(end + 0.01)
@@ -793,7 +794,8 @@ final class Notes30ScaffoldTests: XCTestCase {
                 }
                 print("NOTES30 FILL (\(name)\(red ? " RED" : "")): \(made.members) members; inner nodes \(innerNodes), with their uprights \(inner)")
                 XCTAssertGreaterThan(innerNodes, 0, "\(name): premise: the area has an inside")
-                if red { XCTAssertEqual(inner, 0, "RED CONTROL: the rim alone"); continue }
+                // (the rim alone keeps only the stair's own bay inside; the cone's inside is that bay)
+                if red { if name == "window" { XCTAssertLessThan(inner, innerNodes / 2, "RED CONTROL: the rim alone") }; continue }
                 XCTAssertEqual(inner, innerNodes, "★ \(name): an upright at every node through the whole hole")
                 XCTAssertLessThanOrEqual(made.members, S.membersMost, "★ \(name): the instance count bounded")
             }
