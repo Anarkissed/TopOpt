@@ -2,49 +2,31 @@
 
 Status 2026-11-26 19:30: IN PROGRESS. Everything is behind ONE switch, `TOPOPT_STRENGTH` (unset = today, unchanged; `size` = the form below; `stiff` = a measuring arm). The certificate is shared with the lattice strength check: every change here is told to the reviewer and LatticeReview. The history below is in the order it happened; this block is where it stands.
 
-## WHERE IT STANDS (read this first)
+## WHERE IT STANDS (read this first; rewritten 2026-11-27 04:10)
 
-**In plain words, for the maintainer.** The app decides pass or fail from the stress in the single hottest little cube of the part. That number jumps when the detail level changes and is wrong at the part's edge. Stage 2 replaces it, where the detail is fine enough, with the stress averaged over a small region whose size belongs to the plastic (PLA: 1.2 mm), which is what the research says a printed part really fails by. It also shows the weight as it is printed (walls and infill), not as a solid block.
+Everything is behind switches, unset = today: `TOPOPT_STRENGTH=size` (the strength reading and printed grams), `TOPOPT_RECHECK=fill` (one judge). Nothing here is released.
 
-**Done and measured (all behind the switch):**
-- Printed grams, checked against Bambu Studio to within 3 %; the "saved" figure against the part as drawn at the same walls and infill.
-- The averaged reading, on real stiffness, with the averaging region free to sit on the part's edge. Against the textbook on two shapes at four detail levels it is never more than 4.9 % low and within 10 % across detail levels, from 1.75 voxels across upward (set as the switch point). The across-layer check is read the same way (inside the bar at 19 of 20 points; 5.4 % low at one).
-- Under 1.75 voxels across, or for a material with no published length, the job keeps TODAY'S solve and reading whole, and says so (`[strength]` line, the report's `strength_reading`).
-- The reviewer's rulings of 18:37Z, items 2 to 6: answered (tables below).
+**In plain words, for the maintainer.** The app decides pass or fail from the stress in the single hottest little cube of the part. Stage 2 does three things about that number. (1) The weight it shows becomes the weight as printed, walls and infill, not a solid block. (2) Where the detail is fine enough for the plastic and the part is thick enough there, the stress is read as an average over a small region whose size belongs to the plastic, which is what the research says a printed part fails by; everywhere else today's reading is kept, and the job says which was used. (3) The number shown after finishing is made to come from the same kind of check as the optimiser's own ("one judge"); today a cruder second check has the last word and can be far too generous on the lightest versions.
 
-**Found, and not comfortable:**
-- On his materials and usual detail levels the averaged reading rarely switches on (PLA needs a voxel of 0.69 mm or finer; PETG and ABS essentially never; PA6 and PA12 have no length), so for most jobs stage 2 changes the grams and not the strength number.
-- Today's one-voxel reading is itself 13.9 % low on a sharp notch (the ellipse) at one detail level.
-- The number he is SHOWN comes from a second judge, the re-check of the finished file on all-or-nothing voxels: 10 to 27 % optimistic on the textbook plate, and up to 2.3 times the loop's own number on the lightest carved versions. The averaged reading does not reach it.
+**Measured and in the code:**
+- PRINTED GRAMS: within 3 % of Bambu Studio; "saved" is against the part as drawn at the same walls and infill (the stand: 15 % really saved where the solid figures say 23.5 %; the bracket 20 / 33 / 44 %).
+- THE SIZE FORM (real stiffness, its own solve; the stress averaged over the material's size with the ball free to sit on the part's edge and, where the surface lies on voxel boundaries, on its surface nodes). Against the textbook on a plate with a hole, a thick ring, the across-layer case and a beam in bending, at four detail levels: never more than 4.9 % low from 1.75 voxels across (the switch point) and from a member twice the size thick (the thin-member rule). Under either, the job keeps TODAY'S solve and reading whole and says so (`[strength]` line; report key `strength_reading`).
+- ONE JUDGE (`TOPOPT_RECHECK=fill`, 8 sub-samples per voxel edge, by measurement): the re-check of the finished file analyses each voxel's fill. On textbook shapes today's re-check reads the peak 14 to 47 % under the optimiser's check; with one judge the size form agrees within 0.5 % (16 rows) and the one-voxel form within 2.5 % (12 rows). On the sample bracket the lightest version's shown margin comes down from 3.66 to about 2.2 (the optimiser's own: 1.80). No cost in time; memory flat.
 
-**THE REVIEWER'S RULING of 2026-11-27 00:22Z (maintainer-approved):**
-1. "One judge" APPROVED and FIRST in stage 2, because it is the number he is shown. Behind its own switch (`TOPOPT_RECHECK=fill`) so it can flip ahead of the rest. The sub-sampling k is chosen by measurement: the k at which the shown margin moves under 0.5 % when k doubles. Evidence for its flip: (a) plate, ring and ellipse through the re-check path give the certificate's numbers within 1 %; (b) his parts' shown margins before and after (expect within 1 %), and the bracket, hook and beam: shown against certificate, before and after; (c) time and peak memory of the re-check on his largest job, one thread; (d) test K; (e) lattice jobs A to D, LatticeReview told what moves first.
-2. Switch point 1.75 voxels: accepted.
-3. KNOWN LIMIT, stated: the across-layer reading is 5.4 % low at 2.0 voxels across where the hole is 3 voxels in radius (the in-plane reading is 4.9 % low at the same point). Accepted as a limit; no margin added ("a margin set to pass one point is tuning").
-4. KNOWN LIMIT, stated: a notch whose tip radius is under 2 check voxels is OUTSIDE the bar. On the ellipse (tip radius 0.75 to 1.5 voxels) today's one-voxel reading is 13.9 % under the textbook at one resolution and 22 % apart across resolutions; E x fill^2 is 19.3 % under. No pop-up. If the check can tell cheaply that its peak sits on a feature sharper than 2 voxels, the engineer's readout may say the corner is finer than the grid and a finer resolution reads it better: measured on the ellipse first, or not built.
-5. Today's E x fill^3 stays for the under-a-voxel case. Stage 1's flip items 2(b), 2(c), 2(d) received; the flip waits on 2(a) and the list.
-Also ruled the same hour (stage 5): the connection-rule test on the hook PASSES; before a rung is refused for an unheld load, TRY A STEP-BACK (restore the last design whose load reached a support, halve the move limit, retry, at most 3 times), measured on the hook at pad 1.0 and on demo solve 10 with and without it, kept only if it makes more versions in no more than 10 % more time. The smoother's default is cheb:2.
+**KNOWN LIMITS, stated (ruled):**
+- A-06: TODAY'S one-voxel reading on a member only 2 to 4 voxels thick in bending reads 0.33 to 0.68 of the true surface stress. Not fixed here; carried to stage 4 (the smallest member in voxels through as well as mm).
+- A notch with a tip radius under 2 check voxels is outside the bar (the ellipse: today's reading 13.9 % low at one detail level).
+- The one-voxel form is jumpy in the fill (up to 11 % on an unlucky sliver); a fill-weighted reading is to be measured AFTER one judge flips and would go into both judges together.
+- On his materials at his usual detail the size form rarely switches on (PLA needs a voxel of 0.69 mm or finer; PETG, ABS essentially never; PA6, PA12 no published length): for most of his jobs stage 2 changes the grams and the shown number's honesty (one judge), not the reading itself.
+- Small parts: the size form raises margins by a quarter to two fifths on a 15 mm PLA part, on the published length halved by his rule; shipped on that by ruling, his print replaces it when the rig exists.
 
-**ONE JUDGE, where it is (2026-11-26 21:45):** the switch `TOPOPT_RECHECK=fill[:k]` is in, builds and runs in a job; the fills are counted one layer at a time. On the bracket the lightest version's shown margin comes down from 3.66 to between 2.2 and 2.5 (certificate 1.80), at no cost in time. NOT settled: the number still moves with k (the textbook test: up to 18 % between k = 4 and 8), because the one-voxel form is jumpy in the fill by its nature, in both judges ("WHY the one-voxel form is jumpy", below). Runs at k = 16 against a finer reference are in progress; the reviewer gets the table and the question it raises.
+**Owed before the stage report goes:**
+- One judge, evidence (b) to (e): running under the lock (`b7_onejudge.sh`): his parts and the made parts before and after, time and memory, test K, lattice jobs A to D.
+- The size form's conditions (b) to (e) on his full-resolution parts on the CURRENT build (B5 ran before the thin-member rule).
+- The app's side (#362): show the form, the printed grams; the job carries his top and bottom layers (`loads.top_solid_mm`, `loads.bottom_solid_mm`: #362's keys, to be read by printed grams once its branch is merged).
+- After one judge flips: the fill-weighted one-voxel reading. For stage 4: the member rule in voxels (A-06). With TOSurface: the step-back before refusing a rung.
 
-**THE MAINTAINER, 2026-11-27, on the printed check for small PLA parts:** "I will absolutely add the small PLA parts when the rig is ready. But it won't be for a while." So the averaged reading's 33 to 41 % higher margins on a 15 mm part rest on the published length alone for now. FOR THE REVIEWER to rule when stage 2's size form comes up for its flip: ship it for small parts on the published value, or hold the size form to parts above a stated size until his print exists. Not decided by me.
-
-**THE REVIEWER'S RULING of 2026-11-27 06:34Z (maintainer-approved):**
-1. One judge: k = 8 APPROVED (now the default of `TOPOPT_RECHECK=fill`). Evidence (a): the size form at 1 % (met); the one-voxel form stated as its own scatter (within 2.5 % on all 12 rows at k = 8; up to 11 % on an unlucky sliver at other k). The rows at k = 8 are PINNED as a test (`to_recheck_fill`, ctest -C Long, gated at 2.5 % and 1 %). AFTER one judge flips, not before: measure a fill-weighted one-voxel reading on all three shapes; if steadier it goes into BOTH judges together, never one alone.
-2. Small PLA parts: SHIP on the published length with his half rule (his choice of safety; his prints replace it when the rig exists). ONE CONDITION FIRST: no reading over a size where the ball reaches across the member (a ball wider than a thin member in bending averages across its neutral line and reads low; Taylor 2007, The Theory of Critical Distances). Where the member under the reading is thinner than TWICE the size, read one voxel (today's form). Test: a beam in bending at thicknesses of 0.5, 1, 2 and 4 times the size: at 0.5 and 1 the reading falls back; at 2 and 4 it is judged against its own true value. Then restate the 15 mm part's 33 to 41 %. OWED, next.
-3. scenario_weights: no flip on a base with an unexplained change of results. SETTLED since (TOSolver's fix on my tip, checked).
-4. The memory guard amended for everyone (the swapouts clause only when free is also under 30 %).
-
-**KNOWN LIMIT, STATED (the reviewer's ruling 2026-11-27 07:38Z: "the most important line in your report"):** TODAY'S SHIPPED one-voxel reading, on a member only 2 to 4 voxels thick in BENDING, reads 0.33 to 0.68 of the true surface stress (measured on a beam in pure bending: 0.33 with 2 voxels through the member, 0.68 with 4, 0.85 with 8, 0.93 with 16). It is the grid: a few linear elements cannot carry a bending gradient. It is in the shipped check with or without this stage, so a thin bending member can pass today with a margin up to three times too good. Stage 2 does not fix it (its size form falls back to that same reading on thin members, as ruled). It is carried to STAGE 4: the smallest member is stated in voxels THROUGH as well as in mm, the number set by measurement on the beam at 2, 3, 4, 6 and 8 voxels through, and the automatic resolution must honour it; a candidate to measure there is stress recovered at the surface from its neighbours (superconvergent patch recovery, Zienkiewicz and Zhu 1992, DOI 10.1002/nme.1620330702). Ledger: A-06.
-
-**THE REVIEWER'S RULING of 2026-11-27 07:38Z:** (a) YES to the surface-node ball and the corner-aware width, on the beam and the three shapes, then the switch point again, then the 15 mm part restated. (b) the limit above, in the stage file and the ledger now, and in stage 4. (c) scenario_weights check (c): give it a margin the physics supports or state what it guards; low priority.
-
-**Owed, in order:**
-- The surface-node ball and the corner-aware width in the engine (behind the switch), re-measured on the beam, the three shapes and the switch point; then the 15 mm part again.
-- ONE JUDGE: k by measurement (or the finding that it has no answer for the one-voxel form), evidence (a) to (e).
-- The step-back (the optimiser's loop is in `plsm.cpp`, TOSurface's file: to agree who edits it).
-- Conditions (b) to (e) again on his full-resolution parts with the size form (`b5_stage2.sh`, lock).
-- The app's side (#362): show the form and the printed grams.
+(The dated rulings and every table follow below in the order they happened.)
 
 ## The problem, in plain words
 
