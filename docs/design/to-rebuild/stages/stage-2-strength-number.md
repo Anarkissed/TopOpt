@@ -600,3 +600,18 @@ The part as drawn prints at 100.13 g of 114.98 g solid, so the version really sa
 | 4 x | over the size, every voxel thick, none thin | 0.893 | 0.909 | -1.7 % |
 
 So the engine now gives what the measuring arm gave: inside the 5 % bar from twice the size, and the edge voxels no longer fall back (0 thin where there were 360 and 392). The margin at twice the size is thin (-4.9 %). OWED NEXT: the plate, ring, ellipse and across-layer tests still read with voxel-centred balls only; they are switched to the engine's combined reading and the switch point (1.75 voxels) and the bar are measured again on all of them; then the 15 mm part.
+
+### The surface-node ball NARROWED, and everything measured again together (2026-11-27 03:39; behind `TOPOPT_STRENGTH=size`)
+
+First form (every node where material meets air), on the curved shapes: WRONG the other way. The plate and the ring read 14 to 68 % HIGH at 1.75 to 2 voxels across and 10 to 23 % high at 3 to 4 (a node on a cut surface averages mostly sliver voxels, whose stress the solve reads high). Corrected the same hour: a surface node counts only where EVERY voxel at it is full, that is, where the surface lies on voxel boundaries and a voxel-centred ball cannot reach it; where the surface cuts voxels the voxel-centred ball already sits on the edge.
+
+With that, all four tests on one build:
+
+| test | result |
+|---|---|
+| the beam in bending | falls back at 0.5 and 1 x the size; -4.9 % at 2 x, -1.7 % at 4 x; no edge voxel falls back |
+| plate with a hole, by voxels across | 1.50: +7.1 to +7.5; 1.75: -2.9 to +2.9; 2.00: -4.9 to +2.0; 2.50: -4.0 to +2.8; 3.00: -0.8 to +5.2; 4.00: +0.8 to +4.4 (the figures of 11-26, to the digit) |
+| thick ring | 1.50: +4.1 to +11.3; 1.75: +1.3 to +3.0; 2.00: +1.5 to +3.0; 2.50: +2.5 to +5.2; 3.00: +5.5 to +8.2; 4.00: +4.6 to +6.9 (the same) |
+| across the layers (plate 8 voxels thick, through analyze) | 1.75: +2.4 to +8.0; 2.00: -0.2 to +7.0; 2.50: -1.0 to +6.8; 3.00: +0.7 to +8.2; 4.00: +1.3 to +6.9 |
+
+So: the switch point of 1.75 voxels stands (every figure on the curved shapes between -4.9 and +8.2 % from there up, none more than 5 % low), the flat-face miss is cured (-11.2 % became -4.9 %), and the thin-member rule falls back where ruled. The two thin margins, said again: -4.9 % at 2.0 voxels across on the coarsest plate, and -4.9 % on the beam at twice the size. Owed: the 15 mm part restated with all of this (needs a CLI from this tip; after B7).

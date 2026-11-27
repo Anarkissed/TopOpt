@@ -78,6 +78,10 @@ std::vector<double> stress_over_size(const VoxelGrid& grid,
   return out;
 }
 
+namespace {
+constexpr double kFullVoxel = 0.999;  // a voxel the surface does not cut
+}  // namespace
+
 std::vector<double> stress_over_size_on_surface(const VoxelGrid& grid,
                                                 const std::vector<double>& field,
                                                 const std::vector<double>& density,
@@ -116,11 +120,21 @@ std::vector<double> stress_over_size_on_surface(const VoxelGrid& grid,
   for (int k = 0; k <= grid.nz; ++k)
     for (int j = 0; j <= grid.ny; ++j)
       for (int i = 0; i <= grid.nx; ++i) {
-        int with = 0;
+        int with = 0, cut = 0;
         for (int c = -1; c <= 0; ++c)
           for (int b = -1; b <= 0; ++b)
-            for (int a = -1; a <= 0; ++a) with += holds(i + a, j + b, k + c) ? 1 : 0;
+            for (int a = -1; a <= 0; ++a)
+              if (holds(i + a, j + b, k + c)) {
+                ++with;
+                if (density[grid.index(i + a, j + b, k + c)] < kFullVoxel) ++cut;
+              }
         if (with == 0 || with == 8) continue;  // inside the air, or inside the material
+        // Only where the surface lies ON voxel boundaries (every voxel at the node is
+        // full). Where the surface cuts voxels, a voxel-centred ball already sits on
+        // the edge (on the cut voxels), and a node there would average mostly
+        // slivers, whose stress the solve reads high: measured 2026-11-27, the plate
+        // and the ring read 10 to 68 % high with such nodes counted.
+        if (cut > 0) continue;
         double sum = 0.0, weight = 0.0;
         for (const Tap& t : taps) {
           const int a = i + t.di, b = j + t.dj, c = k + t.dk;

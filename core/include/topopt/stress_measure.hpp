@@ -70,7 +70,10 @@ std::vector<double> stress_over_size(const VoxelGrid& grid,
 // voxel boundaries no voxel is cut, so a voxel-centred ball cannot sit on the
 // surface: it sits half a voxel inside and reads 11 % low at twice the size on a
 // bending beam (5 % with the ball on the surface). Here the ball is centred on
-// every NODE (voxel corner) at which material meets air or the grid's edge, and
+// every NODE (voxel corner) at which FULL voxels meet air or the grid's edge (a
+// node touching a voxel the surface cuts is left to the voxel-centred ball, which
+// already sits on the edge there; with such nodes counted the textbook plate and
+// ring read 10 to 68 % high), and
 // averages the material inside it (weight = the voxel's share inside the ball x its
 // fill, voxels of at least `material_floor` fill). Returned PER VOXEL: the largest
 // such reading among the voxel's own eight corner nodes that are surface nodes, 0
