@@ -17,10 +17,18 @@ Status 2026-11-26 19:30: IN PROGRESS. Everything is behind ONE switch, `TOPOPT_S
 - Today's one-voxel reading is itself 13.9 % low on a sharp notch (the ellipse) at one detail level.
 - The number he is SHOWN comes from a second judge, the re-check of the finished file on all-or-nothing voxels: 10 to 27 % optimistic on the textbook plate, and up to 2.3 times the loop's own number on the lightest carved versions. The averaged reading does not reach it.
 
-**Owed:**
-- The reviewer's rulings on: "one judge" (the file re-check on each voxel's fill, by the same form; `file_fill.hpp` is written ahead, not wired); the sharp-notch question; the across-layer miss.
-- Conditions (b) to (e) again on his full-resolution parts with this form (`b5_stage2.sh`, lock, queued behind the suite).
-- LatticeReview told what moves in the shared certificate once "one judge" is ruled.
+**THE REVIEWER'S RULING of 2026-11-27 00:22Z (maintainer-approved):**
+1. "One judge" APPROVED and FIRST in stage 2, because it is the number he is shown. Behind its own switch (`TOPOPT_RECHECK=fill`) so it can flip ahead of the rest. The sub-sampling k is chosen by measurement: the k at which the shown margin moves under 0.5 % when k doubles. Evidence for its flip: (a) plate, ring and ellipse through the re-check path give the certificate's numbers within 1 %; (b) his parts' shown margins before and after (expect within 1 %), and the bracket, hook and beam: shown against certificate, before and after; (c) time and peak memory of the re-check on his largest job, one thread; (d) test K; (e) lattice jobs A to D, LatticeReview told what moves first.
+2. Switch point 1.75 voxels: accepted.
+3. KNOWN LIMIT, stated: the across-layer reading is 5.4 % low at 2.0 voxels across where the hole is 3 voxels in radius (the in-plane reading is 4.9 % low at the same point). Accepted as a limit; no margin added ("a margin set to pass one point is tuning").
+4. KNOWN LIMIT, stated: a notch whose tip radius is under 2 check voxels is OUTSIDE the bar. On the ellipse (tip radius 0.75 to 1.5 voxels) today's one-voxel reading is 13.9 % under the textbook at one resolution and 22 % apart across resolutions; E x fill^2 is 19.3 % under. No pop-up. If the check can tell cheaply that its peak sits on a feature sharper than 2 voxels, the engineer's readout may say the corner is finer than the grid and a finer resolution reads it better: measured on the ellipse first, or not built.
+5. Today's E x fill^3 stays for the under-a-voxel case. Stage 1's flip items 2(b), 2(c), 2(d) received; the flip waits on 2(a) and the list.
+Also ruled the same hour (stage 5): the connection-rule test on the hook PASSES; before a rung is refused for an unheld load, TRY A STEP-BACK (restore the last design whose load reached a support, halve the move limit, retry, at most 3 times), measured on the hook at pad 1.0 and on demo solve 10 with and without it, kept only if it makes more versions in no more than 10 % more time. The smoother's default is cheb:2.
+
+**Owed, in order:**
+- ONE JUDGE: the switch, k by measurement, evidence (a) to (e).
+- The step-back (the optimiser's loop is in `plsm.cpp`, TOSurface's file: to agree who edits it).
+- Conditions (b) to (e) again on his full-resolution parts with the size form (`b5_stage2.sh`, lock).
 - The app's side (#362): show the form and the printed grams.
 
 ## The problem, in plain words
