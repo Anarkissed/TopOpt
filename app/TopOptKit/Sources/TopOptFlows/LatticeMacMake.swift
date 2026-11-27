@@ -191,6 +191,9 @@ public final class LatticeMacMake: ObservableObject {
     /// organic one"): the job's lattice kind, which picks the card's animation (Organic's vines, a cell lattice's hexagons).
     public enum Kind: Equatable, Sendable { case organic, cells }
     @Published public private(set) var kind: Kind = .organic
+    /// ★ notes30 SA1: the steps of a Structural Auto press (nil: any other print file — its card as before). The card
+    /// shows them in place of the animation (his 11-26: "no animation").
+    @Published public private(set) var autoSteps: StructuralAutoSteps?
     private(set) var projectID: UUID?
     /// The run he asked for (Try again sends it again).
     var request: RunRequest?
@@ -222,8 +225,9 @@ public final class LatticeMacMake: ObservableObject {
     /// for your Mac".
     /// ★ notes27 (G1): `kind` — the job's lattice kind (the card's animation).
     func begin(project id: UUID, path: String?, run: RunModel? = nil, fileOnly: Bool = false, kind: Kind = .organic,
-               onMac: Bool = true, cancel: @escaping () -> Void, now: Date = Date()) {
+               autoSteps: StructuralAutoSteps? = nil, onMac: Bool = true, cancel: @escaping () -> Void, now: Date = Date()) {
         events?.cancel(); events = nil
+        self.autoSteps = autoSteps   // ★ notes30 SA1
         projectID = id; self.path = path; cancelAction = cancel
         started = now; stage = onMac ? LatticeMacMakeCopy.waiting : LatticeMacMakeCopy.makingFile; checking = false
         self.fileOnly = fileOnly
@@ -282,6 +286,16 @@ public final class LatticeMacMake: ObservableObject {
     /// The file arrived from the Mac: drawing it.
     func fileArrived() { if going { stage = LatticeMacMakeCopy.drawing } }
 
+    /// ★ notes30 SA1: the runner's step (from its thread; applied here on the main thread).
+    nonisolated func autoStep(_ e: StructuralAutoSteps.Event) {
+        Task { @MainActor in self.applyAuto(e) }
+    }
+    func applyAuto(_ e: StructuralAutoSteps.Event) {
+        guard going, var s = autoSteps else { return }
+        s.apply(e)
+        autoSteps = s
+    }
+
     /// The file is drawn. ★ notes25: the card STAYS (one card for the whole chain); `checkFollows` (a Structural part): it and
     /// the button say "Checking its strength" until the run lands.
     func drawn(checkFollows: Bool, now: Date = Date()) {
@@ -303,6 +317,7 @@ public final class LatticeMacMake: ObservableObject {
         runWatch?.cancel(); runWatch = nil; waitWatch?.cancel(); waitWatch = nil; run = nil
         going = false; inBackground = false; runOver = false; runSeen = false
         checking = false; fileOnly = false; cancelAction = nil; projectID = nil; request = nil   // (`kind` stays: each press sets it)
+        autoSteps = nil   // ★ notes30 SA1
     }
 
     /// His Cancel on the card.
@@ -324,7 +339,19 @@ struct LatticeMacMakeModal: View {
     @ObservedObject var make = LatticeMacMake.shared
 
     var body: some View {
-        if make.shown {
+        if make.shown, let steps = make.autoSteps, !StructuralAutoCard.controlAnimated {
+            // ★ notes30 SA1 (his 11-26: "no animation ... a pop-up with a progress bar and details saying exactly
+            // what's happening in each step"): the steps card, centred, nothing moving but the bar at each step's real end
+            ZStack {
+                Rectangle().fill(Color.black.opacity(0.35)).ignoresSafeArea()
+                GlassPanel {
+                    StructuralAutoCard(steps: steps, background: { make.sendToBackground() }, cancel: { make.cancel() })
+                }
+                .padding(DS.Space.xl)
+                .background(CornerPairStyle.publish("macMakeModal"))
+            }
+            .zIndex(90)
+        } else if make.shown {
             ZStack {
                 Rectangle().fill(Color.black.opacity(0.35)).ignoresSafeArea()
                 GlassPanel {

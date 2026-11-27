@@ -262,6 +262,7 @@ struct AppSettingsView: View {
                 }
                 row("Accent") { accentDots }
                 skipAnimationsRow   // ★ notes29
+                StructuralAutoSettingsRow()   // ★ notes30 SA1: his switch (REMOVE.md)
                 // ★ Install 3: "New engine (test)" retired — the new engine is the preview (no row)
                 // ★ Install 3 (his 11-17): the strength check, all of it, Simple and Full maths, and the values we chose
                 row("Strength check") {
