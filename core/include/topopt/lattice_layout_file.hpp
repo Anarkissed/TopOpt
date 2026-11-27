@@ -215,6 +215,8 @@ struct StrengthAsk {
   const TriangleMesh* print = nullptr;
   std::string print_path;
   double post_mm = 0.9;
+  // C3: the posts step's wider posts (MeshSpec::post_wide), so the check classes each post by the box it was drawn as.
+  std::vector<MeshSpec::PostWide> post_wide;
   void (*said)(const char*) = nullptr;
   const std::atomic<bool>* stop = nullptr;
   std::string break_cache;

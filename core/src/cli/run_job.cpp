@@ -14079,7 +14079,15 @@ ll::StrengthDone with_break_check(const ll::StrengthAsk& ask, StrengthSetup& S, 
       if (!ask.kept || (i < ask.kept->size() && (*ask.kept)[i]))
         b.bars.push_back({ask.bars->bars[i].a, ask.bars->bars[i].b, ask.bars->bars[i].width});
   if (ask.made)
-    for (const ll::MeshSpec::Post& p : ask.made->posts) b.posts.push_back({p.x, p.y, p.z_bottom, p.z_top, ask.post_mm});
+    for (const ll::MeshSpec::Post& p : ask.made->posts) {
+      // C3: the box the post was drawn as (post_mm at its axis, or the posts step's width and inward move)
+      ll::MeshSpec spec;
+      spec.post_mm = ask.post_mm;
+      spec.post_wide = ask.post_wide;
+      double w = 0.0, cx = 0.0, cy = 0.0;
+      spec.post_box(p, w, cx, cy);
+      b.posts.push_back({cx, cy, p.z_bottom, p.z_top, w});
+    }
   b.youngs_mpa = S.material.youngs_modulus_mpa;
   b.poisson = S.material.poisson;
   b.yield_mpa = S.material.yield_strength_mpa;

@@ -1613,6 +1613,7 @@ FileResult make_lattice_file(StepModel model, const FileJob& job, const std::str
         ask.print = &mesh;
         ask.print_path = file_path;
         ask.post_mm = options.mesh.post_mm;
+        ask.post_wide = options.mesh.post_wide;   // C3
         ask.said = said;
         ask.stop = stop;
         ask.break_cache = job.break_cache;   // review C2 A2: a cache only where the job names one
@@ -1892,7 +1893,8 @@ void posts_step(FileResult& r, const FileJob& job0, const StepModel& model, cons
   for (const BreakPostReading& pr : r.break_posts) any = any || post_is_cause(pr, pass);
   if (!any) return;
   FileJob job = job0;
-  const double floor_w = job.options.mesh.post_mm;   // two lines across (MeshSpec: "A vertical post, two lines across")
+  // never under two lines (the job's line width, layout bead_mm, x 2) nor under the job's post width
+  const double floor_w = std::max(job.options.mesh.post_mm, 2.0 * job.settings.bead_mm);
   std::vector<MeshSpec::PostWide> wide;
   std::vector<std::string> cannot;   // the posts the step could not widen, with why (never tried again)
   std::string rounds_json;
