@@ -34,7 +34,9 @@ namespace {
 
 constexpr double kFarStress = 10.0;  // MPa
 constexpr double kTiltDeg = 30.0;
-constexpr int kThickness = 2;        // voxels
+// Thick enough that the plate is not a THIN MEMBER for any size tried (the rule:
+// a member under twice the size falls back to one voxel): 4 voxels x 2.
+constexpr int kThickness = 8;        // voxels
 constexpr int kSub = 8;
 constexpr double kHoleRadiusMm = 6.0;
 

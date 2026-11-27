@@ -173,6 +173,11 @@ struct FixedDesignAnalysis {
   // mm the deciding stress was read over; 0 = one voxel (today's solve and reading),
   // which is also what a size under kStressSizeSwitchVoxels check voxels gets.
   double stress_read_over_mm = 0.0;
+  // The size form's two populations (0 unless a size was read): voxels whose member
+  // is thick enough to be read over the size, and printed voxels that fell back to
+  // today's one-voxel reading because their member is thinner than
+  // kStressThinMemberSizes sizes.
+  std::size_t stress_thick_member_voxels = 0, stress_thin_member_voxels = 0;
   double max_interlayer_tension = 0.0;
   StressMargin margin;  // SOLID margin (the reported/displayed value)
   V3Report v3;          // §7 V3 suite on the fixed density (min-feature count, mesh, ...)
