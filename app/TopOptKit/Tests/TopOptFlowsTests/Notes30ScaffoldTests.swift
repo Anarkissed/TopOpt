@@ -38,6 +38,9 @@ final class Notes30ScaffoldTests: XCTestCase {
         LatticeLayoutPreview.controlLiveAnimates = false
         LatticeLayoutPreview.roughForTesting = nil
         AppSettings.skipAllAnimations = false
+        S.controlRimOnly = false
+        S.controlWallsFirst = false
+        S.controlNoLandings = false
         super.tearDown()
     }
 
@@ -280,6 +283,7 @@ final class Notes30ScaffoldTests: XCTestCase {
             let made = try XCTUnwrap(S.make(Self.pocketRough(), up: show.viewAxes.up, across: show.viewAxes.across, walls: true))
             show.scaffoldArrived(S.drawing(made, token: show.scaffoldToken), now: t0 + 0.3)
             var opened: [Int] = [], strawUp: [Int] = [], insideShaded = false
+            var checkpoint: (n: Int, straw: Int)?
             var t = t0 + 0.3
             while t < t0 + 6 {
                 LatticeBuildShow.clockForTesting = t
@@ -287,6 +291,7 @@ final class Notes30ScaffoldTests: XCTestCase {
                 let lifts = r.lastScaffold?.lifts ?? 0
                 if lifts == 0 { opened.append(differing(closed, px)) }
                 else if strawUp.count < lifts { strawUp.append(Self.straw(px)) }
+                if checkpoint == nil, lifts == 2 { checkpoint = (lifts, Self.straw(px)) }   // (the first lift's floor and walls)
                 if r.insideMap != nil { insideShaded = true }
                 XCTAssertLessThanOrEqual(Notes29AnimationTests.purple(px), 30, "★ no real strut before the landing")
                 t += 1.0 / 30
@@ -319,6 +324,19 @@ final class Notes30ScaffoldTests: XCTestCase {
             XCTAssertGreaterThan(beat.map(\.purple).min() ?? 0, 300, "★ the finished lattice")
             let peak = after.map(\.straw).max() ?? 0
             XCTAssertGreaterThan(peak, 100, "the scaffold stands at the landing")
+            // ★ the shader's snaps are the plan's: the scaffold drawn at n snaps is its members coded under n, drawn whole
+            let cp = try XCTUnwrap(checkpoint, "premise: the first lift's floor and walls seen")
+            let (r2, d2) = try pocketRenderer()
+            var keep: [Float] = []
+            for (m, c) in made.layout.codes.enumerated() where S.step(code: c) < cp.n { keep += Array(made.bars[(7 * m)..<(7 * m + 7)]) }
+            let map = made.drawn.map { LatticeLayoutSolidGrid(token: 9, origin: made.rough.origin, voxel: made.rough.voxel,
+                                                              dims: made.rough.dims, rg: $0, smooth: true) }
+            r2.applyLayoutBars(LatticeLayoutBarsInputs(token: 9, bars: keep, solid: map, colours: [SIMD4<Float>](repeating: S.colour, count: keep.count / 7),
+                                                       colourKey: 9), device: d2)
+            let whole = Self.straw(try frame(r2))
+            print("NOTES30 SNAPS: at \(cp.n) snaps the scaffold drew \(cp.straw) px; its \(keep.count / 7) members coded under \(cp.n), drawn whole: \(whole) px")
+            XCTAssertGreaterThan(whole, 20, "premise: the first lift's floor and walls drawn")
+            XCTAssertEqual(Double(cp.straw), Double(whole), accuracy: Double(whole) * 0.1 + 10, "★ the shader shows exactly the members coded under its snaps")
             // over: its pass gone
             _ = show.step(end + 0.01)
             LatticeBuildShow.clockForTesting = end + 0.02
@@ -591,9 +609,10 @@ final class Notes30ScaffoldTests: XCTestCase {
     /// What makes a scaffold, not a lattice: its uprights all one lift tall on one even grid, ledgers level, braces and a stair
     /// (stringers turning back lift by lift), every member thin and whole in the area, in a pale colour that is not the
     /// lattice's.
-    static func scaffoldLike(_ bars: [Float], frame f: T.Frame, inArea: (SIMD3<Float>) -> Bool, colour: SIMD4<Float>) -> [String] {
+    static func scaffoldLike(_ bars: [Float], frame f: T.Frame, bay: Float? = nil, inArea: (SIMD3<Float>) -> Bool,
+                             colour: SIMD4<Float>) -> [String] {
         var fails: [String] = []
-        let s = f.floorH * S.bayShare
+        let s = bay ?? f.floorH * S.bayShare
         var uprights = 0, diagonals = 0, level = 0
         var risingRight: [Int: [Bool]] = [:]
         var acrossAt: [Float] = []
@@ -631,31 +650,21 @@ final class Notes30ScaffoldTests: XCTestCase {
         return fails
     }
 
-    /// ★ "I don't think scaffolds ever differ in heights": one even grid, one lift height; uprights and ledgers ringing the
-    /// lattice's area, braces and a zig-zag stair; thin and pale, never mistakable for the lattice's struts; every member whole in
-    /// the area; its lifts the timelapse's floors (each member counted with its own lift). RED CONTROL: a lattice's struts (the
-    /// cell frame Notes29 builds, in the lattice's colour) fail the same test.
+    /// ★ "I don't think scaffolds ever differ in heights": one even grid, one lift height; uprights and ledgers, braces and a
+    /// zig-zag stair; thin and pale, never mistakable for the lattice's struts; every member whole in the area; every lift has its
+    /// members (each counted with its own lift by its snap). RED CONTROL: a lattice's struts (the cell frame Notes29 builds, in the
+    /// lattice's colour) fail the same test.
     func testTheScaffoldIsOneEvenGridBracedWithAStairThinAndPale() throws {
         let made = try XCTUnwrap(S.make(Self.window, up: SIMD3(0, 0, 1), across: SIMD3(1, 0, 0), walls: true))
         let f = made.frame
-        let fails = Self.scaffoldLike(made.bars, frame: f, inArea: Self.window.inArea, colour: S.colour)
+        let fails = Self.scaffoldLike(made.bars, frame: f, bay: made.layout.bay, inArea: Self.window.inArea, colour: S.colour)
         XCTAssertEqual(fails, [], "★ a scaffold")
-        // its lifts are the floors: each upright and its ledgers counted with their own lift
         var perLift = [Int](repeating: 0, count: f.floors)
-        for i in stride(from: 0, to: made.bars.count - 6, by: 7) {
-            let a = SIMD3(made.bars[i], made.bars[i + 1], made.bars[i + 2]), b = SIMD3(made.bars[i + 3], made.bars[i + 4], made.bars[i + 5])
-            perLift[T.step(a, b, f) / T.perFloor] += 1
-        }
+        for c in made.layout.codes { perLift[S.step(code: c) / T.perFloor] += 1 }
         XCTAssertTrue(perLift.allSatisfy { $0 > 0 }, "★ every lift has its members: \(perLift)")
-        // round the area, not through it: no upright at a grid node in the middle of the area
-        let mid = (SIMD3<Float>(10, 0, 6) + SIMD3<Float>(70, 50, 48)) / 2
-        let nearMid = stride(from: 0, to: made.bars.count - 6, by: 7).filter { i in
-            let a = SIMD3(made.bars[i], made.bars[i + 1], 0), m = SIMD3(mid.x, mid.y, 0)
-            return simd_distance(a, m) < f.floorH * 0.9 && abs(made.bars[i + 2] - made.bars[i + 5]) > 1
-        }
-        XCTAssertTrue(nearMid.isEmpty, "★ it stands round the lattice's area, the real lattice goes up inside it")
         XCTAssertLessThan(S.width(liftH: f.floorH), 0.81, "★ thin")
-        print("NOTES30 SCAFFOLD: \(made.members) members over \(f.floors) lifts of \(f.floorH) mm, \(S.width(liftH: f.floorH)) mm wide; per lift \(perLift)")
+        XCTAssertLessThanOrEqual(made.members, S.membersMost, "★ the instance count bounded")
+        print("NOTES30 SCAFFOLD: \(made.members) members over \(f.floors) lifts of \(f.floorH) mm (bay \(made.layout.bay) mm, \(made.layout.nA)×\(made.layout.nD) squares), \(S.width(liftH: f.floorH)) mm wide; per lift \(perLift)")
         // RED CONTROL: a lattice's struts are not a scaffold
         let lattice = Notes29AnimationTests.frameBars(cell: 6)
         let box = try XCTUnwrap(LatticeLayoutBarsPass.box(lattice))
@@ -663,6 +672,206 @@ final class Notes30ScaffoldTests: XCTestCase {
         let c = LatticeLayoutBarsPass.colour
         let red = Self.scaffoldLike(lattice, frame: lf, inArea: { _ in true }, colour: SIMD4(Float(c.r), Float(c.g), Float(c.b), 1))
         XCTAssertFalse(red.isEmpty, "RED CONTROL: a lattice is not a scaffold")
+    }
+
+    // MARK: ★ his verdict on the clips (11-26 22:30, 22:40): closed floors, nothing floating, through the whole hole, in order
+
+    /// A curved area (never his file): in a block 90 × 60 × 40 mm, a round lattice area narrowing as it rises (a cone, 30 mm
+    /// round at its foot, 10 at its top) — every lift's squares fewer than the one below's: steps at every level.
+    static let curved: S.Rough = {
+        let v: Float = 1.5, part = SIMD3<Float>(90, 60, 40)
+        let origin = SIMD3<Float>(repeating: -v)
+        let dims = SIMD3<Int32>(Int32((part.x / v).rounded(.up)) + 3, Int32((part.y / v).rounded(.up)) + 3, Int32((part.z / v).rounded(.up)) + 3)
+        var rg = [Int8]()
+        for z in 0..<Int(dims.z) { for y in 0..<Int(dims.y) { for x in 0..<Int(dims.x) {
+            let p = origin + SIMD3(Float(x), Float(y), Float(z)) * v
+            let inside = all(p .>= SIMD3(repeating: -0.01)) && all(p .<= part + 0.01)
+            let r = 30 - 0.5 * p.z
+            let open = inside && (p.x - 45) * (p.x - 45) + (p.y - 30) * (p.y - 30) < r * r
+            rg += [open ? 127 : -127, inside ? 127 : -127]
+        }}}
+        return S.Rough(origin: origin, voxel: v, dims: dims, rg: rg)
+    }()
+
+    /// Whether the scaffold STANDS: every member's ends meet another member (within the ground and roof floors' hair) or the
+    /// ground lift's foot, and the whole is ONE structure standing on the ground. The failures, at most five.
+    static func stands(_ m: S.Made) -> [String] {
+        let bars = m.bars, n = bars.count / 7, f = m.frame
+        guard n > 0, let g = m.layout.ground else { return ["no scaffold"] }
+        let tol = S.edgeShare * f.floorH + 1e-3, ground = m.layout.height(g)
+        let segs = (0..<n).map { i in (SIMD3(bars[7 * i], bars[7 * i + 1], bars[7 * i + 2]), SIMD3(bars[7 * i + 3], bars[7 * i + 4], bars[7 * i + 5])) }
+        func dist(_ p: SIMD3<Float>, _ a: SIMD3<Float>, _ b: SIMD3<Float>) -> Float {
+            let d = b - a, t = Swift.max(0, Swift.min(1, simd_dot(p - a, d) / Swift.max(simd_dot(d, d), 1e-12)))
+            return simd_distance(p, a + d * t)
+        }
+        var parent = Array(0...n)   // n: the ground
+        func find(_ x: Int) -> Int { var x = x; while parent[x] != x { parent[x] = parent[parent[x]]; x = parent[x] }; return x }
+        func join(_ a: Int, _ b: Int) { parent[find(a)] = find(b) }
+        var fails: [String] = []
+        for i in 0..<n { for p in [segs[i].0, segs[i].1] {
+            var met = false
+            if abs(simd_dot(f.up, p) - ground) <= tol { met = true; join(i, n) }
+            for j in 0..<n where j != i && dist(p, segs[j].0, segs[j].1) <= tol { met = true; join(i, j) }
+            if !met, fails.count < 5 { fails.append(String(format: "a member's end in mid-air at (%.1f, %.1f, %.1f)", p.x, p.y, p.z)) }
+        }}
+        let pieces = Set((0...n).map(find)).count
+        if pieces != 1 { fails.append("\(pieces) pieces: not one structure on the ground") }
+        return fails
+    }
+    /// Each lift's floor outline is ONE closed loop (every node on it meets two of its edges — four where it pinches — and all
+    /// of it connected).
+    static func closedLoops(_ L: S.Layout) -> [String] {
+        var fails: [String] = []
+        for (k, set) in L.squares.enumerated() where !set.isEmpty {
+            let o = S.outline(set)
+            var degree: [S.Node: Int] = [:], next: [S.Node: [S.Node]] = [:]
+            for e in o { degree[e.a, default: 0] += 1; degree[e.b, default: 0] += 1; next[e.a, default: []].append(e.b); next[e.b, default: []].append(e.a) }
+            if degree.values.contains(where: { $0 != 2 && $0 != 4 }) { fails.append("lift \(k): its outline is not closed") }
+            var seen: Set<S.Node> = [], todo = Array(degree.keys.prefix(1))
+            while let x = todo.popLast() { if seen.insert(x).inserted { todo += next[x] ?? [] } }
+            if seen.count != degree.count { fails.append("lift \(k): its outline is more than one loop") }
+        }
+        return fails
+    }
+
+    /// ★ "It can't just float": on the curved part (the area steps in and out lift by lift) and on the stand's window, every
+    /// lift's floor outline is one closed loop, every member's ends meet another member (or the ground lift's foot), and the
+    /// scaffold is one structure standing on the ground — the steps' landings included; every member whole in the area. RED
+    /// CONTROL `controlNoLandings` (a level only its own lift's floor, the 22:15 clips'): pieces float on the curved part.
+    func testEveryLiftStandsOnAClosedFloorAndNothingFloats() throws {
+        for red in [false, true] {
+            S.controlNoLandings = red
+            defer { S.controlNoLandings = false }
+            for (name, r) in [("curved", Self.curved), ("window", Self.window)] {
+                let made = try XCTUnwrap(S.make(r, up: SIMD3(0, 0, 1), across: SIMD3(1, 0, 0), walls: true), name)
+                let L = made.layout
+                let stepsInOrOut = zip(L.squares, L.squares.dropFirst()).filter { !$0.0.isEmpty && !$0.1.isEmpty && $0.0 != $0.1 }.count
+                let standing = Self.stands(made)
+                print("NOTES30 STANDS (\(name)\(red ? " RED" : "")): \(made.members) members, ground lift \(L.ground ?? -1), squares per lift \(L.squares.map(\.count)), \(stepsInOrOut) steps in or out; \(standing.isEmpty ? "stands" : standing.joined(separator: "; "))")
+                if red {
+                    if name == "curved" { XCTAssertFalse(standing.isEmpty, "RED CONTROL: without its landings the curved part's scaffold floats") }
+                    continue
+                }
+                if name == "curved" { XCTAssertGreaterThan(stepsInOrOut, 0, "premise: the curved area steps in or out between lifts") }
+                XCTAssertGreaterThanOrEqual(L.squares.filter { !$0.isEmpty }.count, 3, "\(name): premise: lifts standing")
+                XCTAssertEqual(Self.closedLoops(L), [], "★ \(name): every lift's floor outline one closed loop")
+                XCTAssertEqual(standing, [], "★ \(name): nothing in mid-air, one structure on the ground")
+                let bars = made.bars
+                for i in stride(from: 0, to: bars.count - 6, by: 7) {
+                    let a = SIMD3(bars[i], bars[i + 1], bars[i + 2]), b = SIMD3(bars[i + 3], bars[i + 4], bars[i + 5])
+                    XCTAssertTrue(S.samples.allSatisfy { r.inArea(a + (b - a) * $0) }, "★ \(name): every member whole in the area")
+                }
+            }
+        }
+    }
+
+    /// ★ "make all animation have scaffolding throughout the entire hole": the grid fills the whole opened area — an upright at
+    /// every node of each lift's squares, a ledger on every edge of its floor — on the stand's window and the curved part alike,
+    /// the instance count bounded. RED CONTROL `controlRimOnly` (the 22:15 clips): the rim alone.
+    func testTheScaffoldFillsTheWholeHole() throws {
+        for red in [false, true] {
+            S.controlRimOnly = red
+            defer { S.controlRimOnly = false }
+            for (name, r) in [("window", Self.window), ("curved", Self.curved)] {
+                let made = try XCTUnwrap(S.make(r, up: SIMD3(0, 0, 1), across: SIMD3(1, 0, 0), walls: true), name)
+                let L = made.layout, f = made.frame, bars = made.bars
+                var inner = 0, innerNodes = 0
+                for (k, set) in L.squares.enumerated() where !set.isEmpty {
+                    let rim = S.outline(set)
+                    var rimNodes = Set<S.Node>(), all = Set<S.Node>()
+                    for e in rim { rimNodes.insert(e.a); rimNodes.insert(e.b) }
+                    for q in set { for e in S.edges(q) { all.insert(e.a); all.insert(e.b) } }
+                    for nd in all.subtracting(rimNodes) {
+                        innerNodes += 1
+                        let p = SIMD3<Float>(repeating: 0) + f.across * (L.a0 + Float(nd.i) * L.bay) + f.depth * (L.d0 + Float(nd.j) * L.bay)
+                        let foot = p + f.up * L.height(k)
+                        let has = stride(from: 0, to: bars.count - 6, by: 7).contains { i in
+                            simd_distance(SIMD3(bars[i], bars[i + 1], bars[i + 2]), foot) < 1e-3 && abs(bars[i + 5] - bars[i + 2]) > f.floorH * 0.9
+                        }
+                        if has { inner += 1 }
+                    }
+                }
+                print("NOTES30 FILL (\(name)\(red ? " RED" : "")): \(made.members) members; inner nodes \(innerNodes), with their uprights \(inner)")
+                XCTAssertGreaterThan(innerNodes, 0, "\(name): premise: the area has an inside")
+                if red { XCTAssertEqual(inner, 0, "RED CONTROL: the rim alone"); continue }
+                XCTAssertEqual(inner, innerNodes, "★ \(name): an upright at every node through the whole hole")
+                XCTAssertLessThanOrEqual(made.members, S.membersMost, "★ \(name): the instance count bounded")
+            }
+        }
+    }
+
+    /// ★ "please ensure the floors are generated before the walls ... the walls go up before the stairs. It should go: floors and
+    /// walls, then stairs for the entire level." — every member's snap is its role's (the ledgers of a level: that lift's FLOOR, or
+    /// the top lift's roof; uprights and braces: its WALLS; the flights and treads: its STAIRS), and as the scaffold rises — for a
+    /// lay judged slow at the ask AND for one switched to a second after it — no lift's walls show before its whole floor, nor its
+    /// stairs before its whole walls. RED CONTROL `controlWallsFirst`: the walls before the floor.
+    func testEachLiftGoesFloorThenWallsThenStairsSlowOrSwitched() throws {
+        for red in [false, true] {
+            S.controlWallsFirst = red
+            defer { S.controlWallsFirst = false }
+            for (name, r) in [("window", Self.window), ("curved", Self.curved)] {
+                let made = try XCTUnwrap(S.make(r, up: SIMD3(0, 0, 1), across: SIMD3(1, 0, 0), walls: true), name)
+                let L = made.layout, f = made.frame, bars = made.bars
+                // each member's role, from where it lies: a level's ledgers (a lift's floor at its foot, or the roof over the top
+                // lift standing), uprights and braces (its walls), off the grid's lines (its stairs)
+                enum Role: Equatable { case floor, roof, walls, stairs }
+                var roles: [Role] = [], lifts: [Int] = []
+                func grid(_ p: SIMD3<Float>) -> SIMD2<Float> {
+                    SIMD2((simd_dot(f.across, p) - L.a0) / L.bay, (simd_dot(f.depth, p) - L.d0) / L.bay)
+                }
+                func onGrid(_ g: SIMD2<Float>) -> Bool { abs(g.x - g.x.rounded()) < 1e-3 && abs(g.y - g.y.rounded()) < 1e-3 }
+                let e = S.edgeShare * f.floorH
+                for i in stride(from: 0, to: bars.count - 6, by: 7) {
+                    let a = SIMD3(bars[i], bars[i + 1], bars[i + 2]), b = SIMD3(bars[i + 3], bars[i + 4], bars[i + 5])
+                    let lowH = Swift.min(simd_dot(f.up, a), simd_dot(f.up, b)), rise = abs(simd_dot(f.up, b - a))
+                    if !onGrid(grid(a)) || !onGrid(grid(b)) {
+                        roles.append(.stairs); lifts.append(f.floor(ofHeight: lowH + 0.5 * e))
+                    } else if rise < 1e-4 {
+                        let level = Int(((lowH - f.low) / f.floorH).rounded())
+                        if lowH < L.height(level) - 0.5 * e { roles.append(.roof); lifts.append(level - 1) }
+                        else { roles.append(.floor); lifts.append(level) }
+                    } else {
+                        roles.append(.walls); lifts.append(f.floor(ofHeight: lowH + 0.5 * e))
+                    }
+                }
+                let steps = L.codes.map(S.step(code:))
+                var mismatched = 0
+                for (m, s) in steps.enumerated() {
+                    let part: S.Part
+                    switch roles[m] { case .floor: part = .floor; case .roof: part = .roof; case .walls: part = .walls; case .stairs: part = .stairs }
+                    if s != lifts[m] * T.perFloor + part.rawValue { mismatched += 1 }
+                }
+                // as it rises: a lay judged slow at the ask, and one switched to a second after the ask
+                var outOfOrder = 0
+                for switched in [false, true] {
+                    let show = LatticeBuildShow()
+                    let t0 = CACurrentMediaTime() + 1000
+                    show.layBegins(walls: true, scaffold: !switched, mayScaffold: true, expectedS: switched ? 0.6 : 12, now: t0)
+                    show.scaffoldArrived(S.drawing(made, token: show.scaffoldToken), now: t0 + 0.2)
+                    var t = t0
+                    let landing = t0 + (switched ? 6 : 12)
+                    while t < landing {
+                        show.step(t)
+                        if let v = show.revealScaffold(at: t) {
+                            let shown = steps.map { $0 < v.lifts }
+                            for k in 0..<f.floors {
+                                func all(_ role: Role) -> Bool { roles.indices.filter { roles[$0] == role && steps[$0] / T.perFloor == k }.allSatisfy { shown[$0] } }
+                                func any(_ role: Role) -> Bool { roles.indices.contains { roles[$0] == role && steps[$0] / T.perFloor == k && shown[$0] } }
+                                if any(.walls) && !all(.floor) { outOfOrder += 1 }
+                                if any(.stairs) && !all(.walls) { outOfOrder += 1 }
+                            }
+                        }
+                        t += 0.05
+                    }
+                    XCTAssertTrue(show.timelapse?.scaffolding ?? false, "\(name): premise: the scaffold's path (\(switched ? "switched" : "slow at the ask"))")
+                }
+                print("NOTES30 ORDER (\(name)\(red ? " RED" : "")): \(made.members) members; roles mismatched \(mismatched), out of order \(outOfOrder)")
+                if red { XCTAssertGreaterThan(mismatched + outOfOrder, 0, "RED CONTROL: the walls before the floor"); continue }
+                XCTAssertEqual(mismatched, 0, "★ \(name): each member's snap is its role's (floor, walls, stairs)")
+                XCTAssertEqual(outOfOrder, 0, "★ \(name): floors, then walls, then stairs, lift by lift — slow or switched")
+                XCTAssertFalse(L.flights.isEmpty, "\(name): premise: a stair")
+            }
+        }
     }
 }
 #endif

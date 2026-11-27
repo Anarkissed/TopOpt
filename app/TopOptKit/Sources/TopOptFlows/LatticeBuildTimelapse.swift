@@ -31,9 +31,11 @@
 //   * THE WALLS FIRST: the moment the rough cut-open of the lattice's area is made (before the lay: the domain's "where", every
 //     lattice region open, its cells not yet known — LatticeLayoutSession.gridRough), the walls over it come off floor by floor
 //     in hard snaps (the solid view), its inside shaded.
-//   * THE SCAFFOLD RISES: ONE EVEN GRID of thin, pale uprights and ledgers, every lift one height (a lift is a floor), with
-//     diagonal braces and a zig-zag stair in some bays (LatticeBuildScaffold) — lift by lift from the lowest, each in hard snaps
-//     (its uprights, then its ledgers and braces bay by bay), paced to top out `marginS` before the lay is expected to land.
+//   * THE SCAFFOLD RISES: ONE EVEN GRID of thin, pale uprights and ledgers through the whole opened area, every lift one
+//     height (a lift is a floor), its floors closed, with diagonal braces and a zig-zag stair tower (LatticeBuildScaffold) —
+//     lift by lift from the lowest, each in hard snaps: ★ his order (11-26 22:40) "floors and walls, then stairs for the entire
+//     level" — its FLOOR, then its WALLS, then its STAIRS (the top lift's roof last) — paced to top out `marginS` before the lay
+//     is expected to land.
 //   * THE LANDING: the exact map replaces the rough one (its edge may shift slightly), then the real struts replace the scaffold
 //     FLOOR BY FLOOR: each floor's columns, its bays, then that floor's lift of scaffold is struck — the scaffold comes down as
 //     the real floors go in, nothing of it left once the last floor stands.
@@ -685,7 +687,8 @@ import MetalKit
 
 /// What the bars' shader is told of the timelapse (BarFrame's four rows after the map): x of `build` < 0 — no timelapse, every bar.
 struct LatticeBuildRevealUniform: Equatable {
-    /// x: the snaps shown (−1: all); y: the floors; z: the bays; w: 1 on.
+    /// x: the snaps shown (−1: all); y: the floors; z: the bays; w: 1 on (by where each bar lies), ★ notes30 2 — the scaffold
+    /// (each member's own snap in its flags: its lift's floor, walls, stairs).
     var build = SIMD4<Float>(-1, 1, 1, 0)
     /// xyz: up, in the part's own coordinates; w: the lattice's lowest height along it.
     var up = SIMD4<Float>(0, 1, 0, 0)
@@ -696,8 +699,8 @@ struct LatticeBuildRevealUniform: Equatable {
     var sizes = SIMD4<Float>(1, 1, 0.85, 0)
 
     init() {}
-    init(snaps n: Int, struck: Int = 0, frame f: LatticeBuildTimelapse.Frame) {
-        build = SIMD4(Float(n), Float(f.floors), Float(LatticeBuildTimelapse.bays), 1)
+    init(snaps n: Int, struck: Int = 0, frame f: LatticeBuildTimelapse.Frame, ownSteps: Bool = false) {
+        build = SIMD4(Float(n), Float(f.floors), Float(LatticeBuildTimelapse.bays), ownSteps ? 2 : 1)
         up = SIMD4(f.up, f.low)
         across = SIMD4(f.across, f.acrossLow)
         sizes = SIMD4(f.floorH, f.acrossW, LatticeBuildTimelapse.columnCos, Float(Swift.max(0, struck)))
@@ -716,7 +719,10 @@ extension MeshRenderer {
 
     /// ★ notes30: the bars pass drawn as THE lattice this frame (its map cuts the part, its walls, its inside shade): the
     /// scaffold's while it stands and the landed lattice is not on screen yet, else the landed lay's.
+    /// Organic's growth never: while an Organic lay is on screen its part opens by its own map, as before (his "two different
+    /// animations").
     var drawnLayoutBars: LatticeLayoutBarsPass? {
+        if growth?.layOnScreen == true { return layoutBars }
         if let show = buildShow, let sc = scaffoldBars, sc.isDrawable, show.drawsScaffold(landedToken: layoutBars?.token) {
             return sc
         }
@@ -798,7 +804,7 @@ extension MeshRenderer {
     /// ★ notes30: the scaffold this frame — drawn when a lift stands (risen, not yet struck), and which.
     func scaffoldReveal(_ show: LatticeBuildShow, at now: CFTimeInterval) -> (draw: Bool, reveal: LatticeBuildRevealUniform?) {
         guard let r = show.revealScaffold(at: now), let f = show.frame, r.lifts > r.struck else { return (false, nil) }
-        return (true, LatticeBuildRevealUniform(snaps: r.lifts, struck: r.struck, frame: f))
+        return (true, LatticeBuildRevealUniform(snaps: r.lifts, struck: r.struck, frame: f, ownSteps: true))
     }
 
     /// ★ notes30: the scaffold over the landed lattice (after the landing, until its last lift is struck): its pass and which of

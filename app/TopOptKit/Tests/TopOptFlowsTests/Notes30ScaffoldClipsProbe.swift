@@ -184,12 +184,12 @@ final class Notes30ScaffoldClipsProbe: XCTestCase {
                    T.scaffoldAfterS, T.scaffoldAfterS),
             String(format: "  at least %.0f s from the ask; the site %.1f s; fast: each floor its walls, columns, 3 bays, %.0f %% of the floor's time apart, at least %.1f s of floors after the landing;",
                    T.totalS, T.siteLeastS, T.snapShare * 100, T.buildLeastS),
-            String(format: "  slow: the walls off floor by floor in %.1f s, then the scaffold lift by lift (each at least %.2f s; %.1f s when the landing can't be foreseen), topped out %.1f s before the expected landing;",
+            String(format: "  slow: the walls off floor by floor in %.1f s, then the scaffold lift by lift — its floor, its walls, its stairs (each lift at least %.2f s; %.1f s when the landing can't be foreseen), topped out %.1f s before the expected landing;",
                    T.scaffoldWallsS, T.liftLeastS, T.liftUnknownS, T.marginS),
             String(format: "  after the landing: a %.1f s beat, the real floors replace the scaffold in %.1f s (each its columns, bays, then that lift struck); topped out %.1f s.",
                    T.replaceBeatS, T.replaceS, T.toppedOutS),
-            String(format: "  the scaffold: one even grid, bays %.0f %% of a lift, round the lattice's area; braces every %d bays; a %d-tread zig-zag stair; %.1f %% of a lift wide (%.1f–%.1f mm); pale straw.",
-                   S.bayShare * 100, S.braceEvery, S.stairTreads, S.widthShare * 100, S.widthLeastMM, S.widthMostMM),
+            String(format: "  the scaffold: one even grid through the whole opened area, bays %.0f %% of a lift; every level a closed floor (the steps' landings in it), nothing floating; braces every %d bays of the outer frames; a %d-tread zig-zag stair tower; %.1f %% of a lift wide (%.1f–%.1f mm); pale straw; at most %d members.",
+                   S.bayShare * 100, S.braceEvery, S.stairTreads, S.widthShare * 100, S.widthLeastMM, S.widthMostMM, S.membersMost),
             ""]
         if wanted("stand") {
             var s = LatticeLayoutSession.Settings()

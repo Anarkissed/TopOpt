@@ -234,9 +234,15 @@ struct BarFrame {
 
 // ★ notes29: the snap a bar comes in (LatticeBuildTimelapse.step, mirrored): its floor by its lower end, then 0 for a column,
 // 1 + its bay (by its middle) else. ★ notes30: hidden too below `buildSizes.w` — the scaffold's lifts struck as the real floors
-// replace them (0 for the real lattice: nothing of it is ever taken away)
-static bool bar_build_hidden(float3 a, float3 b, constant BarFrame& F) {
+// replace them (0 for the real lattice: nothing of it is ever taken away). ★ notes30 (his "floors and walls, then stairs"):
+// `build.w` 2 — the scaffold, each member's own snap in its flags (LatticeBuildScaffold.code: bits 0-3 and 5-7, never 16)
+static bool bar_build_hidden(float3 a, float3 b, float flags, constant BarFrame& F) {
     if (F.build.x < 0.0) { return false; }
+    if (F.build.w > 1.5) {
+        uint c = uint(flags + 0.5);
+        float s = float((c & 15u) | ((c >> 5u) << 4u));
+        return s >= F.build.x || s < F.buildSizes.w;
+    }
     float3 up = F.buildUp.xyz;
     float ha = dot(up, a), hb = dot(up, b);
     float floors = max(F.build.y, 1.0), bays = max(F.build.z, 1.0);
@@ -300,7 +306,7 @@ vertex BarVOut bar_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     float3 p = e + ((c & 2) ? v * R : -v * R) + ((c & 4) ? w * R : -w * R);
     BarVOut o;
     o.pos = F.clipFromModel * float4(p, 1.0);
-    if (bar_build_hidden(A.xyz, B.xyz, F)) { o.pos = float4(0.0, 0.0, 2.0, 1.0); }   // ★ notes29: not built yet — no triangle
+    if (bar_build_hidden(A.xyz, B.xyz, B.w, F)) { o.pos = float4(0.0, 0.0, 2.0, 1.0); }   // ★ notes29: not built yet — no triangle
     o.cpos = o.pos;
     o.iid = iid;
     return o;
@@ -562,7 +568,7 @@ vertex LightVOut light_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     float3 p = ((c & 1) ? (B.xyz + u * 0.5 * R) : (A.xyz - u * 0.5 * R)) + radial * R;
     LightVOut o;
     o.pos = F.clipFromModel * float4(p, 1.0);
-    if (bar_build_hidden(A.xyz, B.xyz, F)) { o.pos = float4(0.0, 0.0, 2.0, 1.0); }   // ★ notes29
+    if (bar_build_hidden(A.xyz, B.xyz, B.w, F)) { o.pos = float4(0.0, 0.0, 2.0, 1.0); }   // ★ notes29
     o.ez = -(F.eyeFromModel * float4(p, 1.0)).z;
     o.en = (F.eyeNormalBasis * float4(radial, 0.0)).xyz;
     o.iid = iid;
