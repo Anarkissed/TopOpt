@@ -17,6 +17,7 @@
 // treating a cut voxel, same fixed-size readings and same two forms (measure /
 // --gate) as test_to_strength_known_stress.cpp.
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -93,7 +94,8 @@ std::size_t g_engine_unresolved = 0;
 // how many of those were read as concave (the centre of curvature in the air).
 double g_carry2 = 0.0;
 std::size_t g_carry2_curved = 0, g_carry2_concave = 0, g_carry2_tight = 0, g_carry2_capped = 0,
-            g_carry2_loaded = 0;
+            g_carry2_loaded = 0, g_carry2_unresolved = 0;
+bool g_non_convergent = false;
 // The patch recovery (stress_recovered_at_surface, the bore marked loaded) over the
 // pressure at patch radius 2.5 and 3.5 voxels, and its unresolved counts.
 double g_patch[2] = {0.0, 0.0};
@@ -101,17 +103,19 @@ std::size_t g_patch_unresolved[2] = {0, 0};
 double g_quad[2] = {0.0, 0.0};  // the quadratic patch (order 2) at radius 3.5 and 4.5
 std::size_t g_quad_unresolved[2] = {0, 0}, g_quad_dropped[2] = {0, 0};
 
+// `thickness` (voxels, default kThickness): the ring's thickness; the `[thick6]` rows pass
+// 6. At any other thickness than kThickness the patch recoveries are skipped.
 double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* area_error,
-                  double* over_size = nullptr) {
+                  double* over_size = nullptr, int thickness = kThickness) {
   const double h = kInnerMm / rv;
   const int w = 4 * rv + 4;  // outer diameter plus two voxels of air each side
   VoxelGrid g;
   g.nx = w;
   g.ny = w;
-  g.nz = kThickness;
+  g.nz = thickness;
   g.spacing = h;
   g.origin = Vec3{0.0, 0.0, 0.0};
-  g.tags.assign(static_cast<std::size_t>(w) * w * kThickness, topopt::VoxelTag::Empty);
+  g.tags.assign(static_cast<std::size_t>(w) * w * thickness, topopt::VoxelTag::Empty);
 
   // Centre off the grid lines (in voxels), so nothing is symmetric by luck.
   const double cxv = 0.5 * w + 0.29, cyv = 0.5 * w - 0.41;
@@ -132,7 +136,7 @@ double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* are
         const double r = std::hypot(i + 0.5 - cxv, j + 0.5 - cyv);
         v = (r > ri && r < ro) ? 1.0 : 0.0;
       }
-      for (int k = 0; k < kThickness; ++k) {
+      for (int k = 0; k < thickness; ++k) {
         const std::size_t idx = (static_cast<std::size_t>(k) * w + j) * w + i;
         density[idx] = v;
         if (v > 0.0) g.tags[idx] = topopt::VoxelTag::Interior;
@@ -140,7 +144,7 @@ double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* are
     }
 
   // Pressure on the drawn inner face.
-  const topopt::StepModel model = inner_face(cxv * h, cyv * h, kThickness * h);
+  const topopt::StepModel model = inner_face(cxv * h, cyv * h, thickness * h);
   topopt::FaceAreaReport rep;
   const std::vector<topopt::NodeArea> areas =
       topopt::face_node_areas(g, topopt::face_pieces(model, {0}, 0.5 * h), &rep);
@@ -190,6 +194,7 @@ double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* are
       topopt::SolverKind::MultigridCG_Matfree, 0.0, knockdown, true,
       static_cast<double>(g.tags.size()));
   *ok = res.max_von_mises > 0.0 && std::isfinite(res.max_von_mises);
+  g_non_convergent = res.non_convergent;
   g_switch_readings.clear();
   if (res.von_mises_material_field.size() == density.size())
     for (double mm : g_switch_sizes_mm)
@@ -206,7 +211,7 @@ double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* are
   g_carry_line = g_carry_curve = 0.0;
   if (res.von_mises_material_field.size() == density.size()) {
     const double pi = std::acos(-1.0);
-    const int k = kThickness / 2;
+    const int k = thickness / 2;
     for (int s = 0; s < 32; ++s) {
       const double ang = 2.0 * pi * (s + 0.37) / 32.0;
       double rr[3] = {0, 0, 0}, vv[3] = {0, 0, 0};
@@ -241,6 +246,8 @@ double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* are
   }
   g_engine_carry = 0.0;
   g_engine_unresolved = 0;
+  g_carry2 = 0.0;
+  g_carry2_tight = g_carry2_unresolved = g_carry2_loaded = 0;
   if (res.von_mises_material_field.size() == density.size()) {
     const topopt::SurfaceCarry sc =
         topopt::stress_carried_to_surface(g, res.von_mises_material_field, density);
@@ -250,7 +257,7 @@ double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* are
     // whose centre is within 1.5 voxels of the inner radius tagged Load (Load counts as
     // material, like Interior: only Empty is air to the carry).
     VoxelGrid g_loaded = g;
-    for (int k = 0; k < kThickness; ++k)
+    for (int k = 0; k < thickness; ++k)
       for (int j = 0; j < w; ++j)
         for (int i = 0; i < w; ++i) {
           const std::size_t idx = g.index(i, j, k);
@@ -267,12 +274,13 @@ double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* are
     g_carry2_tight = sc2.tight_points;
     g_carry2_capped = sc2.capped_points;
     g_carry2_loaded = sc2.loaded_points;
+    g_carry2_unresolved = sc2.unresolved;
   }
   g_patch[0] = g_patch[1] = 0.0;
   g_patch_unresolved[0] = g_patch_unresolved[1] = 0;
   g_quad[0] = g_quad[1] = 0.0;
   g_quad_unresolved[0] = g_quad_unresolved[1] = g_quad_dropped[0] = g_quad_dropped[1] = 0;
-  if (res.stress_tensor_field.size() == 6 * density.size()) {
+  if (thickness == kThickness && res.stress_tensor_field.size() == 6 * density.size()) {
     // The bore carries the pressure: every voxel with material whose centre is within
     // 1.5 voxels of the inner radius. The outer face is free.
     std::vector<char> bore(density.size(), 0);
@@ -309,6 +317,8 @@ int main(int argc, char** argv) {
   const bool gate = argc > 1 && std::strcmp(argv[1], "--gate") == 0;
   int failures = 0;
   std::vector<Row> rows;
+  double thin_carry2[4] = {0.0, 0.0, 0.0, 0.0};
+  std::size_t thin_tight[4] = {0, 0, 0, 0}, thin_unresolved[4] = {0, 0, 0, 0}, thin_loaded[4] = {0, 0, 0, 0};
   std::printf("[test E, ring] thick ring, pressure on the inner face; peak von Mises / "
               "pressure, textbook %.3f\n",
               kTextbook);
@@ -325,6 +335,10 @@ int main(int argc, char** argv) {
     row.fill_cubed = peak_ratio(r, true, 3.0, &ok2, &e2);
     const double cc_line = g_carry_line, cc_curve = g_carry_curve;
     row.fill_linear = peak_ratio(r, true, 1.0, &ok3, &e3, row.over_size);
+    thin_carry2[r - 3] = g_carry2;
+    thin_tight[r - 3] = g_carry2_tight;
+    thin_unresolved[r - 3] = g_carry2_unresolved;
+    thin_loaded[r - 3] = g_carry2_loaded;
     std::printf("[carry] inner radius %d voxels: carried to the true inner face, straight line / curve, percent against the textbook: "
                 "all-or-nothing %+.1f / %+.1f; E x fill^3 %+.1f / %+.1f; E x fill %+.1f / %+.1f; "
                 "ENGINE (E x fill only): %+.1f %%, unresolved %zu\n",
@@ -470,6 +484,40 @@ int main(int argc, char** argv) {
       std::printf("[switch] %4.2f voxels across: %+6.1f %+6.1f %+6.1f %+6.1f   lowest %+6.1f, spread %5.1f  %s\n",
                   kSpans[s], off[s][0], off[s][1], off[s][2], off[s][3], lo, hi - lo,
                   lo >= -5.0 && hi - lo <= 10.0 ? "inside the bar" : "outside");
+    }
+  }
+
+  // THICK (the reviewer, 2026-11-27: "several voxels thick, not 2"): the same shape-1
+  // reading (E x fill, the bore tagged Load) on the ring SIX voxels thick, beside the
+  // two-voxel `[carry2]` rows. Print-only. The finest ring is skipped when the one before
+  // it took over 70 s (it would take over about two minutes).
+  if (!gate) {
+    std::printf("\n[thick6] the ring 6 voxels thick (the [carry2] reading, E x fill, bore tagged Load); percent against the textbook %.3f\n",
+                kTextbook);
+    double last_seconds = 0.0;
+    for (int r : {3, 4, 5, 6}) {
+      if (r == 6 && last_seconds > 70.0) {
+        std::printf("[thick6] inner radius 6 voxels: SKIPPED (radius 5 took %.0f s; radius 6 would take over about two minutes)\n",
+                    last_seconds);
+        continue;
+      }
+      bool ok = false;
+      double unused[3] = {0.0, 0.0, 0.0}, ae = 0.0;
+      const auto t0 = std::chrono::steady_clock::now();
+      (void)peak_ratio(r, true, 1.0, &ok, &ae, unused, 6);
+      last_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+      if (g_non_convergent || !ok) {
+        std::printf("[thick6] inner radius %d voxels: the solve DID NOT CONVERGE inside its cap (20000 iterations); no reading "
+                    "(two thick: %+.1f %%)\n", r, 100.0 * (thin_carry2[r - 3] / kTextbook - 1.0));
+      } else {
+        std::printf("[thick6] inner radius %d voxels: 6 thick %+.1f %%, tight %zu, unresolved %zu, loaded %zu;  "
+                    "2 thick %+.1f %%, tight %zu, unresolved %zu, loaded %zu\n",
+                    r, 100.0 * (g_carry2 / kTextbook - 1.0), g_carry2_tight, g_carry2_unresolved, g_carry2_loaded,
+                    100.0 * (thin_carry2[r - 3] / kTextbook - 1.0), thin_tight[r - 3], thin_unresolved[r - 3],
+                    thin_loaded[r - 3]);
+      }
+      std::printf("[thick6] (timing) inner radius %d voxels: %.1f s\n", r, last_seconds);
+      std::fflush(stdout);
     }
   }
 

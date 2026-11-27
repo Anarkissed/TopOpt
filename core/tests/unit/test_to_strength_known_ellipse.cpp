@@ -20,6 +20,7 @@
 // resolution (reading high is the safe side). MEASURES by default; --gate fails
 // when E x fill^2 misses the bar.
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -85,7 +86,9 @@ std::size_t g_engine_unresolved = 0;
 // The curvature-shaped carry (shape 1) over the reference stress, its curved points and
 // how many of those were read as concave (the centre of curvature in the air).
 double g_carry2 = 0.0;
-std::size_t g_carry2_curved = 0, g_carry2_concave = 0, g_carry2_tight = 0, g_carry2_capped = 0;
+std::size_t g_carry2_curved = 0, g_carry2_concave = 0, g_carry2_tight = 0, g_carry2_capped = 0,
+            g_carry2_unresolved = 0;
+bool g_non_convergent = false;
 // The patch recovery (stress_recovered_at_surface) over the far stress, the loaded
 // edges masked the same way, at patch radius 2.5 and 3.5 voxels, and its unresolved counts.
 double g_patch[2] = {0.0, 0.0};
@@ -95,16 +98,18 @@ std::size_t g_quad_unresolved[2] = {0, 0}, g_quad_dropped[2] = {0, 0};
 
 // The peak von Mises over voxels / the far stress, for the ellipse with short
 // semi-axis `b_voxels` and stiffness E x fill^penalty in the voxels the hole cuts.
-double peak_ratio(int b_voxels, double penalty, bool* ok) {
+// `thickness` (voxels, default kThickness): the plate's thickness; the `[thick6]` rows
+// pass 6. At any other thickness than kThickness the patch recoveries are skipped.
+double peak_ratio(int b_voxels, double penalty, bool* ok, int thickness = kThickness) {
   const int a_voxels = 2 * b_voxels;
   const int w = 10 * a_voxels;  // the hole's long axis is a fifth of the plate's width... (2 a / W = 0.2)
   VoxelGrid g;
   g.nx = w;
   g.ny = w;
-  g.nz = kThickness;
+  g.nz = thickness;
   g.spacing = kShortAxisMm / b_voxels;
   g.origin = Vec3{0.0, 0.0, 0.0};
-  g.tags.assign(static_cast<std::size_t>(w) * w * kThickness, topopt::VoxelTag::Interior);
+  g.tags.assign(static_cast<std::size_t>(w) * w * thickness, topopt::VoxelTag::Interior);
 
   const double t = kTiltDeg * std::acos(-1.0) / 180.0;
   const double c = std::cos(t), s = std::sin(t);
@@ -125,7 +130,7 @@ double peak_ratio(int b_voxels, double penalty, bool* ok) {
         for (int aa = 0; aa < kSub; ++aa)
           if (solid(i + (aa + 0.5) / kSub, j + (bb + 0.5) / kSub)) ++in;
       const double v = static_cast<double>(in) / (kSub * kSub);
-      for (int k = 0; k < kThickness; ++k)
+      for (int k = 0; k < thickness; ++k)
         density[(static_cast<std::size_t>(k) * w + j) * w + i] = v;
     }
 
@@ -162,6 +167,7 @@ double peak_ratio(int b_voxels, double penalty, bool* ok) {
       g, params, density, bcs, loads, m, Vec3{0.0, 0.0, 1.0}, 1e-8, 20000,
       topopt::SolverKind::MultigridCG_Matfree, 0.0, knockdown, true,
       static_cast<double>(g.tags.size()));
+  g_non_convergent = res.non_convergent;
   *ok = !res.non_convergent && res.max_von_mises > 0.0 && std::isfinite(res.max_von_mises);
   if (res.non_convergent)
     std::printf("  (b = %d voxels, fill^%.0f: the solve did not converge)\n", b_voxels, penalty);
@@ -201,6 +207,8 @@ double peak_ratio(int b_voxels, double penalty, bool* ok) {
   }
   g_engine_carry = 0.0;
   g_engine_unresolved = 0;
+  g_carry2 = 0.0;
+  g_carry2_tight = g_carry2_unresolved = 0;
   if (res.von_mises_material_field.size() == density.size()) {
     std::vector<double> f = res.von_mises_material_field;  // the loaded edges masked
     for (int k = 0; k < g.nz; ++k)
@@ -216,12 +224,13 @@ double peak_ratio(int b_voxels, double penalty, bool* ok) {
     g_carry2_concave = sc2.curved_concave;
     g_carry2_tight = sc2.tight_points;
     g_carry2_capped = sc2.capped_points;
+    g_carry2_unresolved = sc2.unresolved;
   }
   g_patch[0] = g_patch[1] = 0.0;
   g_patch_unresolved[0] = g_patch_unresolved[1] = 0;
   g_quad[0] = g_quad[1] = 0.0;
   g_quad_unresolved[0] = g_quad_unresolved[1] = g_quad_dropped[0] = g_quad_dropped[1] = 0;
-  if (res.stress_tensor_field.size() == 6 * density.size()) {
+  if (thickness == kThickness && res.stress_tensor_field.size() == 6 * density.size()) {
     std::vector<double> tf = res.stress_tensor_field;  // the loaded edges masked
     for (int k = 0; k < g.nz; ++k)
       for (int j = 0; j < w; ++j)
@@ -270,6 +279,7 @@ int main(int argc, char** argv) {
   std::size_t carry2_curved[3][4] = {}, carry2_concave[3][4] = {}, carry2_tight[3][4] = {},
               carry2_capped[3][4] = {};
   std::size_t quad_unresolved[2][3][4] = {}, quad_dropped[2][3][4] = {};
+  std::size_t carry2_unresolved[3][4] = {};
   for (int p = 0; p < 3; ++p) {
     std::printf("%-20s", kName[p]);
     int bi = 0;
@@ -291,6 +301,7 @@ int main(int argc, char** argv) {
       carry2_concave[p][bi] = g_carry2_concave;
       carry2_tight[p][bi] = g_carry2_tight;
       carry2_capped[p][bi] = g_carry2_capped;
+      carry2_unresolved[p][bi] = g_carry2_unresolved;
       for (int q = 0; q < 2; ++q) {
         patch[q][p][bi] = g_patch[q];
         patch_unresolved[q][p][bi] = g_patch_unresolved[q];
@@ -335,6 +346,37 @@ int main(int argc, char** argv) {
         std::printf("  %+.1f (unresolved %zu, squares dropped %zu)", 100.0 * (quad[pr][p][q] / kReference - 1.0),
                     quad_unresolved[pr][p][q], quad_dropped[pr][p][q]);
       std::printf("\n");
+    }
+  }
+  // THICK (the reviewer, 2026-11-27: "a plate several voxels thick, not 2"): the same
+  // shape-1 reading (E x fill only, the loaded edges masked) on the plate SIX voxels
+  // thick, beside the two-voxel `[carry2]` E x fill^1 row. Print-only. The finest plate is
+  // skipped when the one before it took over 70 s (it would take over about two minutes).
+  if (!gate) {
+    std::printf("\n[thick6] the plate 6 voxels thick (the [carry2] reading, E x fill, loaded edges masked); percent against the reference %.2f\n",
+                kReference);
+    double last_seconds = 0.0;
+    for (int bi = 0; bi < 4; ++bi) {
+      const int b = kB[bi];
+      if (bi == 3 && last_seconds > 70.0) {
+        std::printf("[thick6] b = %d voxels: SKIPPED (b = %d took %.0f s; b = %d would take over about two minutes)\n",
+                    b, kB[2], last_seconds, b);
+        continue;
+      }
+      bool ok = false;
+      const auto t0 = std::chrono::steady_clock::now();
+      (void)peak_ratio(b, 1.0, &ok, 6);
+      last_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+      if (g_non_convergent || !ok) {
+        std::printf("[thick6] b = %d voxels: the solve DID NOT CONVERGE inside its cap (20000 iterations); no reading "
+                    "(two thick: %+.1f %%)\n", b, 100.0 * (carry2[0][bi] / kReference - 1.0));
+      } else {
+        std::printf("[thick6] b = %d voxels: 6 thick %+.1f %%, tight %zu, unresolved %zu;  2 thick %+.1f %%, tight %zu, unresolved %zu\n",
+                    b, 100.0 * (g_carry2 / kReference - 1.0), g_carry2_tight, g_carry2_unresolved,
+                    100.0 * (carry2[0][bi] / kReference - 1.0), carry2_tight[0][bi], carry2_unresolved[0][bi]);
+      }
+      std::printf("[thick6] (timing) b = %d voxels: %.1f s\n", b, last_seconds);
+      std::fflush(stdout);
     }
   }
   const bool pass = low[1] >= -5.0;

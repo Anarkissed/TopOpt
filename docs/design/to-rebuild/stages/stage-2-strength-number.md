@@ -1019,3 +1019,24 @@ UNSET: all four files the same bytes as today, and the same numbers. Times 569 /
 
 LOOSE ENDS: (1) with a design box, a drawn face that grown material now covers would still be lowered to its drawn fill: not exercised here (no design box in this job); to fix before the flip; (2) the stress-view count is printed for the first view only; (3) a view is ignored when a lattice posture is given (lattice jobs unchanged).
 
+### The reviewer's measurements 1 and 2: thick plates, and a real 3D fillet (2026-11-27 18:00; print-only rows `[thick6]` and `[fillet]`; a builder's test code, two builds; every solve converged)
+
+**2. Plates SIX voxels thick instead of two** (the surface reading, real stiffness; percent against exact; six thick / two thick):
+
+| | 3 voxels | 4 | 5 | 6 |
+|---|---|---|---|---|
+| plate, round hole (radius) | -30.7 / -28.9 | -14.9 / -13.8 | -3.9 / -4.2 | -0.8 / -1.0 |
+| ring, loaded bore | -12.6 / -13.0 | -4.5 / -4.9 | -4.1 / -4.3 | +1.7 / +1.3 |
+| ellipse (b; the tip's radius is b / 2) | -37.6 / -37.2 | -35.8 / -36.7 | -34.0 / -34.7 | -16.9 / -5.2 |
+
+The two-voxel plates did not flatter the reading: at six thick the plate and the ring move by a point or less. The one change is the ellipse at b = 6 (tip radius 3 voxels, under the resolved limit of 4 and flagged tight in both): -16.9 % at six thick against -5.2 % at two. So the "-5.2 %, just missed" I recorded for it was luck; under 4 voxels of radius it is simply unresolved, as the limit says.
+
+**1. A real 3D raiser: an L bracket with an inside fillet, bent open** (arms 8 voxels thick, 6 through; the reference is the same shape FOUR times finer, read the same way: 27.28 MPa at R = 4, 24.76 at R = 6):
+
+| fillet radius | the surface reading, base grid | the same, 2 x finer | the per-voxel peak: base / 2 x / 4 x |
+|---|---|---|---|
+| 4 voxels (24 points flagged tight at the base grid) | -9.0 % | +12.7 % | -30.5 / -16.0 / -11.3 % |
+| 6 voxels (none flagged) | -8.3 % | -5.2 % | -25.1 / -11.9 / -10.6 % |
+
+READ PLAINLY: on a real inside-corner fillet of 6 voxels of radius, NOT flagged, the reading is 8.3 % under the 4 x reference: it MISSES the bar (5 %). It is far better than the per-voxel peak (25 to 30 % under), and at R = 6 it closes as the grid refines (-8.3, -5.2), but it is not inside 5 % at the resolved limit. And at R = 4 the 2 x grid reads 12.7 % ABOVE the 4 x one, so the reference itself is not settled there (the reading does not converge steadily at that radius). The round hole in a plate passed from 5 voxels; a fillet in bending, where the raiser sits on a member only 8 voxels thick and the stress falls away through the thickness as well as around the corner, is harder. So either "resolved" for an inside fillet is more than 6 voxels of radius (to be measured at 8 and 12), or the shape of the carry there needs the bending gradient as well as the 1 / r^2 term. For the reviewer; the reading stays behind its switch.
+
