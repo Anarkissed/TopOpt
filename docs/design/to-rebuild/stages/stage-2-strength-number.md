@@ -27,6 +27,8 @@ Also ruled the same hour (stage 5): the connection-rule test on the hook PASSES;
 
 **ONE JUDGE, where it is (2026-11-26 21:45):** the switch `TOPOPT_RECHECK=fill[:k]` is in, builds and runs in a job; the fills are counted one layer at a time. On the bracket the lightest version's shown margin comes down from 3.66 to between 2.2 and 2.5 (certificate 1.80), at no cost in time. NOT settled: the number still moves with k (the textbook test: up to 18 % between k = 4 and 8), because the one-voxel form is jumpy in the fill by its nature, in both judges ("WHY the one-voxel form is jumpy", below). Runs at k = 16 against a finer reference are in progress; the reviewer gets the table and the question it raises.
 
+**THE MAINTAINER, 2026-11-27, on the printed check for small PLA parts:** "I will absolutely add the small PLA parts when the rig is ready. But it won't be for a while." So the averaged reading's 33 to 41 % higher margins on a 15 mm part rest on the published length alone for now. FOR THE REVIEWER to rule when stage 2's size form comes up for its flip: ship it for small parts on the published value, or hold the size form to parts above a stated size until his print exists. Not decided by me.
+
 **Owed, in order:**
 - ONE JUDGE: k by measurement (or the finding that it has no answer for the one-voxel form), evidence (a) to (e).
 - The step-back (the optimiser's loop is in `plsm.cpp`, TOSurface's file: to agree who edits it).

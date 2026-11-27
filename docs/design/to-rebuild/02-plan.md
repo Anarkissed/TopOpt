@@ -43,6 +43,16 @@ Stage 0 "make room" comes first on purpose: today every stage would edit `run_jo
 
 Stages 3 and 5 do not depend on 1 and 2 and can run beside them if he approves helpers (Phase 5).
 
+### Added by the maintainer, 2026-11-27: finish fast, then keep going finer
+
+His words (11-26): "it should check the memory and compute and use that to determine the finest detail that can be done in the shortest amount of time. Then when done, can we make it so there is an option to keep going and get finer detail? ... That way we finish a version ASAP and the user decides if they want to wait more for more detail or not." 11-27: "Yes, add 'finish fast, then keep going finer' to the plan."
+
+What it is, in two parts:
+1. AUTOMATIC DETAIL. In Auto the resolution is chosen from the part (one voxel per wall-line width, `part_scale.hpp auto_resolution`) AND from the machine: the memory free and the speed measured on this device set the finest grid that finishes in a stated time. Manual keeps a typed resolution.
+2. KEEP GOING. When a run has finished, one button continues the SAME result at a finer grid, without starting over: the design is a smooth function that does not depend on the grid, so the finer pass starts from the finished coarse design and only refines it. The user sees a first result as early as possible and chooses whether to wait for more detail.
+
+Where it sits: after stage 3 (the surface comes from the function, so a finer pass has something exact to start from) and stage 5 (the speed and memory figures the choice rests on); built with stage 6 (the search) and shown in stage 9 (one button). Ledger: new item, to be numbered when stage 6 is planned. Open choices to settle by measurement then: the time budget for the first result; how much finer each "keep going" step is (x1.5 or x2); whether a finer pass may change the topology or only sharpen it; the memory test on the iPad against the Mac. Nothing is built for it yet; the stage's plain-words overview and plan go to him before code, as for every stage.
+
 ### The "best I can do" build
 
 After his OK on the workplan and before helpers start production work: ONE probe tree (never merged) carrying the cheap form of stages 2, 3 and 4 together, measured against today on all reference parts. Its table settles the open choices below. Every mechanism is named and switchable, so each can later be tested alone.
