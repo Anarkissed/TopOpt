@@ -1398,12 +1398,16 @@ public final class LatticeLayoutPreview: ObservableObject {
         guard facts.lays, facts.touch > 0, facts.openLook > 0 else { return nil }
         let bead = p.printParams.strutLineWidthMM > 0 ? p.printParams.strutLineWidthMM : 0.45
         let thinnest = 2 * bead   // partWide's minStrutLines
-        let on = l.allowQuilt && (p.latticePageManual || l.isOrganic)
+        let manual = p.latticePageManual || l.isOrganic   // Auto lays neither Allow quilt nor Small cells (settings(_:))
+        let on = l.allowQuilt && manual
         var ae = l
         ae.stageMode = .aesthetic
+        let floor = thinnest / (on ? facts.touch : facts.openLook)
         return SolidReason.Depth(depthMM: 0, cellsAcross: Int(Swift.max(1, minCellsAcross(l))),
-                                 floorCellMM: thinnest / (on ? facts.touch : facts.openLook), quiltFloorCellMM: thinnest / facts.touch,
-                                 aestheticCellsAcross: Int(minCellsAcross(ae)), allowQuiltOn: on)
+                                 floorCellMM: floor, quiltFloorCellMM: thinnest / facts.touch,
+                                 aestheticCellsAcross: Int(minCellsAcross(ae)), allowQuiltOn: on,
+                                 thinFloorCellMM: thinFloor(thinnest: thinnest, bead: bead, touch: facts.touch, floor: floor),
+                                 smallCellsOn: l.smallCellsInThinWalls && manual)
     }
 
     nonisolated static func depthAsk(_ s: LatticeLayoutSession.Settings, lattice l: LatticeSettings,
@@ -1415,9 +1419,20 @@ public final class LatticeLayoutPreview: ObservableObject {
         let thinnest = Swift.max(1, s.minStrutLines) * s.beadMM
         var ae = l
         ae.stageMode = .aesthetic
+        let strut = facts.lays && facts.touch > 0 && !LatticeSheets.isSheet(s.topology)
         return SolidReason.Depth(depthMM: deepest, cellsAcross: Int(Swift.max(1, s.minCellsAcross)), floorCellMM: floorCellMM,
-                                 quiltFloorCellMM: facts.lays && facts.touch > 0 ? thinnest / facts.touch : 0,
-                                 aestheticCellsAcross: Int(minCellsAcross(ae)), allowQuiltOn: s.allowQuilt)
+                                 quiltFloorCellMM: strut ? thinnest / facts.touch : 0,
+                                 aestheticCellsAcross: Int(minCellsAcross(ae)), allowQuiltOn: s.allowQuilt,
+                                 thinFloorCellMM: strut ? thinFloor(thinnest: thinnest, bead: s.beadMM, touch: facts.touch,
+                                                                    floor: floorCellMM) : 0,
+                                 smallCellsOn: s.smallCellsInThinWalls)
+    }
+
+    /// ★ notes30 X2 (Small cells first): the smallest cell Small cells in thin walls lays in a wall that needs it — core's
+    /// lay_cells thin_floor_cell_mm: lattice_quilt_off_cell_mm (the thinnest strut and kQuiltOffGapLines = 1 printed line of air,
+    /// over the type's touch), never over the open look's floor.
+    nonisolated static func thinFloor(thinnest: Double, bead: Double, touch: Double, floor: Double) -> Double {
+        Swift.min(floor, (thinnest + bead) / touch)
     }
 
     /// ★ his ruling 11-14: why asked-for lattice is solid, and the fixes (after every layout: one coarse map).
@@ -1511,9 +1526,22 @@ public final class LatticeLayoutPreview: ObservableObject {
         acts = Array(acts.prefix(3))
         let popups = AppPopups.shared
         let title = SolidPopUp.title(r)
-        if r.offersThree, let first = acts.first {
+        if r.offersThree, SolidReason.controlThreeOffers, let first = acts.first {   // RED CONTROL: release 22's three buttons
             popups.choose(title, text, first: first, second: acts.count > 1 ? acts[1] : nil, third: acts.count > 2 ? acts[2] : nil,
                           dismiss: nil, why: SolidPopUp.offersWhy(r).map { (SolidPopUp.offersWhyTitle, $0) })
+        } else if r.offersThree {
+            // ★ notes30 X2 (his yes, 11-26): up to three offers (Small cells in thin walls first, where it lays), and Leave it
+            // solid last, the pop-up's dismiss word (it changes nothing: the pop-up closes)
+            let offered = r.fixes.filter { $0 != .leaveSolid }.prefix(3).map { f in
+                (title: f.title, run: { [weak self] in self?.takeFix(f) } as () -> Void)
+            }
+            let why = SolidPopUp.offersWhy(r).map { (SolidPopUp.offersWhyTitle, $0) }
+            if let first = offered.first {
+                popups.choose(title, text, first: first, second: offered.count > 1 ? offered[1] : nil,
+                              third: offered.count > 2 ? offered[2] : nil, dismiss: SolidReason.Fix.leaveSolid.title, why: why)
+            } else {
+                popups.choose(title, text, first: (SolidReason.Fix.leaveSolid.title, {}), second: nil, dismiss: nil, why: why)
+            }
         } else if acts.count >= 2 {
             popups.choose(title, text, first: acts[0], second: acts[1], third: acts.count > 2 ? acts[2] : nil, dismiss: "OK")
         } else {
