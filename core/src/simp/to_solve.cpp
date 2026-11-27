@@ -18,7 +18,7 @@
 
 #include "topopt/observability.hpp"
 
-#include "../fea/fea_matfree.hpp"  // mf_parallel_ranges: the solver's worker pool
+#include "../fea/fea_matfree.hpp"  // SolverSettingsScope (E-01)
 
 namespace topopt {
 
@@ -262,15 +262,15 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
   Hex8Stiffness KA, KB, KC;
   if (LM != nullptr) hex8_cubic_blocks(grid.spacing, KA, KB, KC);
   out.dcompliance.assign(grid.voxel_count(), 0.0);
-  // S-05 (TO rebuild stage 5): the per-element energy and sensitivity on every
-  // matrix-free worker, by contiguous z-slabs. Each element writes only its own
-  // `ce[e]` (its compliance term) and `dcompliance[e]`, so the values do not
-  // depend on the thread count; the compliance is then summed SERIALLY in the
-  // same ascending voxel order as before, so it is byte-identical to the serial
-  // loop this replaces (a skipped element contributes an exact +0.0).
-  std::vector<double> ce(grid.voxel_count(), 0.0);
-  fea_detail::mf_parallel_ranges(0, grid.nz, 2, [&](int k_lo, int k_hi) {
-  for (int k = k_lo; k < k_hi; ++k)
+  // S-05 WITHDRAWN (TO rebuild stage 5, 11-27): a parallel version of this loop
+  // (z-slabs on the matrix-free workers, terms summed serially) was identical
+  // across thread counts but NOT to this serial loop: compiled inside the worker
+  // lambda, the per-element arithmetic rounded differently in the last bits, and
+  // a scenario job's design moved (test_scenario_weights check (c), bisected by
+  // TOReview). The serial loop stays until a parallel one is shown byte-identical
+  // to it on that job.
+  double compliance = 0.0;
+  for (int k = 0; k < grid.nz; ++k)
     for (int j = 0; j < grid.ny; ++j)
       for (int i = 0; i < grid.nx; ++i) {
         if (!grid.solid(i, j, k)) continue;
@@ -323,7 +323,7 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
               (LR != nullptr && (*LR)[e] >= 0.0) ? (*LR)[e] : rho;
           double Cv[3], Cd[3];
           LM->eval(lat_rho, Cv, Cd);
-          ce[e] = Cv[0] * qA + Cv[1] * qB + Cv[2] * qC;
+          compliance += Cv[0] * qA + Cv[1] * qB + Cv[2] * qC;
           // dc/d(lat_rho). On the multiscale path lat_rho IS the design density
           // and this is dc/d(design density), unchanged. On an overridden voxel it
           // is the derivative with respect to the LATTICE relative density — what
@@ -347,18 +347,15 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
         // density, exactly as an out-of-domain voxel above (an unanchored
         // speck carries no load either way).
         if (!dropped.empty() && dropped[e]) {
-          ce[e] = dropped_e * q;
+          compliance += dropped_e * q;
           out.dcompliance[e] = 0.0;
           continue;
         }
-        ce[e] = std::pow(rho, params.penalty) * params.youngs_modulus * q;
+        compliance += std::pow(rho, params.penalty) * params.youngs_modulus * q;
         out.dcompliance[e] = -params.penalty *
                              std::pow(rho, params.penalty - 1.0) *
                              params.youngs_modulus * q;
       }
-  });
-  double compliance = 0.0;
-  for (const double c : ce) compliance += c;  // ascending voxel order, as before
   out.compliance = compliance;
   out.t_sensitivity_ms = steady_clock_ms() - t_sens0;
   return out;
