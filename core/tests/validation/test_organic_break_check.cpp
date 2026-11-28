@@ -155,8 +155,13 @@ void bar() {
               r.json.substr(r.json.find("\"force_asked_n\""), 90).c_str());
   check(sz.material_voxels == 11250 && std::fabs(sz.bytes - want_bytes) < 1.0 && r.size.material_voxels == 11250,
         "the bar's size before the solve: 11,250 material voxels and their bytes, the same count the solve uses");
-  check(r.ok && r.verdict == "pass" && r.first_resolved.found && std::fabs(r.first_resolved.multiple / (31.0 / (20.0 / 9.0)) - 1.0) < 0.10,
-        "the bar's verdict is pass and its first break is within 10 % of 31 / 2.22");
+  // C11: with the 0.3 mm ball (the lead's ruling) the first break is read at the held face's corner, where the full
+  // clamp (every direction held, so Poisson's contraction is stopped there) concentrates the stress: 10.88, 22 % under
+  // the hand number. The 0.9 mm ball averaged it away (13.36). So the mark is: pass, never more than 10 % over the hand
+  // number, and at most 25 % under it (the safe side, the clamp's own concentration).
+  const double hand = 31.0 / (20.0 / 9.0), ratio = r.first_resolved.multiple / hand;
+  check(r.ok && r.verdict == "pass" && r.first_resolved.found && ratio <= 1.10 && ratio >= 0.75,
+        "the bar's verdict is pass and its first break is from 25 % under to 10 % over 31 / 2.22 (the held corner's concentration)");
 }
 
 int face_where(const StepModel& m, const Vec3& n, int axis, bool want_max) {
@@ -211,8 +216,9 @@ std::vector<char> study_voxels(const TriangleMesh& mesh, const VoxelGrid& ref) {
 
 // C10 G2, TEST-ONLY candidates (argv "smooth:R" the smoothing ball's radius in mm, "connected" also the connected-ball
 // reading); the product's default (0.9 mm radius, every material voxel in the ball) is never changed by them
-double g_smooth = 0.9;
+double g_smooth = BreakAsk{}.smooth_mm;   // C11: the shipping default unless "smooth:R" is given
 bool g_connected = false;
+bool g_big = false;   // C11, mark 6 (TEST-ONLY): "big" lets the steady mode run over 3 GB; run only while the lead holds HEAVY.lock
 double g_tol = 1e-2;   // the marks' solve tolerance (argv "tol:1e-8": the SPARSE split, C1 Piece 1)
 
 struct Piece {
@@ -456,7 +462,7 @@ void steady(char** a) {
   ask.grid_shift = {std::atof(a[6]) / ask.voxel_mm, std::atof(a[6]) / ask.voxel_mm, std::atof(a[6]) / ask.voxel_mm};
   const BreakSize sz0 = organic_break_size(ask);
   std::printf("STEADY size at %.3f mm: %zu material voxels (centre count), %.2f GB estimate\n", ask.voxel_mm, sz0.material_voxels, sz0.bytes / 1e9);
-  if (sz0.bytes > 3e9) { std::printf("STEADY skipped: over 3 GB\n"); return; }
+  if (sz0.bytes > 3e9 && !g_big) { std::printf("STEADY skipped: over 3 GB\n"); return; }   // C11: "big" (mark 6, run only under the lead's lock)
   fea_set_matfree_threads(1);
   ask.smooth_mm = g_smooth;                // C10 G2 (test-only)
   ask.also_connected_ball = g_connected;
@@ -903,6 +909,7 @@ int main(int argc, char** argv) {
   for (int i = 1; i < argc; ++i) {
     if (std::string(argv[i]).rfind("smooth:", 0) == 0) g_smooth = std::atof(argv[i] + 7);
     if (std::string(argv[i]) == "connected") g_connected = true;
+    if (std::string(argv[i]) == "big") g_big = true;
   }
   if (argc >= 2 && std::string(argv[1]) == "g2") { g2(); return 0; }   // C10: test-only, no default checks first
   // the steady mode (argv[10], [11] optional, C5) runs alone (C10: the default checks are not run first)

@@ -84,7 +84,10 @@ struct BreakAsk {
   // The grid is anchored at the PART's box low corner + grid_shift x voxel_mm (0: on the part's box; the study's blocks
   // were solved at -0.5, -0.5, 0), and extended by whole voxels to hold the whole print.
   Vec3 grid_shift{0.0, 0.0, 0.0};
-  double smooth_mm = 0.9;               // the smoothing ball's radius
+  // C11 (the lead's ruling on G2): the smoothing ball's RADIUS, 0.3 mm (was 0.9: a 0.9 mm vine in bending read at 7x
+  // its first yield). Only the smoothed reading uses it; every load-path distance (CORE, THICK, FAR, members, contacts)
+  // is set by min_voxels_across and kBreakFarMarginVoxels, not by this.
+  double smooth_mm = 0.3;
   int min_voxels_across = 3;            // the judged (resolved) gate
   double near_post_mm = 2.0;            // the class "solid near a post's end"
   double tolerance = 1e-2;              // the solve's relative residual
