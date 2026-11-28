@@ -146,7 +146,7 @@ void bar() {
   ask.z_knockdown = 0.55;
   const BreakSize sz = organic_break_size(ask);
   const BreakResult r = organic_break_check(ask);
-  const double want_bytes = 11250.0 * 3200.0 + 11250.0 * 125.0;
+  const double want_bytes = 11250.0 * 3200.0 + 11250.0 * 157.0;
   std::printf("bar: size %d x %d x %d, %zu material voxels, %.0f bytes (want 11250, %.0f); ok %d %s verdict %s, first break %.4f at (%.2f, %.2f, "
               "%.2f) %s; force asked %s\n", sz.nx, sz.ny, sz.nz, sz.material_voxels, sz.bytes, want_bytes, r.ok, r.why.c_str(), r.verdict.c_str(),
               r.first_resolved.multiple, r.first_resolved.at.x, r.first_resolved.at.y, r.first_resolved.at.z, r.first_resolved.by.c_str(),
@@ -598,7 +598,7 @@ void write_boxes(const std::string& path, const std::vector<std::array<double, 6
   f << "endsolid boxes\n";
 }
 BreakResult load_path_case(const std::string& name, const std::vector<std::array<double, 6>>& boxes, double force = 1.0,
-                           bool part_is_print = false) {
+                           bool part_is_print = false, double shift_voxels = 0.0) {
   const std::string w = std::string(TMP_DIR) + "/organic_break_check/" + name;
   std::filesystem::remove_all(w);
   std::filesystem::create_directories(w);
@@ -621,18 +621,19 @@ BreakResult load_path_case(const std::string& name, const std::vector<std::array
   ask.poisson = 0.35;
   ask.yield_mpa = 31;
   ask.z_knockdown = 0.55;
+  ask.grid_shift = {shift_voxels, 0.0, 0.0};
   const BreakResult r = organic_break_check(ask);
   std::string why;
   for (const std::string& x : r.not_proven_because) why += x + " ";
   std::printf("%s: verdict %s (%s); first break %.3f; unresolved energy %.4f, largest region %.4f at (%.2f, %.2f, %.2f), %zu voxels\n", name.c_str(),
               r.verdict.c_str(), why.c_str(), r.first_resolved.multiple, r.unresolved_energy_share, r.largest_unresolved_share,
               r.largest_unresolved_at.x, r.largest_unresolved_at.y, r.largest_unresolved_at.z, r.largest_unresolved_voxels);
-  std::printf("%s: thin regions: %zu slivers (%zu voxels), %zu members, %zu connectors\n", name.c_str(), r.sliver_regions, r.sliver_voxels,
-              r.member_regions, r.connector_regions);
+  std::printf("%s: thin regions: %zu sliver voxels, %zu member regions, %zu connector regions\n", name.c_str(), r.sliver_voxels, r.member_regions,
+              r.connector_regions);
   if (!r.joint_regions.empty())
-    std::printf("%s: the region with the most load: %s, %.4f of the load at (%.2f, %.2f, %.2f), %zu voxels, touching %zu bodies\n", name.c_str(),
+    std::printf("%s: the region with the most load: %s, %.4f of the load at (%.2f, %.2f, %.2f), %zu voxels\n", name.c_str(),
                 r.joint_regions.front().member ? "thin member" : "connector", r.joint_regions.front().load_share, r.joint_regions.front().at.x,
-                r.joint_regions.front().at.y, r.joint_regions.front().at.z, r.joint_regions.front().voxels, r.joint_regions.front().bodies);
+                r.joint_regions.front().at.y, r.joint_regions.front().at.z, r.joint_regions.front().voxels);
   return r;
 }
 void load_path() {
@@ -648,12 +649,16 @@ void load_path() {
   check(c.ok && c.verdict == "not_proven" && !c.joint_regions.empty() && c.joint_regions.front().load_share > kBreakLoadPathShare &&
             std::hypot(std::hypot(c.joint_regions.front().at.x - 4.95, c.joint_regions.front().at.y - 2.8), c.joint_regions.front().at.z - 2.8) < 1.5,
         "the load-path rule: a thin joint in the load path is named (not_proven, the region at the joint)");
+  // the same JOINT on a grid placed half a voxel (0.1 mm) further along the load axis: still named
+  const BreakResult c2 = load_path_case("JOINT_SHIFTED", {{0, 0, 0, 5, 3, 3}, {4.9, 2.6, 2.6, 10, 5.6, 5.6}}, 0.1, true, 0.5);
+  check(c2.ok && c2.verdict == "not_proven" && !c2.joint_regions.empty() && c2.joint_regions.front().load_share > kBreakLoadPathShare,
+        "the load-path rule: the thin joint is still named on a grid shifted half a voxel along the load");
   // the gate on a thick block whose faces fall inside voxels (the lead's ruling on C8): a 6 x 6 x 6 mm block at
   // (0.03, 0.07, 0.11), so every face voxel is partly filled. Its face and edge voxels must all read resolved except at
   // most a line along each of the 12 sharp edges (12 x 32 voxels at 0.2 mm).
   {
     const BreakResult d = load_path_case("BLOCK", {{0.03, 0.07, 0.11, 6.03, 6.07, 6.11}}, 1.0, true);
-    std::printf("BLOCK: %zu material voxels not resolved, %zu of them in slivers (verdict %s)\n", d.unresolved_voxels, d.sliver_voxels, d.verdict.c_str());
+    std::printf("BLOCK: %zu material voxels not resolved, %zu of them slivers (verdict %s)\n", d.unresolved_voxels, d.sliver_voxels, d.verdict.c_str());
     check(d.ok && d.unresolved_voxels <= 12 * 32 && d.member_regions == 0 && d.connector_regions == 0 && d.verdict == "pass",
           "the gate: a thick block's partly filled face and edge voxels are resolved or slivers (exempt): pass");
   }
@@ -670,8 +675,9 @@ void load_path() {
   {   // two thick blocks joined by a thick bridge AND, in parallel, a short thin patch: one BODY, so the patch is a sliver
     const BreakResult q = load_path_case("PARALLEL", {{0, 0, 0, 4.9, 3, 3}, {5.1, 0, 0, 10, 3, 3}, {4.8, 0, 0, 5.2, 1.5, 3}, {4.8, 2.6, 2.6, 5.2, 3.0, 3.0}},
                                          1.0, true);
-    std::printf("PARALLEL reads: verdict %s, slivers %zu, members %zu, connectors %zu (the known limit: the patch is not measured)\n",
-                q.verdict.c_str(), q.sliver_regions, q.member_regions, q.connector_regions);
+    std::printf("PARALLEL reads: verdict %s, sliver voxels %zu, member regions %zu, connector regions %zu; the region with the most load %.4f\n",
+                q.verdict.c_str(), q.sliver_voxels, q.member_regions, q.connector_regions,
+                q.joint_regions.empty() ? 0.0 : q.joint_regions.front().load_share);
   }
   // the same bar whole, with a 0.4 mm fin off the load path (on its +y face): not named
   const BreakResult b = load_path_case("FIN", {{0, 0, 0, 10, 3, 3}, {4, 2.9, 1.3, 6, 5, 1.7}});

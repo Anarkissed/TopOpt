@@ -38,13 +38,14 @@ constexpr double kBreakLoadPathShare = 0.05;
 //  - THICK: material within r of CORE (the opening by a ball of diameter 3 voxels); THIN: material not THICK.
 //  - FAR: material farther than r + d from CORE, d = kBreakFarMarginVoxels voxels (1.25: 0.25 mm at 0.2 mm), which
 //    covers the sliver an opening removes at a square edge (0.12 mm) and at a cube's corner (0.22 mm).
-//  - A voxel is resolved (THICK) when at least half of its filled samples are THICK. BODIES = the face-connected
-//    components of THICK voxels. Each face-connected THIN region is (A) a SLIVER (no FAR material, touching at most one
-//    BODY: part of that body's surface, left out of the load-path measures), (B) a THIN MEMBER (holds FAR material:
-//    measured by the energy share and the force through it), or (C) a CONNECTOR (no FAR material, touching two or more
-//    BODIES, e.g. a kissing contact or a short joint: measured by the force through it).
-//  Known limit: a thin patch in parallel with a thick bridge between the same two blocks makes ONE body, so the patch is
-//  a sliver and is not measured.
+//  - A voxel is resolved (THICK) when at least half of its filled samples are THICK.
+//  - LOCAL REGIONS: MEMBER voxels = thin voxels holding FAR material, plus thin voxels in the 26-neighbourhood of one
+//    (one voxel of margin); member regions = their face-connected components, measured by the energy share and the
+//    force through them. CONTACT, on the samples (so it does not hang on the grid's placement): BODIES = face-connected
+//    THICK samples; a contact sample is a filled, not-THICK sample with, along some axis, a THICK sample of one body at
+//    offset -1 and of a different body at +1 or +2 (or the mirror); contact voxels hold one and are not members;
+//    connector regions = their face-connected components, measured by the force through them. Every other thin voxel
+//    is a SLIVER: in no region and no measure.
 constexpr double kBreakFarMarginVoxels = 1.25;
 
 // A bar of the lay as the file holds it (model frame), and a post as the print check laid it.
