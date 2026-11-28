@@ -500,7 +500,12 @@ struct MgTuning {
   // levels leaves a much larger coarsest operator, which the shipped cap would
   // reject outright; raising it is what makes those cells measurable at all.
   int coarse_dof_cap = 6000;  // == kMgCoarseDofCap
-  MgSmoother smoother = MgSmoother::ScalarJacobi;
+  // B-05 RULED (the reviewer, 11-26): the default smoother is the stage-5
+  // 4th-kind Chebyshev of degree `cheb_degree` (2) on each level's lambda bound.
+  // The stage's switch (TOPOPT_SOLVER) was deleted at the close-out (11-28); the
+  // pre-stage-5 fixed-weight Jacobi (ScalarJacobi, `omega` 0.6,
+  // omega_over_lambda 0) is reachable only through the tests' mg_set_tuning.
+  MgSmoother smoother = MgSmoother::Chebyshev4;
   // TO stage 5 (B-05). Damped Jacobi weighted PER LEVEL: omega_level =
   // omega_over_lambda / lambda_level, stable for omega_over_lambda < 2 whatever
   // the level's lambda_max(D^-1 A) (the shipped fixed 0.6 is unstable above

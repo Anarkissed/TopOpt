@@ -1,12 +1,14 @@
-// Stage 5 (faster solves), B-05: the stable smoothers behind TOPOPT_SOLVER.
+// Stage 5 (faster solves), B-05: the stable smoothers, Chebyshev degree 2 the default.
 //
 // Today's damped Jacobi uses a fixed weight 0.6, which only settles while the
 // level's lambda_max(D^-1 A) stays under 3.33; his parts measure 4.4 to 9.9, so
 // the shipped cycle grows the error, latches off and every solve runs on the
 // l1 retry (stage file, section 1). Stage 5 adds two smoothers that are stable
 // whatever lambda is: Jacobi weighted F / lambda per level, and 4th-kind
-// Chebyshev of degree K. Both are selected by the stage switch TOPOPT_SOLVER
-// ("jacobi:F", "cheb:K"); unset, the solver is today's, byte for byte.
+// Chebyshev of degree K. Degree 2 is the default since the stage's close-out
+// (11-28), which also deleted the stage switch TOPOPT_SOLVER; this test selects
+// each setting with the tests-only mg_set_tuning ("jacobi:F", "cheb:K", and
+// "today" for the pre-stage-5 fixed weight 0.6).
 //
 // Two blocks, both with a graded modulus (ripple and a soft band, neighbours up
 // to ~200x apart): Poisson 0.3 (lambda about 3: today's weight is stable) and
@@ -17,9 +19,8 @@
 //   * the solve converges ON MULTIGRID, without the l1 safe retry;
 //   * the answer matches a tight Jacobi-CG reference in the energy norm;
 //   * a repeat after an unrelated solve gives identical bytes (test K);
-//   * the switch is inert unset, at "today" and at a value it does not
-//     understand (identical bytes to today's solver), and the caller's tuning
-//     is back after every switched solve.
+//   * the default is cheb:2 byte for byte, the pre-stage-5 weight is not the
+//     default, and the tuning is the default again after every solve.
 
 #include "topopt/fea.hpp"
 #include "topopt/voxel.hpp"
@@ -73,10 +74,10 @@ struct Posture {
     topopt::fea_matfree_set_mg_safe_retry(true);
     topopt::fea_matfree_reset_mg_stagnation_latch();
     topopt::fea_matfree_reset_mg_safe_failures();
-    unsetenv("TOPOPT_SOLVER");
+    topopt::fea_detail::mg_reset_tuning();
   }
   ~Posture() {
-    unsetenv("TOPOPT_SOLVER");
+    topopt::fea_detail::mg_reset_tuning();
     topopt::fea_matfree_reset_mg_stagnation_latch();
     topopt::fea_matfree_reset_mg_safe_failures();
     topopt::fea_matfree_set_mg_safe_retry(prev_safe);
@@ -153,7 +154,30 @@ struct Case {
   std::vector<NodalLoad> loads;
 };
 
-// One multigrid solve with TOPOPT_SOLVER = `setting` (nullptr = unset).
+// The tuning for a setting: "jacobi:F" (weight F / lambda per level), "cheb:K",
+// or "today" (the pre-stage-5 fixed weight); nullptr = the default.
+topopt::fea_detail::MgTuning tuning_for(const char* setting) {
+  using topopt::fea_detail::MgSmoother;
+  topopt::fea_detail::MgTuning t;
+  if (setting == nullptr) return t;
+  const std::string s(setting);
+  if (s == "today") {
+    t.smoother = MgSmoother::ScalarJacobi;
+    t.omega_over_lambda = 0.0;
+  } else if (s.rfind("jacobi:", 0) == 0) {
+    t.smoother = MgSmoother::ScalarJacobi;
+    t.omega_over_lambda = std::atof(s.c_str() + 7);
+  } else if (s.rfind("cheb:", 0) == 0) {
+    t.smoother = MgSmoother::Chebyshev4;
+    t.cheb_degree = std::atoi(s.c_str() + 5);
+  } else {
+    std::fprintf(stderr, "  unknown setting %s\n", setting);
+    std::exit(2);
+  }
+  return t;
+}
+
+// One multigrid solve with the tuning for `setting` (nullptr = the default).
 struct Run {
   bool ok = false;
   FeaSolution sol;
@@ -163,8 +187,7 @@ struct Run {
 
 Run solve(const Case& c, const char* setting) {
   Run r;
-  if (setting != nullptr) setenv("TOPOPT_SOLVER", setting, 1);
-  else unsetenv("TOPOPT_SOLVER");
+  topopt::fea_detail::mg_set_tuning(tuning_for(setting));
   topopt::fea_matfree_reset_mg_stagnation_latch();
   topopt::fea_matfree_reset_mg_safe_failures();
   const long long e0 = topopt::fea_matfree_mg_safe_engagements();
@@ -174,11 +197,11 @@ Run solve(const Case& c, const char* setting) {
                                            &r.info, nullptr, nullptr);
     r.ok = true;
   } catch (const std::exception& e) {
-    std::fprintf(stderr, "  %s %s threw: %s\n", c.name, setting ? setting : "(today)",
+    std::fprintf(stderr, "  %s %s threw: %s\n", c.name, setting ? setting : "(default)",
                  e.what());
   }
   r.safe_engagements = topopt::fea_matfree_mg_safe_engagements() - e0;
-  unsetenv("TOPOPT_SOLVER");
+  topopt::fea_detail::mg_reset_tuning();
   return r;
 }
 
@@ -233,8 +256,8 @@ int main() {
     CHECK(ref_ok, "the tight Jacobi-CG reference converges");
     if (!ref_ok) continue;
 
-    const Run today = solve(c, nullptr);
-    CHECK(today.ok, "today's solver solves the block");
+    const Run today = solve(c, "today");
+    CHECK(today.ok, "the pre-stage-5 smoother solves the block");
     std::printf("  today:        %s, %d iterations, %lld l1 retries\n",
                 today.info.used_multigrid ? "multigrid" : "Jacobi-CG fallback",
                 today.info.iterations, today.safe_engagements);
@@ -244,7 +267,7 @@ int main() {
       CHECK(r.ok, "the stage-5 smoother converges");
       CHECK(r.info.used_multigrid, "the stage-5 smoother converges ON MULTIGRID");
       CHECK(r.safe_engagements == 0, "the stage-5 smoother never needs the l1 retry");
-      CHECK(tuning_is_default(), "the caller's tuning is back after a switched solve");
+      CHECK(tuning_is_default(), "the tuning is the default again after the solve");
       const double d = r.ok ? energy_rel_diff(c.g, c.E, c.nu, r.sol.u, ref.u) : 1.0;
       CHECK(d < 5e-3, "the stage-5 answer matches the tight reference (energy norm)");
       std::printf("  %-12s  %s, %d iterations, %lld l1 retries, energy diff %.2e\n", s,
@@ -260,16 +283,15 @@ int main() {
               a.info.iterations == b.info.iterations,
           "a repeat after an unrelated solve gives identical bytes");
 
-    // The switch is inert unset, at "today" and at values it does not understand.
-    const Run t2 = solve(c, "today");
-    const Run bad1 = solve(c, "jacobi:2.5");
-    const Run bad2 = solve(c, "chebyshev");
-    CHECK(today.ok && t2.ok && same_bytes(today.sol, t2.sol),
-          "TOPOPT_SOLVER=today is today's solver, byte for byte");
-    CHECK(today.ok && bad1.ok && same_bytes(today.sol, bad1.sol),
-          "an out-of-range weight runs today's solver, byte for byte");
-    CHECK(today.ok && bad2.ok && same_bytes(today.sol, bad2.sol),
-          "an unknown value runs today's solver, byte for byte");
+    // The default IS cheb:2 (B-05, the close-out 11-28), byte for byte; the
+    // pre-stage-5 fixed weight is not the default.
+    const Run def = solve(c, nullptr);
+    const Run c2 = solve(c, "cheb:2");
+    CHECK(def.ok && c2.ok && same_bytes(def.sol, c2.sol) &&
+              def.info.iterations == c2.info.iterations,
+          "the default solver is cheb:2, byte for byte");
+    CHECK(def.ok && today.ok && !same_bytes(def.sol, today.sol),
+          "the pre-stage-5 smoother is not the default");
     CHECK(tuning_is_default(), "the tuning is the default after every solve");
   }
 

@@ -108,8 +108,8 @@ int main() {
     check(!t.deepest, "shipped builder stops at the first level under the cap");
     check(t.coarse_dof_cap == 6000,
           "shipped coarsest-level DOF cap is kMgCoarseDofCap == 6000");
-    check(t.smoother == MgSmoother::ScalarJacobi,
-          "shipped smoother is SCALAR damped Jacobi, not point-block");
+    check(t.smoother == MgSmoother::Chebyshev4 && t.cheb_degree == 2,
+          "shipped smoother is the stage-5 Chebyshev of degree 2 (B-05, ruled 11-26)");
   }
 
   // ------------------------------------------------------------------
@@ -200,7 +200,7 @@ int main() {
               back.cycle_gamma == 1 && back.coarse_extra_smooth == 0 &&
               back.max_levels == 0 && !back.deepest &&
               back.coarse_dof_cap == 6000 &&
-              back.smoother == MgSmoother::ScalarJacobi,
+              back.smoother == MgSmoother::Chebyshev4 && back.cheb_degree == 2,
           "mg_reset_tuning restores EVERY field to the shipped recipe");
   }
 

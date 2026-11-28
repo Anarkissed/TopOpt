@@ -389,8 +389,9 @@ static_assert(!fea_detail::MgTuning{}.deepest,
               "MgTuning default must stop at the shipped DOF cap");
 static_assert(fea_detail::MgTuning{}.coarse_dof_cap == kMgCoarseDofCap,
               "MgTuning default coarse_dof_cap must be the shipped kMgCoarseDofCap");
-static_assert(fea_detail::MgTuning{}.smoother == fea_detail::MgSmoother::ScalarJacobi,
-              "MgTuning default smoother must be the shipped scalar damped Jacobi");
+static_assert(fea_detail::MgTuning{}.smoother == fea_detail::MgSmoother::Chebyshev4 &&
+                  fea_detail::MgTuning{}.cheb_degree == 2,
+              "MgTuning default smoother must be the stage-5 Chebyshev of degree 2 (B-05)");
 
 // --- Coarse-space seam (task: hybrid-amg-coarsening-probe) -------------------
 // The harness-only override for how levels 2.. are built (see the long note in
@@ -951,7 +952,7 @@ std::vector<Level> build_hierarchy_from_prolongators(
     const std::vector<fea_detail::MgCoo>& Ps) {
   const fea_detail::MgTuning& t = g_mg_tuning;
   if (Ps.empty()) return {};
-  if (t.smoother != fea_detail::MgSmoother::ScalarJacobi) return {};
+  if (t.smoother == fea_detail::MgSmoother::PointBlockJacobi) return {};
 
   std::vector<Level> levels;
   Level one;
@@ -1069,6 +1070,8 @@ Vec v_cycle(const std::vector<Level>& levels, int l, const Vec& b,
 // ||b - A x|| / ||b|| <= tol (matching Eigen's CG criterion). Returns false and
 // leaves diagnostics in *iters/*resid if it does not converge within max_it or
 // the iterate goes non-finite (the caller then falls back).
+void set_level_lambdas(std::vector<Level>& levels, const MgOpts& o, int iters, double safety);
+
 bool mgpcg(const std::vector<Level>& levels, const Vec& b, double tol,
            int max_it, Vec& x, int& iters, double& resid) {
   const SpMat& A = levels[0].A;
@@ -1230,6 +1233,8 @@ FeaSolution solve_reduced_mgcg(const ReducedSystem& s, const VoxelGrid& grid,
                         /*frugal=*/false, g_mg_tuning.max_levels,
                         /*global_level0=*/0);
     diag.hier_built = !levels.empty();  // fallback-mode diagnostics (handoff 128)
+    set_level_lambdas(levels, mg_opts_now(), g_mg_tuning.lambda_iters,
+                      g_mg_tuning.lambda_safety);  // B-05: the same smoother as the matrix-free path
 
     bool solved = false;
     Vec xg;
@@ -2171,7 +2176,7 @@ bool build_mf_hierarchy_algebraic(const MatfreeReduced& m, int nnx, int nny,
   // The POINT-BLOCK smoother needs a nodal structure a general aggregation does
   // not have below level 1, so it is REFUSED here rather than approximated —
   // the same rule build_hierarchy_from_prolongators applies.
-  if (tune.smoother != fea_detail::MgSmoother::ScalarJacobi) {
+  if (tune.smoother == fea_detail::MgSmoother::PointBlockJacobi) {
     st.refused = true;
     st.refuse_reason = "point-block smoother is not available on algebraic levels";
     g_mg_alg_stats = st;
@@ -2516,74 +2521,19 @@ void set_smoother_lambdas(MfHierarchy& H, const MgOpts& o, int iters, double saf
   }
 }
 
-// TO STAGE 5 SWITCH (docs/design/to-rebuild/stages/stage-5-faster-solves.md,
-// 02-plan.md section 3: one temporary switch per stage, deleted with the old
-// path at the stage's close-out). TOPOPT_SOLVER selects the smoother under
-// test; unset, empty or "today" = today's solver, byte-identical:
-//   "jacobi:F"  damped Jacobi, weight F / lambda_level on every level (F < 2)
-//   "cheb:K"    4th-kind Chebyshev of degree K on every level
-// optionally followed by ",safety=S" (lambda bound factor, default 1.1) and
-// ",iters=N" (power iterations, default 12). Read once per solve; an unknown
-// value is reported once and runs today's solver.
-bool parse_stage5_solver(const char* v, fea_detail::MgTuning& t) {
-  const std::string s(v);
-  std::size_t pos = s.find(',');
-  const std::string head = s.substr(0, pos);
-  if (head.rfind("jacobi:", 0) == 0) {
-    const double f = std::atof(head.c_str() + 7);
-    if (!(f > 0.0 && f < 2.0)) return false;
-    t.smoother = fea_detail::MgSmoother::ScalarJacobi;
-    t.omega_over_lambda = f;
-  } else if (head.rfind("cheb:", 0) == 0) {
-    const int k = std::atoi(head.c_str() + 5);
-    if (k < 1 || k > 16) return false;
-    t.smoother = fea_detail::MgSmoother::Chebyshev4;
-    t.cheb_degree = k;
-    t.omega_over_lambda = 0.0;
-  } else {
-    return false;
+// The same per-level bounds for an ASSEMBLED hierarchy (fea_solve_mgcg), so the
+// assembled reference smooths exactly as the matrix-free path does (B-05).
+void set_level_lambdas(std::vector<Level>& levels, const MgOpts& o, int iters, double safety) {
+  if (!o.lambda_smoother()) return;
+  if (iters < 1) iters = 1;
+  if (!(safety >= 1.0)) safety = 1.0;
+  for (Level& L : levels) {
+    if (L.coarsest) continue;
+    const double l = power_lambda_dinv_a(
+        L.n, L.Dinv, [&L](const Vec& x, Vec& y) { y = L.A * x; }, iters);
+    L.lambda = (l > 0.0 && std::isfinite(l)) ? safety * l : 0.0;
   }
-  while (pos != std::string::npos) {
-    const std::size_t next = s.find(',', pos + 1);
-    const std::string kv = s.substr(pos + 1, next == std::string::npos ? std::string::npos
-                                                                         : next - pos - 1);
-    if (kv.rfind("safety=", 0) == 0) t.lambda_safety = std::atof(kv.c_str() + 7);
-    else if (kv.rfind("iters=", 0) == 0) t.lambda_iters = std::atoi(kv.c_str() + 6);
-    else return false;
-    pos = next;
-  }
-  return t.lambda_safety >= 1.0 && t.lambda_iters >= 1;
 }
-
-// Installs the TOPOPT_SOLVER tuning for ONE solve and restores the previous
-// tuning on exit, so a harness's mg_set_tuning and every other caller see
-// exactly what they set. Inert (no copy, no install) when the variable is unset.
-struct Stage5SolverScope {
-  bool active = false;
-  fea_detail::MgTuning saved;
-  Stage5SolverScope() {
-    const char* v = std::getenv("TOPOPT_SOLVER");
-    if (v == nullptr || *v == '\0' || std::strcmp(v, "today") == 0) return;
-    fea_detail::MgTuning t = g_mg_tuning;
-    static thread_local std::string reported;
-    const bool ok = parse_stage5_solver(v, t);
-    if (reported != v) {
-      reported = v;
-      std::fprintf(stderr, "[mg] TOPOPT_SOLVER=%s: %s\n", v,
-                   ok ? "stage-5 smoother in use (per-level lambda bound, per solve)"
-                      : "NOT understood; today's solver runs");
-    }
-    if (!ok) return;
-    saved = g_mg_tuning;
-    g_mg_tuning = t;
-    active = true;
-  }
-  ~Stage5SolverScope() {
-    if (active) g_mg_tuning = saved;
-  }
-  Stage5SolverScope(const Stage5SolverScope&) = delete;
-  Stage5SolverScope& operator=(const Stage5SolverScope&) = delete;
-};
 
 // D4 on the V-cycle B as a stationary iteration: e <- (I - B A) e, normalised
 // in the A-norm. Returns rho_A(I - BA) (growth factor of the last step) and the
@@ -2954,10 +2904,6 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
   // build, the HIERARCHY build (the expensive part the 127 latch exists to skip),
   // the V-cycle loop and the Jacobi fallback are timed separately, because a
   // solve's `iterations` count describes only the last of those.
-  // TO stage 5's switch (TOPOPT_SOLVER): inert when unset; otherwise the
-  // smoother under test for exactly this solve, the caller's tuning restored on
-  // exit. First, so the hierarchy build and every cycle below see one recipe.
-  const Stage5SolverScope stage5_solver;
   const double t_entry = fea_detail::mf_steady_ms();
   const long long mv_entry = fea_matvec_count();
   {  // observation only: did THIS solve run with the island drop permitted?

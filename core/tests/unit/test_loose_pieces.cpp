@@ -230,6 +230,16 @@ Solve solve(const Fixture& F) {
 }  // namespace
 
 int main() {
+  // TO stage 5 close-out (11-28): the default smoother is now Chebyshev of
+  // degree 2, which converges on these fixtures, so the paths under test (the l1
+  // retry, the latch, the Jacobi-CG fallback) are reached only by the pre-stage-5
+  // fixed-weight Jacobi. Pinned on this thread (the solves' thread) for the test.
+  {
+    topopt::fea_detail::MgTuning old;
+    old.smoother = topopt::fea_detail::MgSmoother::ScalarJacobi;
+    old.omega_over_lambda = 0.0;
+    topopt::fea_detail::mg_set_tuning(old);
+  }
   const Fixture clean = make_fixture(false);
   const Fixture F = make_fixture(true);
   std::printf("      fixture: %dx%dx%d, %d loose pieces planted (%lld voxels): %d bars "

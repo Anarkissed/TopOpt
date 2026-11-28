@@ -79,9 +79,10 @@ add_executable(test_to_solver_bridge_way tests/unit/test_to_solver_bridge_way.cp
 target_link_libraries(test_to_solver_bridge_way PRIVATE topopt)
 add_test(NAME to_solver_bridge_way COMMAND test_to_solver_bridge_way)
 
-# Stage 5, B-05: the stable smoothers behind TOPOPT_SOLVER (per-level Jacobi and
-# 4th-kind Chebyshev, three settings each): converge on multigrid without the l1
-# retry, match a tight reference, identical bytes on a repeat, switch inert unset.
+# Stage 5, B-05: the stable smoothers (per-level Jacobi and 4th-kind Chebyshev,
+# three settings each; Chebyshev degree 2 the default since the close-out):
+# converge on multigrid without the l1 retry, match a tight reference, identical
+# bytes on a repeat, the default is cheb:2 byte for byte.
 add_executable(test_to_solver_smoother tests/unit/test_to_solver_smoother.cpp)
 target_link_libraries(test_to_solver_smoother PRIVATE topopt)
 target_include_directories(test_to_solver_smoother PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -150,6 +151,7 @@ add_test(NAME to_solver_connection_rule COMMAND test_to_solver_connection_rule)
 # design, a loaded piece cut loose): multigrid, no l1 retry, within a cycle budget; the cut-off load refused.
 add_executable(test_to_solver_shapes tests/unit/test_to_solver_shapes.cpp)
 target_link_libraries(test_to_solver_shapes PRIVATE topopt)
+target_include_directories(test_to_solver_shapes PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 add_test(NAME to_solver_shapes COMMAND test_to_solver_shapes)
 
 # Stage 1, M6 (LatticeReview for TOReview): on the strength grid, the protected skin against the lattice cubes, the

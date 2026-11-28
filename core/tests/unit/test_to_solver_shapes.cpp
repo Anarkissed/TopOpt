@@ -8,8 +8,8 @@
 //           void floor, about a tenth solid (four columns, braces, a top plate),
 //           held only at the four feet;
 //   loose   the dilute design plus a loaded cube cut off from every support.
-// Checks, with TOPOPT_SOLVER=cheb:2 (the ruled default, 11-26) and jacobi:1.6
-// (measured beside it):
+// Checks, with cheb:2 (the default since the stage-5 close-out, 11-28) and
+// jacobi:1.6 (measured beside it), set through the tests-only mg_set_tuning:
 //   * block, hole, bracket and dilute converge on multigrid with no l1 safe
 //     retry and no fallback, within a cycle budget (about twice the measured);
 //   * the loose design under the connection rule (FeaAnchorBySupportOnly) is
@@ -17,6 +17,8 @@
 
 #include "topopt/fea.hpp"
 #include "topopt/voxel.hpp"
+
+#include "fea/fea_matfree.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -153,9 +155,26 @@ struct Run {
   long long l1 = 0;
 };
 
+// "cheb:K" or "jacobi:F" (weight F / lambda per level).
+fea_detail::MgTuning tuning_for(const char* setting) {
+  fea_detail::MgTuning t;
+  const std::string s(setting);
+  if (s.rfind("jacobi:", 0) == 0) {
+    t.smoother = fea_detail::MgSmoother::ScalarJacobi;
+    t.omega_over_lambda = std::atof(s.c_str() + 7);
+  } else if (s.rfind("cheb:", 0) == 0) {
+    t.smoother = fea_detail::MgSmoother::Chebyshev4;
+    t.cheb_degree = std::atoi(s.c_str() + 5);
+  } else {
+    std::fprintf(stderr, "unknown setting %s\n", setting);
+    std::exit(2);
+  }
+  return t;
+}
+
 Run solve(const Case& c, const char* setting) {
   Run r;
-  setenv("TOPOPT_SOLVER", setting, 1);
+  fea_detail::mg_set_tuning(tuning_for(setting));
   fea_matfree_reset_mg_stagnation_latch();
   const long long l1_before = fea_matfree_mg_safe_engagements();
   try {
@@ -167,7 +186,7 @@ Run solve(const Case& c, const char* setting) {
     std::fprintf(stderr, "  %s %s threw: %s\n", c.name.c_str(), setting, e.what());
   }
   r.l1 = fea_matfree_mg_safe_engagements() - l1_before;
-  unsetenv("TOPOPT_SOLVER");
+  fea_detail::mg_reset_tuning();
   return r;
 }
 

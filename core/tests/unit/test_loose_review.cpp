@@ -137,6 +137,16 @@ bool bit_identical(const std::vector<double>& a, const std::vector<double>& b) {
 }  // namespace
 
 int main() {
+  // TO stage 5 close-out (11-28): the default smoother is now Chebyshev of
+  // degree 2, which converges on these fixtures, so the paths under test (the l1
+  // retry, the latch, the Jacobi-CG fallback) are reached only by the pre-stage-5
+  // fixed-weight Jacobi. Pinned on this thread (the solves' thread) for the test.
+  {
+    topopt::fea_detail::MgTuning old;
+    old.smoother = topopt::fea_detail::MgSmoother::ScalarJacobi;
+    old.omega_over_lambda = 0.0;
+    topopt::fea_detail::mg_set_tuning(old);
+  }
   // ---------------------------------------------------------------------------
   // R1: GenEO's setup never counts; a build that gives up leaves plain CG going.
   // ---------------------------------------------------------------------------
