@@ -20,6 +20,9 @@ public struct RunScreen: View {
     var onRetry: () -> Void
     /// ★ T5: the version this run makes ("v8"), for the card's overline "OPTIMIZING V8"; nil off the Library.
     var version: String? = nil
+    /// ★ TO rebuild A-05 (agreed 2026-11-25): the too-weak-as-drawn pop-up's Strengthen — the setup's own Strengthen, then
+    /// the run. nil: the pop-up offers Close alone.
+    var onStrengthen: (() -> Void)? = nil
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     /// ★ notes29: Reduce Motion, or Settings › Skip all animations.
@@ -30,12 +33,13 @@ public struct RunScreen: View {
     @ObservedObject private var mac = LatticeMacMake.shared
 
     public init(model: RunModel, materialName: String, resolution: Int,
-                onRetry: @escaping () -> Void = {}, version: String? = nil) {
+                onRetry: @escaping () -> Void = {}, version: String? = nil, onStrengthen: (() -> Void)? = nil) {
         self.model = model
         self.materialName = materialName
         self.resolution = resolution
         self.onRetry = onRetry
         self.version = version
+        self.onStrengthen = onStrengthen
     }
 
     public var body: some View {
@@ -158,6 +162,8 @@ public struct RunScreen: View {
                             .foregroundStyle(DS.Color.textPrimary.color)
                             .multilineTextAlignment(.center)
 
+                        // ★ TO rebuild stages 1-2: the report's own reason (its buttons below)
+                        let trueLoads: TrueLoadsFailure? = { if case .trueLoads(let f) = failure { return f }; return nil }()
                         let blocks = model.outcome?.reportJSON.flatMap(RunReportBlocks.decode(reportJSON:))   // Flexible (PR #362) H56h: redesign to strengthen (overnight plan 2026-10-25)
                         if blocks?.strengthen == nil {   // Flexible (PR #362) H56h: redesign to strengthen (overnight plan 2026-10-25) — a strengthen run's cards say what failed (the margin line would read 0.00×)
                         Text(failure.message)
@@ -170,12 +176,22 @@ public struct RunScreen: View {
 
                         HStack(spacing: DS.Space.m) {
                             PillButton("Close", style: .secondary) { model.dismissFailure() }
+                            if let t = trueLoads {
+                                // ★ TO rebuild: the same job again would say the same, so no Try Again; the too-weak
+                                // pop-up offers Strengthen (A-05)
+                                if t.offersStrengthen, let strengthen = onStrengthen {
+                                    PillButton(TrueLoadsWords.strengthenButton) { model.dismissFailure(); strengthen() }
+                                        .background(CornerPairStyle.publish("runFailureStrengthen"))
+                                        .accessibilityIdentifier("run-failure-strengthen")
+                                }
+                            } else {
                             // A stall didn't cancel the background solve — offer to let
                             // it keep running (an honest guard admits its own timeout).
                             if model.canKeepWaiting {
                                 PillButton("Keep waiting", style: .secondary) { model.keepWaiting() }
                             }
                             PillButton("Try Again") { model.dismissFailure(); onRetry() }
+                            }
                         }
                         .padding(.top, DS.Space.s)
                     }

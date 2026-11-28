@@ -525,6 +525,10 @@ public enum RunFailure: Equatable, Sendable {
     /// last design's own margin sentence when IT failed on strength (nil when it too was a refused file). Never the generic
     /// "not strong enough": the margins of a refused file passed.
     case allRefusedAtFinalCheck(lines: [String], lastTried: String?)
+    /// ★ TO rebuild stages 1-2 (TrueLoadsReport): the run's report says why no version was kept, in plain words — the part
+    /// as drawn is too weak (the pop-up offers Strengthen), it is too small for the nozzle, or the last version tried cut
+    /// the load's path to every anchor. Only when its key is in the report (each is absent unless core's switch is on).
+    case trueLoads(TrueLoadsFailure)
 
     /// The strength-margin minimum every accepted variant must clear (core
     /// `MinimizePlasticOptions.margin_stop` default / ROADMAP M5.3).
@@ -577,6 +581,7 @@ public enum RunFailure: Equatable, Sendable {
         case .solver: return "Optimization couldn’t finish"
         case .allRejectedOnMargin: return "Not strong enough to print"
         case .allRefusedAtFinalCheck: return "No print file passed the final check"
+        case .trueLoads(let f): return f.title
         }
     }
 
@@ -598,6 +603,8 @@ public enum RunFailure: Equatable, Sendable {
                 body += "\n\nThe last design the run tried: " + t.prefix(1).lowercased() + t.dropFirst()
             }
             return body
+        case .trueLoads(let f):
+            return f.message
         }
     }
 
@@ -1760,6 +1767,9 @@ public final class RunModel: ObservableObject {
                         lastTried: lastRefused ? nil : RunFailure.rejectionBody(
                             worstMargin: worst, effectiveMargin: terminal?.diagnosis?.marginEffective ?? worst,
                             violations: terminal?.minFeatureViolations ?? 0, diagnosis: terminal?.diagnosis))
+                } else if let why = TrueLoadsFailure.of(TrueLoadsReport.decode(reportJSON: o.reportJSON),
+                                                        terminalVF: terminal?.requestedVolumeFraction) {
+                    failure = .trueLoads(why)   // ★ TO rebuild stages 1-2: the report's own reason, in one centred pop-up
                 } else {
                 failure = .allRejectedOnMargin(
                     worstMargin: worst,
@@ -1772,6 +1782,13 @@ public final class RunModel: ObservableObject {
                 outcome = stamp(o)                         // authoritative final
                 progress = nil
                 phase = .succeeded
+                // ★ TO rebuild (his 2026-11-26: "Definitely a pop-up for when a part is too small for the nozzle"): the
+                // one centred pop-up recommending the nozzle that fits, or resin. A run that kept nothing says it in its
+                // failure pop-up instead (TrueLoadsFailure), so there is only ever one.
+                if let small = TrueLoadsReport.decode(reportJSON: o.reportJSON).tooSmall {
+                    let f = TrueLoadsFailure.tooSmall(small)
+                    AppPopups.shared.show(f.title, f.message)
+                }
             }
         case .failure(let error):
             // A solver error mid-run: keep variants that already streamed + were

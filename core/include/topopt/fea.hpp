@@ -976,6 +976,19 @@ FeaSolution fea_solve_mgcg_matfree(const VoxelGrid& grid,
                                    int max_iterations = 0, CgInfo* info = nullptr,
                                    const std::vector<char>* active_mask = nullptr,
                                    const FeaSolution* initial_guess = nullptr);
+// E-01: the same solve with its settings passed in (see SolverSettings).
+struct SolverSettings;
+class SolverRunState;
+FeaSolution fea_solve_mgcg_matfree(const VoxelGrid& grid,
+                                   const std::vector<double>& youngs_per_voxel,
+                                   double poisson,
+                                   const std::vector<DirichletBC>& bcs,
+                                   const std::vector<NodalLoad>& loads,
+                                   double tolerance, int max_iterations, CgInfo* info,
+                                   const std::vector<char>* active_mask,
+                                   const FeaSolution* initial_guess,
+                                   const SolverSettings& settings,
+                                   SolverRunState* run = nullptr);
 
 // Memory evidence (diagnostic): total nonzeros stored across the ASSEMBLED
 // operators of the multigrid hierarchy each solver builds for (grid, E, nu, bcs,
@@ -1090,6 +1103,17 @@ FeaSolution fea_solve_cg_matfree(const VoxelGrid& grid,
                                  CgInfo* info = nullptr,
                                  const FeaSolution* initial_guess = nullptr,
                                  const std::vector<char>* active_mask = nullptr);
+// E-01: the same solve with its settings passed in (see SolverSettings).
+FeaSolution fea_solve_cg_matfree(const VoxelGrid& grid,
+                                 const std::vector<double>& youngs_per_voxel,
+                                 double poisson,
+                                 const std::vector<DirichletBC>& bcs,
+                                 const std::vector<NodalLoad>& loads,
+                                 double tolerance, int max_iterations, CgInfo* info,
+                                 const FeaSolution* initial_guess,
+                                 const std::vector<char>* active_mask,
+                                 const SolverSettings& settings,
+                                 SolverRunState* run = nullptr);
 
 // Number of scalar (double) values the matrix-free operator stores to represent
 // the global stiffness K: exactly the single 24x24 reference element stiffness
@@ -1108,6 +1132,62 @@ std::size_t fea_matfree_operator_storage_doubles();
 // therefore a pure performance control, safe to change between solves; it never
 // affects the computed field. Thread-global (not per-call).
 int fea_set_matfree_threads(int n);
+
+// ---------------------------------------------------------------------------
+// E-01 (TO rebuild stage 5): ONE SOLVER SETTINGS VALUE, passed in.
+//
+// Every process- or thread-wide solver switch below (fea_set_matfree_threads,
+// the Galerkin block cache, mixed precision, the cubic lattice path, GenEO, the
+// Krylov recycling dials, the multigrid safe retry, re-arm period, parity pad and
+// algebraic level 1) is also a field here. The entry points that take a
+// SolverSettings run that ONE solve with exactly these values and leave every
+// global untouched, so two jobs in one process (the app running Flexible and a
+// topology run, say) cannot flip each other's solver mid-solve, and a solve's
+// result does not depend on what another caller set before it (test K).
+// The entry points without it read the globals, byte for byte as before; callers
+// move over one by one and the setters go when the last one has moved.
+// Defaults = the library defaults the setters start from.
+struct SolverSettings {
+  int matfree_threads = 0;                     // 0 = all hardware threads
+  bool galerkin_block_cache = false;
+  bool mixed_precision = false;
+  bool cubic_lattice = false;
+  bool geneo_twolevel = false;
+  bool krylov_recycling = false;
+  int krylov_recycle_dim = 16;                 // == kRecycleDefaultDim
+  int krylov_recycle_cycle = 1;
+  bool krylov_recycle_wrap_multigrid = false;
+  bool mg_safe_retry = true;
+  int mg_rearm_period = 0;
+  int mg_parity_pad_mode = 1;                  // 0 off, 1 auto, 2 force
+  bool mg_algebraic_level1 = false;
+};
+// The values the setters have made this thread's defaults (what an entry point
+// without a SolverSettings would use now): the starting point for a caller that
+// moves over and wants today's posture.
+SolverSettings fea_current_solver_settings();
+
+// E-01: a RUN's solver state, owned by the caller and handed to each solve of
+// that run: the multigrid stagnation latch and safe-retry latch, the Krylov
+// recycle basis and the GenEO basis, i.e. everything that makes one solve depend
+// on the ones before it. Two runs with their own SolverRunState share nothing; a
+// solve handed a FRESH one (a certification or a re-check, say) cannot depend on
+// which solves ran before it (test K). A solve handed none uses this thread's
+// default state, as the entry points without it always have (and the run-start
+// resets fea_matfree_reset_mg_stagnation_latch, fea_reset_krylov_recycle_space
+// and fea_reset_geneo_basis clear that default only).
+class SolverRunState {
+ public:
+  SolverRunState();
+  ~SolverRunState();
+  SolverRunState(const SolverRunState&) = delete;
+  SolverRunState& operator=(const SolverRunState&) = delete;
+  struct Impl;
+  Impl* impl() const { return impl_.get(); }
+
+ private:
+  std::unique_ptr<Impl> impl_;
+};
 
 // Enable the GALERKIN BLOCK CACHE in the matrix-free multigrid's coarse-operator
 // build (handoff 090). OPT-IN, DEFAULT OFF; returns the previous setting.
@@ -1450,6 +1530,67 @@ struct FeaLoosePieceRuleOff {
   FeaLoosePieceRuleOff(const FeaLoosePieceRuleOff&) = delete;
   FeaLoosePieceRuleOff& operator=(const FeaLoosePieceRuleOff&) = delete;
 };
+
+// THE CONNECTION RULE, support-only form (the reviewer's ruling 2026-11-26,
+// maintainer-approved; TO rebuild stage 5). Inside an FeaAnchorBySupportOnly a
+// piece is HELD only when it reaches a support (an engaged Dirichlet BC or
+// spring) through shared faces; a load no longer holds a piece (under
+// self-weight every node carries one, so the ruled rule took no floating piece
+// out). A loose piece that carries only its BODY load (registered with an
+// FeaBodyLoadScope) leaves the solve with that load. A loose piece that carries
+// ANY applied load never leaves the solve and its load is never dropped: the
+// solve throws FeaLoadUnheld at once, before any iteration ("the load has no
+// path to a mount", the rule of the lattice's load_unheld_share), and the
+// caller refuses the version. Without an FeaBodyLoadScope every load counts as
+// applied. Outside the scope every byte is as before. RAII, thread-local,
+// nestable; held by the run together with its body loads.
+void fea_matfree_anchor_support_only_enter();
+void fea_matfree_anchor_support_only_exit();
+struct FeaAnchorBySupportOnly {
+  FeaAnchorBySupportOnly() { fea_matfree_anchor_support_only_enter(); }
+  ~FeaAnchorBySupportOnly() { fea_matfree_anchor_support_only_exit(); }
+  FeaAnchorBySupportOnly(const FeaAnchorBySupportOnly&) = delete;
+  FeaAnchorBySupportOnly& operator=(const FeaAnchorBySupportOnly&) = delete;
+};
+
+// The solve's BODY load described per voxel: voxel_force[e] (N, length
+// voxel_count, 0 where nothing is weighed) is the force voxel e puts on its 8
+// nodes, an eighth each, along `direction` (normalized here). It describes loads
+// the caller ALSO put in the solve's `loads`: the solver only ever subtracts it
+// (a loose piece's own weight, under FeaAnchorBySupportOnly), never adds it, and
+// a node's load beyond its registered weight is an APPLIED load. Thread-local
+// and depth-counted like FeaIslandKeepMask (the previous registration comes back
+// at exit); the vector must outlive the scope.
+void fea_matfree_set_body_load(const std::vector<double>* voxel_force, Vec3 direction,
+                               const std::vector<double>** prev_force, Vec3* prev_direction);
+struct FeaBodyLoadScope {
+  FeaBodyLoadScope(const std::vector<double>& voxel_force, Vec3 direction) {
+    fea_matfree_set_body_load(&voxel_force, direction, &prev_force_, &prev_dir_);
+  }
+  ~FeaBodyLoadScope() { fea_matfree_set_body_load(prev_force_, prev_dir_, nullptr, nullptr); }
+  FeaBodyLoadScope(const FeaBodyLoadScope&) = delete;
+  FeaBodyLoadScope& operator=(const FeaBodyLoadScope&) = delete;
+ private:
+  const std::vector<double>* prev_force_ = nullptr;
+  Vec3 prev_dir_{0.0, 0.0, 0.0};
+};
+
+// Thrown by a matrix-free solve under FeaAnchorBySupportOnly when a piece that
+// reaches no support carries an applied load (see above). A SolverNonConvergence
+// (iterations 0, residual 0), so every optimiser's existing catch refuses THAT
+// rung with a well-formed result and the ladder goes on (TOReview 11-26);
+// `pieces` / `voxels` say how much of the part is cut off. Every throw also bumps
+// a thread-local counter that only grows (fea_matfree_load_unheld_count), and
+// fea_matfree_last_load_unheld reports the last one's size, so a caller reading
+// the counter before and after a rung can name the reason in plain words.
+struct FeaLoadUnheld : public SolverNonConvergence {
+  FeaLoadUnheld(const std::string& what_arg, int pieces_, long long voxels_)
+      : SolverNonConvergence(what_arg, 0, 0.0), pieces(pieces_), voxels(voxels_) {}
+  int pieces = 0;
+  long long voxels = 0;
+};
+long long fea_matfree_load_unheld_count();
+void fea_matfree_last_load_unheld(int* pieces, long long* voxels);
 
 // THE CONNECTION RULE, on a DESIGN (not a solve): the same classifier the
 // solves use — face-connected pieces of `solid` (non-zero = material; voxels

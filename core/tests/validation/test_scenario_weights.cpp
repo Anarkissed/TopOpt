@@ -14,7 +14,7 @@
 // connection is the material between the arms:
 //   (a) one scenario only, for context: the arms stay apart (two columns);
 //   (b) at 10 %, one carrying body and no fallback bridge;
-//   (c) the connection's material grows with the cross load, 10 % < 15 % < 20 %;
+//   (c) the connection's material grows with the cross load: 15 % >= 1.10 x 10 %, 20 % >= 0.95 x 15 %;
 //   (d) at every cross load each scenario is HELD (its connection, not the weak springs
 //       of its OFF anchor, carries it) and the design is accepted.
 // Eigen (minimize_plastic), OCCT-free.
@@ -204,7 +204,12 @@ int main() {
     }
     CHECK(at[0].bodies == 1 && at[0].bridges == 0,
           "(b) a cross load at the line joins the arms itself: one body, no fallback bridge");
-    CHECK(at[0].connection < at[1].connection && at[1].connection < at[2].connection,
+    // The reviewer's ruling of 2026-11-27 16:34Z: from 10 % to 15 % the connection must
+    // grow by a tenth or more; from 15 % to 20 % it must not shrink by more than a
+    // twentieth (measured 94.33 / 117.83 / 118.98: the last step is nearly flat, and a
+    // strict "grows" there was judging solver noise).
+    CHECK(at[1].connection >= 1.10 * at[0].connection &&
+              at[2].connection >= 0.95 * at[1].connection,
           "(c) the connection grows with the cross load");
     for (int c = 0; c < 3; ++c)
       CHECK(at[c].all_held && at[c].accepted,

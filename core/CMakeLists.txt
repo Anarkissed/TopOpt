@@ -352,6 +352,9 @@ if(Eigen3_FOUND)
   # drives the graded fea_solve_cg overload in assembly.cpp, so it is gated on
   # Eigen the same way. CI has Eigen (DEPS=ON), so it always builds in CI.
   target_sources(topopt PRIVATE src/simp/simp.cpp)
+  # The shared solve pieces moved out of simp.cpp (TO rebuild stage 5): Eigen-gated
+  # with it.
+  target_sources(topopt PRIVATE src/simp/to_solve.cpp)
   # minimize_plastic end-to-end driver (M5.3): self-weight + volume-fraction
   # ladder stopping at margin < 1.5. Drives simp_optimize / simp_compliance, so
   # it is gated on Eigen like simp.cpp. CI has Eigen (DEPS=ON), so it always
@@ -2331,7 +2334,10 @@ endif()
 # needs only Eigen (traction_loads / minimize_plastic_solved_grid). That is what
 # lets an STL/3MF part run the full load-case pipeline on a slice without OCCT.
 if(Eigen3_FOUND)
-  target_sources(topopt PRIVATE src/cli/loadcase.cpp)
+  target_sources(topopt PRIVATE src/cli/loadcase.cpp
+    src/fea/face_loads.cpp      # TO rebuild stage 1: loads from the drawn face
+    src/simp/stress_measure.cpp   # TO rebuild stage 2: stress read over a fixed size
+    src/simp/printed_mass.cpp)    # TO rebuild stage 2: printed grams at walls and infill
 endif()
 
 if(OpenCASCADE_FOUND AND Eigen3_FOUND)

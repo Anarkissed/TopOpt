@@ -1814,7 +1814,14 @@ public struct WorkspacePlaceholder: View {
                       materialName: project.material,
                       resolution: runResolution,
                       onRetry: { startRun(lattice: startedRunWithLattice) },   // ★ B3: the run that failed, as it was
-                      version: versionLabel)   // ★ T5: the card's overline names it
+                      version: versionLabel,   // ★ T5: the card's overline names it
+                      onStrengthen: {   // ★ TO rebuild A-05: the setup's own [Minimize │ Strengthen] (its guard too), then the run
+                          if project.minimizePlastic, StrengthenRoute.line(workerSelected: compute.wantsRemote) != nil {
+                              model.toast = StrengthenRoute.onDeviceToast; return
+                          }
+                          project.minimizePlastic = false
+                          startRun(lattice: false)
+                      })
                 // ★ notes25: the print file's chain ends while the cards' host is away (a full-screen page up, gravity being set)
                 // — its stop is still said at once in the centred pop-up
                 .onChange(of: run.phase) { ph in
@@ -1901,6 +1908,7 @@ public struct WorkspacePlaceholder: View {
                                                     orientation: project.buildOrientation, gravity: force.gravity),
                               chosenFace: !project.buildOrientation.isInferredFromGravity,
                               orientation: printOrientationHost(for: outcome),   // ★ notes27 P6/P7: "Print orientation"
+                              placeName: { [project] in project.padPlaceName($0) },   // ★ TO rebuild: each pad's face by its plain name
                               certify: stage == .lattice ? certifyCard : nil)   // ★ Organic cut 2: his certify wizard (★ notes25: the print file's, in the Lattice stage)
                     .ignoresSafeArea()
                     .onAppear { startCertifyWalk(); model.resultsMounted.mounted = true }   // ★ 11-23

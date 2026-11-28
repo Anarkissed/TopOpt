@@ -238,6 +238,8 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     model_grid = std::move(setup.grid);
     bcs = std::move(setup.bcs);
     options = std::move(setup.options);
+    options.top_skin_mm = job.loads.top_solid_mm;      // stage 2: the user's skins, for printed grams
+    options.bottom_skin_mm = job.loads.bottom_solid_mm;
     for (const ProductionLoadCase::LoadGroup& g : lc.load_groups)
       for (const int fid : g.face_ids) load_freeze_face_ids.push_back(fid);
   } else {
@@ -250,9 +252,11 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
         resolve_selectors(result.model, job.fixture_faces, "fixture_faces");
     std::size_t tagged = 0;
     for (const int f : result.fixture_face_ids)
-      tagged += model_is_mesh
-                    ? tag_mesh_face(model_grid, result.model, f, VoxelTag::Fixture)
-                    : tag_step_face(model_grid, result.model, f, VoxelTag::Fixture);
+      tagged += to_stage1_on()
+                    ? tag_face_by_stage(model_grid, result.model, f, VoxelTag::Fixture)
+                    : model_is_mesh
+                        ? tag_mesh_face(model_grid, result.model, f, VoxelTag::Fixture)
+                        : tag_step_face(model_grid, result.model, f, VoxelTag::Fixture);
     if (tagged == 0)
       throw JobError(
           "analyze: fixture faces tagged no voxels (resolution too coarse "
@@ -313,6 +317,9 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     throw JobError("analyze: --smooth requires a --mesh input to smooth");
 
   VoxelGrid design_grid = cert_grid;
+  // ONE JUDGE (to_stage_switch.hpp, TOPOPT_RECHECK=fill): each voxel's fill of the
+  // file being re-checked; empty when the switch is off or no file is analysed.
+  std::vector<double> file_fill;
   // The smoothed mesh, held until the applied build orientation is known (see
   // below). Empty unless --smooth ran.
   TriangleMesh pending_smoothed_mesh;
@@ -396,6 +403,8 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     // preserves the part's Fixture/Load tags at the domain offset, so the tag
     // carry-over below reads the same tags it always did.
     design_grid = voxelize_onto_grid(design_mesh, cert_grid);
+    if (recheck_fill_sub() > 0)
+      file_fill = file_fill_fractions(design_mesh, cert_grid, recheck_fill_sub());
     for (std::size_t i = 0; i < design_grid.tags.size(); ++i) {
       if (cert_grid.tags[i] == VoxelTag::Load) {
         // When WE smoothed, the loaded cap is restored solid (see above). For a raw
@@ -418,6 +427,36 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   std::vector<double> density(design_grid.voxel_count(), 0.0);
   for (std::size_t i = 0; i < density.size(); ++i)
     if (design_grid.tags[i] != VoxelTag::Empty) density[i] = 1.0;
+  // ONE JUDGE: the file's own fills, analysed by the form the loop's certificate
+  // uses (the exact fills at the same stiffness law), so the number shown after
+  // finishing and the number the loop accepted are one judge's. A voxel the file
+  // cuts with its centre OUTSIDE holds material too: it gets an element (Interior).
+  // Load and Fixture voxels keep what the block above gave them (a restored loaded
+  // cap stays whole). A voxel under the material floor is air.
+  if (file_fill.size() == density.size()) {
+    std::size_t cut = 0, added = 0;
+    for (std::size_t i = 0; i < density.size(); ++i) {
+      const VoxelTag tg = design_grid.tags[i];
+      if (tg == VoxelTag::Load || tg == VoxelTag::Fixture) continue;
+      const double f = file_fill[i];
+      if (f >= kStressMaterialFloor) {
+        if (tg == VoxelTag::Empty) {
+          design_grid.tags[i] = VoxelTag::Interior;
+          ++added;
+        }
+        density[i] = f < 1.0 ? f : 1.0;
+        if (f < 1.0) ++cut;
+      } else {
+        // Under the floor: air where the centre is outside; a centre-inside voxel
+        // that is all but empty keeps its element at the floor.
+        density[i] = tg == VoxelTag::Empty ? 0.0 : kStressMaterialFloor;
+      }
+    }
+    std::fprintf(stderr,
+                 "[recheck] one judge: the file's fills at %d per voxel edge; %zu cut voxel(s), "
+                 "%zu of them with their centre outside the file\n",
+                 recheck_fill_sub(), cut, added);
+  }
 
   // ── the certification load case (production config already on `options`) ─────
   // The production solver config + margin + gravity/build orientation were set on
@@ -469,6 +508,10 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   // on the identical rule. THE ONE builder (knockdown_spec_for) — shared with the
   // optimizer's per-rung gate and the on-device bridge so all three agree by
   // construction. width_aware defaults false → the scalar f^1.5 gate.
+  // TO rebuild stage 2 (see to_setup.inc); set here, after the load case has
+  // replaced the options.
+  if (strength_mode() == StrengthMode::Size || strength_mode() == StrengthMode::Surface)
+    options.stress_reading_mm = reading_size_for_job_mm(job.material);
   const KnockdownSpec knockdown = knockdown_spec_for(options);
 
   // ── THE single analysis solve — no optimization ─────────────────────────────
@@ -516,6 +559,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   std::optional<BuildFrameRotation> analyze_bake;
   if (bake_plan.bake) analyze_bake = build_frame_rotation(applied_build_dir);
   result.voxel_mass_grams = a.mass_grams;
+  result.voxel_mass_solid_grams = a.mass_grams_solid;  // TO rebuild stage 2
 
   {
     std::error_code ec;

@@ -44,6 +44,7 @@ void append_rung(MinimizePlasticResult& into, MinimizePlasticResult&& from) {
   take(into.rung_non_convergent, from.rung_non_convergent);
   take(into.rung_non_convergent_iteration, from.rung_non_convergent_iteration);
   take(into.rung_non_convergent_residual, from.rung_non_convergent_residual);
+  take(into.rung_non_convergent_tolerance, from.rung_non_convergent_tolerance);
   take(into.rung_diverged, from.rung_diverged);
   take(into.rung_diverged_iteration, from.rung_diverged_iteration);
   take(into.rung_diverged_c_ratio, from.rung_diverged_c_ratio);

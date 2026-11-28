@@ -659,7 +659,8 @@ JobDescription parse_job(const std::string& json_text, double safety_margin_floo
              "wall_loops",
              "layer_height_mm",
              "wall_line_width_mm", "wall_line_width_outer_mm",
-             "top_solid_layers", "bottom_solid_layers", "top_solid_mm", "bottom_solid_mm"},
+             "top_solid_layers", "bottom_solid_layers", "top_solid_mm", "bottom_solid_mm",
+             "pad_mm"},
         "loads");
     job.loads.present = true;
 
@@ -1142,6 +1143,14 @@ JobDescription parse_job(const std::string& json_text, double safety_margin_floo
           schema_fail(std::string("\"loads.") + key + "\" must be in [0, 1000] mm");
         *out = mm;
       }
+    }
+    // ★ TO rebuild stage 1: the Manual pad (JobLoadCase::pad_mm). Absent or negative =
+    // the automatic pad; > 0 = the typed depth in mm. Zero is no pad at all: refused.
+    if (const JsonValue* v = find_key(lv, "pad_mm")) {
+      const double mm = require_number(*v, "loads.pad_mm");
+      if (!std::isfinite(mm) || mm == 0.0 || mm > 1000.0)
+        schema_fail("\"loads.pad_mm\" must be in (0, 1000] mm (a typed pad) or negative (automatic)");
+      job.loads.pad_mm = mm;
     }
   } else {
     // Self-weight mode: fixture_faces (required, non-empty geometric selectors).

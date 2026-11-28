@@ -442,6 +442,7 @@ KnockdownSpec knockdown_spec_for(const MinimizePlasticOptions& opts) {
   knockdown.infill_knockdown = infill_margin_knockdown(opts.infill_percent);
   knockdown.width_aware = opts.width_aware_knockdown;
   knockdown.infill_percent = opts.infill_percent;
+  knockdown.stress_reading_mm = opts.stress_reading_mm;  // TO rebuild stage 2; 0 = today
   // Slicer wall-ring thickness (handoff line-width-plumbing). Bambu Studio / OrcaSlicer
   // deposit the single OUTER perimeter at its own line width and the remaining
   // (wall_loops - 1) INNER loops at wall_line_width_mm, so the faithful ring is
@@ -458,6 +459,8 @@ KnockdownSpec knockdown_spec_for(const MinimizePlasticOptions& opts) {
       opts.wall_loops > 0
           ? outer_w + static_cast<double>(opts.wall_loops - 1) * inner_w
           : 0.0;
+  knockdown.top_skin_mm = opts.top_skin_mm;
+  knockdown.bottom_skin_mm = opts.bottom_skin_mm;
   return knockdown;
 }
 
@@ -809,6 +812,12 @@ void configure_production_options(MinimizePlasticOptions& opts) {
   // precision flip so "production run configured" implies one known thread count,
   // which run_info.json echoes as matfree_threads. A caller may override afterwards.
   fea_set_matfree_threads(production_matfree_thread_count());
+  // E-01 (TO rebuild stage 5): the same posture as ONE value the run carries to
+  // every solve (SimpOptions::solver_settings). Read back from the switches just
+  // set, so it is identical to them; the setters above stay until every caller
+  // passes the value.
+  opts.simp.solver_settings = fea_current_solver_settings();
+  opts.simp.use_solver_settings = true;
 }
 
 std::vector<double> production_reduction_ladder() {

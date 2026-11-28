@@ -1088,6 +1088,13 @@ struct JobLoadCase {
   int bottom_solid_layers = -1;              // loads.bottom_solid_layers
   double top_solid_mm = -1.0;                // loads.top_solid_mm
   double bottom_solid_mm = -1.0;             // loads.bottom_solid_mm
+  // ★ TO rebuild stage 1 (For #362 item 6; his ruling 2026-11-26: "Automatic pad at
+  // strength 0.2 as Auto: Yes (Manual mode = typed depth in mm)"): the MANUAL pad, the
+  // typed depth in mm frozen behind each fixed or loaded face on the drawn-face path.
+  // Absent or negative (the default) = the automatic pad; > 0 = the typed depth. The
+  // job key for what TOPOPT_PAD_MM carries today; read by the TO rebuild where it
+  // reads TOPOPT_PAD_MM. Nothing in this build reads it yet.
+  double pad_mm = -1.0;                      // loads.pad_mm
 };
 
 // An axis-aligned box in model space (mm), min <= max componentwise — a design
@@ -1565,6 +1572,9 @@ struct AnalyzeJobResult {
   bool analyzed_mesh = false;          // true iff a substitute mesh was re-voxelized
   std::string analyzed_mesh_path;      // that mesh's path ("" when analyzing the solid)
   double voxel_mass_grams = 0.0;       // analysis.mass_grams (the re-analyzed voxel mass)
+  // TO rebuild stage 2: the same voxels printed solid (analysis.mass_grams_solid);
+  // equal to voxel_mass_grams on today's path.
+  double voxel_mass_solid_grams = 0.0;
   double mesh_mass_grams = 0.0;        // enclosed-volume mass of the analysed mesh (0 if solid)
   double margin_required = 0.0;        // the margin_stop the gate USED (job.margin_stop in
                                        // self-weight mode; the production default in loadcase

@@ -153,6 +153,49 @@ int mf_thread_count();  // effective count actually used (>= 1)
 void mf_parallel_ranges(int begin, int end, int min_per_thread,
                         const std::function<void(int, int)>& body);
 
+// E-01: the SolverSettings a solve was handed (fea.hpp), installed for exactly
+// that solve on its thread; nullptr = none (the globals, as before). Every switch
+// accessor (mf_thread_count, rc_enabled, geneo_enabled, ...) reads it first.
+const SolverSettings* mf_settings_override();
+int mf_thread_count_setting();  // the stored setting (0 = all hardware threads)
+
+// E-01: a run's state (fea.hpp SolverRunState), one part per module, installed for
+// exactly one solve by RunStateScope; nullptr = this thread's default state.
+struct MgRunState;
+struct RcRunState;
+struct GeneoRunState;
+MgRunState* mg_new_run_state();
+void mg_delete_run_state(MgRunState* r);
+MgRunState* mg_set_run_override(MgRunState* r);
+RcRunState* rc_new_run_state();
+void rc_delete_run_state(RcRunState* r);
+RcRunState* rc_set_run_override(RcRunState* r);
+GeneoRunState* geneo_new_run_state();
+void geneo_delete_run_state(GeneoRunState* r);
+GeneoRunState* geneo_set_run_override(GeneoRunState* r);
+class RunStateScope {
+ public:
+  explicit RunStateScope(SolverRunState* run);  // run == nullptr: no change
+  ~RunStateScope();
+  RunStateScope(const RunStateScope&) = delete;
+  RunStateScope& operator=(const RunStateScope&) = delete;
+
+ private:
+  bool on_ = false;
+  MgRunState* mg_ = nullptr;
+  RcRunState* rc_ = nullptr;
+  GeneoRunState* geneo_ = nullptr;
+};
+class SolverSettingsScope {
+ public:
+  explicit SolverSettingsScope(const SolverSettings& s);
+  ~SolverSettingsScope();
+  SolverSettingsScope(const SolverSettingsScope&) = delete;
+  SolverSettingsScope& operator=(const SolverSettingsScope&) = delete;
+ private:
+  const SolverSettings* prev_;
+};
+
 // Galerkin block cache toggle (handoff 090; public face:
 // fea_set_matfree_galerkin_block_cache). Opt-in, default OFF. Read by the
 // matrix-free multigrid's coarse-operator build in multigrid.cpp; it changes only
@@ -272,7 +315,17 @@ struct MatfreeReduced {
   std::vector<double> up;           // full field seeded with prescribed values
   std::vector<double> rg;           // ng reduced RHS
   std::vector<double> invdiag;      // ng Jacobi inverse diagonal (matrix-free)
-  // Reused full-length scratch for the matvec.
+  // B-06 (TO rebuild stage 5): the element product works in the REDUCED system.
+  // g2r maps every global DOF to its kept id, and every fixed or void DOF to the
+  // spare slot ng; xr / yr are ng+1 long (xr[ng] = 0, yr[ng] is scratch). The
+  // apply then gathers and scatters straight through the map: no full-length
+  // copies, no branch, and the same per-DOF summation order, so y is bit-identical
+  // to the full-length path. Built when the system has no cubic elements and no
+  // springs (both still apply on full-length vectors); empty otherwise.
+  std::vector<int> g2r;
+  mutable std::vector<double> xr, yr;
+  // Reused full-length scratch for the matvec: only for systems with cubic
+  // elements or springs (g2r empty).
   mutable std::vector<double> xfull, yfull;
   // Reused full-length FP32 scratch for the mixed-precision matvec, sized lazily
   // on first use so the FP64-only path never allocates it (handoff 092).
@@ -441,6 +494,13 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
 enum class MgSmoother {
   ScalarJacobi = 0,      // x <- x + omega*Dinv.*(b - A x)  (SHIPPED)
   PointBlockJacobi = 1,  // per-node 3x3 block inverse (Peetz & Elbanna)
+  // TO stage 5 (B-05): 4th-kind Chebyshev of degree `cheb_degree` in D^-1 A
+  // (Lottes 2023, arXiv 2202.08830; Phillips & Fischer 2022, arXiv 2210.03179),
+  // on [0, rho] with rho = `lambda_safety` x the level's power-iteration
+  // estimate of lambda_max(D^-1 A). A polynomial in D^-1 A is A-self-adjoint, so
+  // equal pre and post smoothing keeps the cycle SPD. Needs only an UPPER bound,
+  // and an over-estimate costs little, so no lower eigenvalue bound is guessed.
+  Chebyshev4 = 2,
 };
 
 struct MgTuning {
@@ -468,6 +528,18 @@ struct MgTuning {
   // reject outright; raising it is what makes those cells measurable at all.
   int coarse_dof_cap = 6000;  // == kMgCoarseDofCap
   MgSmoother smoother = MgSmoother::ScalarJacobi;
+  // TO stage 5 (B-05). Damped Jacobi weighted PER LEVEL: omega_level =
+  // omega_over_lambda / lambda_level, stable for omega_over_lambda < 2 whatever
+  // the level's lambda_max(D^-1 A) (the shipped fixed 0.6 is unstable above
+  // lambda 3.33; his parts measure 4.4 to 9.9). 0 = the fixed `omega` (shipped).
+  double omega_over_lambda = 0.0;
+  // Chebyshev4's polynomial degree (operator applies per smoothing step).
+  int cheb_degree = 2;
+  // lambda_level = lambda_safety x the power-iteration estimate (which approaches
+  // lambda_max from below) over `lambda_iters` iterations. Computed per solve,
+  // after the hierarchy is built, so no state crosses solves.
+  double lambda_safety = 1.1;
+  int lambda_iters = 12;
 };
 
 // The tuning in force on THIS thread. Thread-local, like the stagnation latch
@@ -670,6 +742,8 @@ struct MgIslandCensus {
   double floor_e = 0.0;
   double ms = 0.0;                 // the flood fill's wall time
   std::vector<int> drop;
+  int loaded_loose = 0;            // support-only rule: loose pieces with an applied load
+  long long loaded_loose_voxels = 0;
 };
 MgIslandCensus mg_island_census(const VoxelGrid& grid,
                                 const std::vector<double>& elem_youngs,
@@ -690,6 +764,10 @@ struct MgLooseStats {
   int last_pieces = 0, last_loose = 0, last_frozen_loose = 0;
   long long last_loose_voxels = 0;
   int majority_warnings = 0;
+  int last_loaded_loose = 0;              // support-only rule: loose pieces with an applied load
+  long long last_loaded_loose_voxels = 0;
+  long long loaded_loose_solves = 0;
+  double last_body_removed = 0.0;         // support-only rule: loose weight taken out (N)
 };
 const MgLooseStats& mg_loose_stats();
 // TEST ONLY — never called by production code. false turns the connection rule

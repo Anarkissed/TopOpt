@@ -1050,7 +1050,8 @@ int64_t tag_step_face(const std::string& step_path, int face_id,
     topopt::VoxelGrid g = topopt::voxelize(model.mesh, resolution);
     const topopt::VoxelTag tag =
         as_fixture ? topopt::VoxelTag::Fixture : topopt::VoxelTag::Load;
-    return static_cast<int64_t>(topopt::tag_step_face(g, model, face_id, tag));
+    // TO rebuild stage 1: the stage switch picks today's voxel rule or the drawn face.
+    return static_cast<int64_t>(topopt::tag_face_by_stage(g, model, face_id, tag));
   });
 }
 
@@ -1066,8 +1067,9 @@ int64_t mask_step_face(const std::string& step_path, int face_id,
     topopt::VoxelGrid g = topopt::voxelize(model.mesh, resolution);
     topopt::DesignMask mask = topopt::make_active_mask(g);
     const auto mv = static_cast<topopt::MaskValue>(mask_value);
-    return static_cast<int64_t>(
-        topopt::mask_step_face(g, model, face_id, mv, depth_voxels, mask));
+    // TO rebuild stage 1: the run freezes by true distance (mm) with the switch on.
+    return static_cast<int64_t>(topopt::mask_face_by_stage(
+        g, model, face_id, mv, depth_voxels, depth_voxels * g.spacing, mask));
   });
 }
 
@@ -1094,8 +1096,9 @@ bool face_slab_preview(const std::string& step_path, FaceSlabPreview& io,
       const int depth_vox = std::max(
           1, static_cast<int>(std::lround(depths_mm[i] / g.spacing)));
       topopt::DesignMask one = topopt::make_active_mask(g);
-      voxels_out.push_back(static_cast<int64_t>(topopt::mask_step_face(
-          g, model, fid, topopt::MaskValue::FrozenSolid, depth_vox, one)));
+      // TO rebuild stage 1: layers on today's path, the mm asked with the switch on.
+      voxels_out.push_back(static_cast<int64_t>(topopt::mask_face_by_stage(
+          g, model, fid, topopt::MaskValue::FrozenSolid, depth_vox, depths_mm[i], one)));
     }
     return true;
   }, [&](const std::string& why) -> bool {

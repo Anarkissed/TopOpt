@@ -23,6 +23,8 @@
 #include <cstddef>
 #include <vector>
 
+#include "topopt/file_fill.hpp"       // one judge: the file re-check's fills, for callers
+#include "topopt/stress_measure.hpp"  // kStressSizeSwitchVoxels, for callers of the reading
 #include "topopt/build_orientation.hpp"  // BuildOrientationReport (post-pass)
 #include "topopt/fea.hpp"        // DirichletBC, NodalLoad
 #include "topopt/lattice.hpp"    // LatticeTopology (lattice certification)
@@ -106,15 +108,34 @@ struct KnockdownSpec {
   bool width_aware = false;
   double infill_percent = 100.0;
   double wall_thickness_mm = 0.0;
+  // TO rebuild stage 2: the solid top / bottom skins for the printed grams, mm;
+  // < 0 = the usual ones (kStage2TopSkinMm / kStage2BottomSkinMm). No solve reads them.
+  double top_skin_mm = -1.0;
+  double bottom_skin_mm = -1.0;
   // The infill curve's exponent and floor, as the width-aware per-voxel core term reads them (Install 3: the
   // strength check's settings). The defaults ARE infill_margin_knockdown's constants, so every caller that leaves
   // them is byte-for-byte as before.
   double infill_exponent = 1.5;
   double infill_floor = 1e-3;
+  // TO rebuild stage 2 (TOPOPT_STRENGTH=size): the size in mm the deciding stress
+  // is read over (stress_measure.hpp). 0, the default, reads the single hottest
+  // voxel, byte for byte as before.
+  double stress_reading_mm = 0.0;
+  // TO rebuild stage 2: also record the stress of the voxels the surface CUTS
+  // (fill between kStressMaterialFloor and iso) in von_mises_material_field, which
+  // a reading over a size needs (stress_measure.hpp). Set by tests; a job reading
+  // over a size (TOPOPT_STRENGTH=size) records it whatever this says.
+  bool record_material_stress = false;
 };
 
 // Install 3: numbers of the analysis that the new engine's strength check lets a job set (strength_settings).
 // Null (the default, every other caller): the constants below, byte-for-byte.
+// See analyze_fixed_design's `stress_view`.
+struct StressView {
+  VoxelGrid grid;
+  std::vector<double> density;
+};
+
 struct AnalysisKnobs {
   int contact_rounds = 6;                           // bearing anchors: most contact solves
   double sliding_share_max = 0.05;                  // == kAnchorsSlidingShare
@@ -134,6 +155,12 @@ struct FixedDesignAnalysis {
   // Per-voxel von Mises stress over the PRINTED material (density > iso),
   // grid-indexed (grid.voxel_count()), MPa; zero off the printed set.
   std::vector<double> von_mises_field;
+  // TO rebuild stage 2: von_mises_field PLUS the stress of the material in the
+  // voxels the surface cuts (fill above kStressMaterialFloor, under iso), which a
+  // reading over a size averages too. Empty unless a size is read or
+  // KnockdownSpec::record_material_stress is set. MPa; lattice and loose voxels
+  // as in von_mises_field.
+  std::vector<double> von_mises_material_field;
   // Per-voxel Cauchy stress tensor, flattened grid-indexed (6*voxel_count),
   // Voigt [xx,yy,zz,xy,yz,zx], TRUE shear, MPa; zero off the printed set.
   std::vector<double> stress_tensor_field;
@@ -141,10 +168,35 @@ struct FixedDesignAnalysis {
   // mm; zero on nodes attached only to non-printed voxels.
   std::vector<double> displacement_field;
   double mass_grams = 0.0;
+  // TO rebuild stage 2: the same material printed solid (what mass_grams was
+  // before the stage; equal to it on today's path).
+  double mass_grams_solid = 0.0;
   int support_volume_voxels = 0;
   std::size_t printed_voxels = 0;
   double printed_fraction = 0.0;  // printed_voxels / part_solid (0 if part_solid==0)
   double max_von_mises = 0.0;
+  // TO rebuild stage 2: the single hottest voxel, kept beside `max_von_mises`
+  // when that one is read over a size (the engineers' second, softer warning).
+  // Equal to max_von_mises on today's path.
+  double max_von_mises_one_voxel = 0.0;
+  // TO rebuild stage 2 (ruling item 6): which form this analysis used. The size in
+  // mm the deciding stress was read over; 0 = one voxel (today's solve and reading),
+  // which is also what a size under kStressSizeSwitchVoxels check voxels gets.
+  double stress_read_over_mm = 0.0;
+  // The size form's two populations (0 unless a size was read): voxels whose member
+  // is thick enough to be read over the size, and printed voxels that fell back to
+  // today's one-voxel reading because their member is thinner than
+  // kStressThinMemberSizes sizes.
+  std::size_t stress_thick_member_voxels = 0, stress_thin_member_voxels = 0;
+  // TO rebuild stage 2, TOPOPT_STRENGTH=surface only (0 otherwise): the surface
+  // reading's counts (stress_measure.hpp, SurfaceCarry) for the readout: concave
+  // points too tight for the grid, points with too few full voxels behind them,
+  // points on a loaded face; the largest value the surface reading gave; and the
+  // printed voxels whose member is under kSurfaceResolvedThroughVoxels voxels through
+  // (0 where no member width was measured on that path).
+  std::size_t surface_tight_points = 0, surface_unresolved_points = 0, surface_loaded_points = 0;
+  double surface_read_peak = 0.0;
+  std::size_t surface_thin_voxels = 0;
   double max_interlayer_tension = 0.0;
   StressMargin margin;  // SOLID margin (the reported/displayed value)
   V3Report v3;          // §7 V3 suite on the fixed density (min-feature count, mesh, ...)
@@ -430,7 +482,14 @@ FixedDesignAnalysis analyze_fixed_design(
     // other case, including an armed gate the law could not evaluate.
     bool gate_on_strut_strength = false,
     // Install 3: the strength check's numbers (AnalysisKnobs). Null: the constants, as before.
-    const AnalysisKnobs* knobs = nullptr);
+    const AnalysisKnobs* knobs = nullptr,
+    // TO rebuild stage 2, TOPOPT_STRENGTH=surface only (null everywhere else, which is
+    // byte-for-byte today): the grid and density the STRESS is solved and read on (the
+    // drawn faces at their fills; minimize_plastic's stress view). The solve, the
+    // stress fields and the margins use the view; the mass, the printed grams and
+    // counts, the support proxy and the V3 / exported density keep `grid` and
+    // `density`. Same dimensions as `grid`. Ignored when `lattice` is given.
+    const StressView* stress_view = nullptr);
 
 // ═══ THE MARGIN-REPRODUCTION BAND ═══════════════════════════════════════════
 // (task 2026-08-08-lattice-variant-margin-tolerance, S1)

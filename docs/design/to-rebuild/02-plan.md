@@ -31,7 +31,7 @@ Each stage leaves the app working, is measured on all reference parts with the S
 | 1. True loads and honest results | margins stop jumping with grid alignment; protection depth is the mm he typed; a failed part says why; no version appears and then vanishes | V-01, L-03, pad depth, A-05, R-07, R-08, P-15 | M | 0 | LatticeReview (shared tagging and certificate), #362 (bridge copy I-01, the plain line) |
 | 2. A strength number that holds | pass / fail no longer depends on resolution; weight is printed grams; infill is a real lever | A-02, A-01, M-07, R-04, ruling 3 | M-L | 1 | LatticeReview: the certificate is shared |
 | 3. Smooth surfaces | G2: surface from the function; drawn faces exact; no stair-steps, no snap creases | X-01, X-04, B-01, P-03, P-04, P-11, P-16, V-02, C-01 to C-03, I-02, F-01 | L | 0 (1 for the final numbers) | - |
-| 4. Rules inside the optimiser | smallest wall (two lines) and hole, drain, overhang, a bound on waviness, load paths kept connected; no after-the-fact patches | P-07, P-18, S-06, V-03, V-04, F-05 | L | 3 | - |
+| 4. Rules inside the optimiser | smallest wall (ONE line for a solid part, his word 2026-11-26; two lines is the lattice's rule) and hole, drain, overhang, a bound on waviness, load paths kept connected; no after-the-fact patches | P-07, P-18, S-06, V-03, V-04, F-05 | L | 3 | - |
 | 5. Faster solves | run time | E-05, B-05, B-06, S-05, M-04, P-05, B-03, P-10, X-03, F-04, E-01 | M-L | 0 (independent) | reviewer: the solver is shared with Flexible |
 | 6. Generative | G3: lightest part that meets the strength he set, several outcomes | M-05, L-04, R-01, R-03 to R-06, S-01 | L | 2, 4 | #362: job contract |
 | 7. Optimise THEN lattice | G4b on the new engine, one clean solid | M-06, A-04 (part), ruling 23:23Z | L | 2, 3 | JOINT with LatticeReview |
@@ -42,6 +42,16 @@ Each stage leaves the app working, is measured on all reference parts with the S
 Stage 0 "make room" comes first on purpose: today every stage would edit `run_job.cpp`, and the rule is no two agents in one file.
 
 Stages 3 and 5 do not depend on 1 and 2 and can run beside them if he approves helpers (Phase 5).
+
+### Added by the maintainer, 2026-11-27: finish fast, then keep going finer
+
+His words (11-26): "it should check the memory and compute and use that to determine the finest detail that can be done in the shortest amount of time. Then when done, can we make it so there is an option to keep going and get finer detail? ... That way we finish a version ASAP and the user decides if they want to wait more for more detail or not." 11-27: "Yes, add 'finish fast, then keep going finer' to the plan."
+
+What it is, in two parts:
+1. AUTOMATIC DETAIL. In Auto the resolution is chosen from the part (one voxel per wall-line width, `part_scale.hpp auto_resolution`) AND from the machine: the memory free and the speed measured on this device set the finest grid that finishes in a stated time. Manual keeps a typed resolution.
+2. KEEP GOING. When a run has finished, one button continues the SAME result at a finer grid, without starting over: the design is a smooth function that does not depend on the grid, so the finer pass starts from the finished coarse design and only refines it. The user sees a first result as early as possible and chooses whether to wait for more detail.
+
+Where it sits: after stage 3 (the surface comes from the function, so a finer pass has something exact to start from) and stage 5 (the speed and memory figures the choice rests on); built with stage 6 (the search) and shown in stage 9 (one button). Ledger: new item, to be numbered when stage 6 is planned. Open choices to settle by measurement then: the time budget for the first result; how much finer each "keep going" step is (x1.5 or x2); whether a finer pass may change the topology or only sharpen it; the memory test on the iPad against the Mac. Nothing is built for it yet; the stage's plain-words overview and plan go to him before code, as for every stage.
 
 ### The "best I can do" build
 

@@ -12,10 +12,16 @@
 //    mask_step_face); the test measures how deep the frozen material really goes.
 //    Rule 3: the typed mm within a tenth of a voxel.
 //
-// Today both follow whole voxels (ledger V-01 and L-03), so:
-//   no argument : MEASURE. Prints both tables; fails only on a broken run or a
-//                 total force that changed. This is what ctest runs until stage 1.
-//   --gate      : also fails outside the rules. Stage 1 switches ctest to it.
+// Each table has two halves: TODAY's path (whole voxels; ledger V-01 and L-03),
+// which is only reported, and the DRAWN-FACE path (face_loads.hpp, stage 1), which
+// is held to the rules:
+//   - the loaded area, its centre and the total force, exactly as drawn;
+//   - the protected depth as the frozen whole voxels show it (half a voxel at
+//     best, by construction) and as the per-voxel protected share shows it (the
+//     typed mm within a tenth of a voxel; what a stage that can hold a partly
+//     protected voxel will deliver).
+// The test fails when the drawn-face path breaks a rule. Today's path never
+// fails it.
 //
 // Pure C++/std: the model is built in code; no OCCT, no Eigen.
 #include <algorithm>
@@ -24,6 +30,7 @@
 #include <cstring>
 #include <vector>
 
+#include "topopt/face_loads.hpp"
 #include "topopt/face_region.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/mesh.hpp"
@@ -123,9 +130,31 @@ LoadRow measure_load(int res, double x0, double y0) {
   return r;
 }
 
+// The same patch through the drawn-face path.
+LoadRow measure_load_face(int res, double x0, double y0) {
+  LoadRow r;
+  r.res = res;
+  const StepModel model = build_block(x0, y0);
+  const VoxelGrid g = topopt::voxelize(model.mesh, res);
+  r.voxel = g.spacing;
+  topopt::FaceAreaReport rep;
+  const std::vector<topopt::NodeArea> areas = topopt::face_node_areas(
+      g, topopt::face_pieces(model, {F_PATCH}, 0.5 * g.spacing), &rep);
+  if (areas.empty()) return r;
+  for (const topopt::NodalLoad& l :
+       topopt::face_traction_loads(areas, Vec3{0.0, 0.0, kForce}))
+    if (l.component == 2) r.total += l.value;
+  r.area = rep.placed_area;
+  r.centre_off = std::hypot(rep.placed_centre.x - (x0 + 0.5 * kPatch),
+                            rep.placed_centre.y - (y0 + 0.5 * kPatch));
+  r.ok = true;
+  return r;
+}
+
 struct DepthRow {
   int res = 0;
   double voxel = 0.0, typed = 0.0, measured = 0.0;
+  double by_share = 0.0;  // drawn-face path only: depth the protected shares add up to
   bool ok = false;
 };
 
@@ -153,7 +182,173 @@ DepthRow measure_depth(int res, double typed_mm) {
   return r;
 }
 
+// The same protection through the drawn-face path.
+DepthRow measure_depth_face(int res, double typed_mm) {
+  DepthRow r;
+  r.res = res;
+  r.typed = typed_mm;
+  const double x0 = 20.37, y0 = 10.71;
+  const StepModel model = build_block(x0, y0);
+  const VoxelGrid g = topopt::voxelize(model.mesh, res);
+  r.voxel = g.spacing;
+  topopt::DesignMask mask(g.voxel_count(), topopt::MaskValue::Active);
+  std::vector<float> share;
+  topopt::mask_face_depth_mm(g, model, {F_PATCH}, typed_mm,
+                             topopt::MaskValue::FrozenSolid, mask, &share);
+  const int i = static_cast<int>((x0 + 0.5 * kPatch - g.origin.x) / g.spacing);
+  const int j = static_cast<int>((y0 + 0.5 * kPatch - g.origin.y) / g.spacing);
+  int lowest = -1;
+  double sum = 0.0;
+  for (int k = g.nz - 1; k >= 0; --k) {
+    if (g.solid(i, j, k) && mask[g.index(i, j, k)] == topopt::MaskValue::FrozenSolid)
+      lowest = k;
+    // A voxel's share counts only for the part of the voxel that is under the face.
+    const double z0 = g.origin.z + k * g.spacing;
+    const double under = std::min(std::max(kLz - z0, 0.0), g.spacing) / g.spacing;
+    sum += std::min(static_cast<double>(share[g.index(i, j, k)]), under);
+  }
+  if (lowest < 0) return r;
+  r.measured = kLz - (g.origin.z + lowest * g.spacing);
+  // Where the face stands above the highest solid voxel, that sliver of the part
+  // is not in the grid at all (a voxelisation matter, ledger V-02); it is under
+  // the face all the same.
+  int top = -1;
+  for (int k = 0; k < g.nz; ++k)
+    if (g.solid(i, j, k)) top = k;
+  const double missing = std::max(kLz - (g.origin.z + (top + 1) * g.spacing), 0.0);
+  r.by_share = missing + sum * g.spacing;
+  r.ok = true;
+  return r;
+}
+
 }  // namespace
+
+// The sideways lip (LatticeReview, 2026-11-25). The patch is PART of the flat
+// top. A depth by voxel layers stays in the prism under the patch; a depth by
+// true distance to the patch's triangles also reaches sideways under the
+// neighbouring face, by up to the depth. Counted here: the frozen voxels whose
+// centre lies outside the prism under the drawn patch, and how far the farthest
+// one is from it.
+struct LipRow {
+  double voxel = 0.0;
+  long long in_prism = 0, outside = 0;
+  double reach = 0.0;  // mm, sideways, of the farthest outside voxel
+};
+// way: 0 = today, by layers (a face); 1 = by true distance; 2 = today, by layers (a region).
+LipRow measure_lip(int res, double typed_mm, int way) {
+  LipRow r;
+  const double x0 = 20.37, y0 = 10.71;
+  const StepModel model = build_block(x0, y0);
+  const VoxelGrid g = topopt::voxelize(model.mesh, res);
+  r.voxel = g.spacing;
+  topopt::DesignMask mask(g.voxel_count(), topopt::MaskValue::Active);
+  if (way == 1)
+    topopt::mask_face_depth_mm(g, model, {F_PATCH}, typed_mm, topopt::MaskValue::FrozenSolid,
+                               mask);
+  else if (way == 2) {
+    // The region path the old lattice mask uses: the patch as a one-face region.
+    topopt::ResolvedFaceRegion region;
+    region.id = 1;
+    region.member_faces = {F_PATCH};
+    for (std::size_t t = 0; t < model.triangle_face.size(); ++t)
+      if (model.triangle_face[t] == F_PATCH) region.member_triangles.push_back(static_cast<int>(t));
+    for (int idx : topopt::cut_voxels(
+             g, topopt::region_member_voxels(g, model, region,
+                                             topopt::region_depth_layers(typed_mm, g.spacing)),
+             region.cuts))
+      mask[static_cast<std::size_t>(idx)] = topopt::MaskValue::FrozenSolid;
+  } else
+    topopt::mask_step_face(g, model, F_PATCH, topopt::MaskValue::FrozenSolid,
+                           topopt::region_depth_layers(typed_mm, g.spacing), mask);
+  for (int k = 0; k < g.nz; ++k)
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = 0; i < g.nx; ++i) {
+        if (mask[g.index(i, j, k)] != topopt::MaskValue::FrozenSolid) continue;
+        const topopt::Vec3 c = g.voxel_center(i, j, k);
+        const double dx = std::max({x0 - c.x, c.x - (x0 + kPatch), 0.0});
+        const double dy = std::max({y0 - c.y, c.y - (y0 + kPatch), 0.0});
+        const double side = std::hypot(dx, dy);
+        if (side > 0.0) {
+          ++r.outside;
+          r.reach = std::max(r.reach, side);
+        } else {
+          ++r.in_prism;
+        }
+      }
+  return r;
+}
+
+// The control (stage 1 against the lattice strength check, job A): a plain box on
+// the grid, held on its whole bottom, loaded on its whole top. Nothing is
+// misaligned, yet the two paths give different margins. Counted here: which
+// nodes each path holds and loads.
+StepModel build_plain_box(double L, double W, double H) {
+  StepModel model;
+  topopt::TriangleMesh& m = model.mesh;
+  m.vertices = {{0, 0, 0}, {L, 0, 0}, {L, W, 0}, {0, W, 0}, {0, 0, H}, {L, 0, H}, {L, W, H}, {0, W, H}};
+  const int t[12][4] = {{0, 2, 1, 0}, {0, 3, 2, 0}, {4, 5, 6, 2}, {4, 6, 7, 2}, {0, 1, 5, 1}, {0, 5, 4, 1},
+                        {3, 7, 6, 1}, {3, 6, 2, 1}, {0, 4, 7, 1}, {0, 7, 3, 1}, {1, 2, 6, 1}, {1, 6, 5, 1}};
+  for (const auto& x : t) {
+    m.triangles.push_back({x[0], x[1], x[2]});
+    model.triangle_face.push_back(x[3]);
+  }
+  model.face_count = 3;  // 0 bottom, 1 sides, 2 top
+  model.solid_count = 1;
+  model.brep_volume = L * W * H;
+  model.faces.assign(3, topopt::StepFaceInfo{});
+  return model;
+}
+
+void print_control() {
+  const StepModel model = build_plain_box(32.0, 32.0, 16.0);
+  std::printf("\n[control] a 32 x 32 x 16 mm box on the grid (res 40), held on the bottom, 20 N on the top\n");
+  std::printf("%-12s %12s %14s %12s %16s %18s %12s\n", "path", "held nodes", "node planes", "loaded nodes",
+              "of them on sides", "force on sides N", "total N");
+  for (int way = 0; way < 2; ++way) {
+    VoxelGrid g = topopt::voxelize(model.mesh, 40);
+    std::vector<int> held;
+    std::vector<topopt::NodalLoad> loads;
+    if (way == 0) {
+      topopt::tag_step_face(g, model, 0, topopt::VoxelTag::Fixture);
+      held = topopt::fea_tagged_nodes(g, topopt::VoxelTag::Fixture);
+      VoxelGrid gl = topopt::voxelize(model.mesh, 40);
+      topopt::tag_step_face(gl, model, 2, topopt::VoxelTag::Load);
+      loads = topopt::traction_loads(gl, topopt::VoxelTag::Load, Vec3{0.0, 0.0, -20.0});
+    } else {
+      const double h = g.spacing;
+      const auto bottom = topopt::face_node_areas(g, topopt::face_pieces(model, {0}, 0.5 * h));
+      for (const topopt::DirichletBC& bc : topopt::face_clamp_bcs(g, bottom))
+        if (bc.component == 0) held.push_back(bc.node);
+      loads = topopt::face_traction_loads(
+          topopt::face_node_areas(g, topopt::face_pieces(model, {2}, 0.5 * h)), Vec3{0.0, 0.0, -20.0});
+    }
+    const int per_plane = (g.nx + 1) * (g.ny + 1);
+    std::vector<char> plane(static_cast<std::size_t>(g.nz + 1), 0);
+    for (int n : held) plane[static_cast<std::size_t>(n / per_plane)] = 1;
+    int planes = 0;
+    for (char c : plane) planes += c;
+    std::vector<double> fz(static_cast<std::size_t>(topopt::fea_node_count(g)), 0.0);
+    for (const topopt::NodalLoad& l : loads)
+      if (l.component == 2) fz[static_cast<std::size_t>(l.node)] += l.value;
+    // The top face's own node plane is the highest one that carries any load.
+    int top_plane = 0;
+    for (std::size_t n = 0; n < fz.size(); ++n)
+      if (fz[n] != 0.0) top_plane = std::max(top_plane, static_cast<int>(n) / per_plane);
+    int loaded = 0, below = 0;
+    double total = 0.0, below_force = 0.0;
+    for (std::size_t n = 0; n < fz.size(); ++n) {
+      if (fz[n] == 0.0) continue;
+      ++loaded;
+      total += fz[n];
+      if (static_cast<int>(n) / per_plane < top_plane) {
+        ++below;
+        below_force += fz[n];
+      }
+    }
+    std::printf("%-12s %12zu %14d %12d %16d %18.3f %12.3f\n", way == 0 ? "today" : "drawn face",
+                held.size(), planes, loaded, below, below_force, total);
+  }
+}
 
 int main(int argc, char** argv) {
   const bool gate = argc > 1 && std::strcmp(argv[1], "--gate") == 0;
@@ -185,6 +380,25 @@ int main(int argc, char** argv) {
               worst_area, nothing_loaded);
   if (gate && (worst_area > 2.0 || nothing_loaded > 0)) ++failures;
 
+  std::printf("\n[test C] the same patch through the drawn-face path\n");
+  double worst_face_area = 0.0, worst_face_centre = 0.0;
+  for (int res : {32, 40, 48, 64, 80, 96})
+    for (int p = 0; p < 3; ++p) {
+      const LoadRow r = measure_load_face(res, places[p][0], places[p][1]);
+      const double pct = 100.0 * (r.area / (kPatch * kPatch) - 1.0);
+      const bool force_ok = std::fabs(r.total - kForce) < 1e-9 * std::fabs(kForce);
+      std::printf("%5d %8.3f %10d %12.1f %+10.2f %14.4f %10.3f %s\n", r.res, r.voxel,
+                  p + 1, r.area, pct, r.centre_off / r.voxel, r.total,
+                  !r.ok ? "NOTHING LOADED" : (!force_ok ? "FORCE CHANGED" : ""));
+      if (!r.ok || !force_ok) ++failures;
+      worst_face_area = std::max(worst_face_area, std::fabs(pct));
+      worst_face_centre = std::max(worst_face_centre, r.centre_off / r.voxel);
+    }
+  std::printf("[test C] drawn-face path: worst area error %.2f %% (rule 6: 2 %%), "
+              "centre off by at most %.3f voxel\n",
+              worst_face_area, worst_face_centre);
+  if (worst_face_area > 2.0 || worst_face_centre > 0.1) ++failures;
+
   std::printf("\n[test D] protection depth under the patch\n");
   std::printf("%5s %8s %10s %12s %14s\n", "res", "voxel", "typed mm", "measured mm",
               "off, in voxels");
@@ -198,8 +412,87 @@ int main(int argc, char** argv) {
       if (!r.ok && gate) ++failures;
       worst_depth = std::max(worst_depth, std::fabs(off));
     }
-  std::printf("[test D] worst depth error %.2f voxel (rule 3: 0.10)\n", worst_depth);
+  std::printf("[test D] today: worst depth error %.2f voxel (rule 3: 0.10)\n", worst_depth);
   if (gate && worst_depth > 0.10) ++failures;
+
+  std::printf("\n[test D] the same protection through the drawn-face path\n");
+  std::printf("%5s %8s %10s %14s %14s %12s %14s\n", "res", "voxel", "typed mm",
+              "whole voxels", "off, in voxels", "by share mm", "off, in voxels");
+  double worst_whole = 0.0, worst_share = 0.0;
+  for (int res : {48, 64, 96})
+    for (double typed : {2.0, 3.0, 5.0}) {
+      const DepthRow r = measure_depth_face(res, typed);
+      const double v = r.voxel > 0.0 ? r.voxel : 1.0;
+      std::printf("%5d %8.3f %10.1f %14.3f %+14.2f %12.3f %+14.2f %s\n", r.res, r.voxel,
+                  r.typed, r.measured, (r.measured - r.typed) / v, r.by_share,
+                  (r.by_share - r.typed) / v, r.ok ? "" : "BROKEN");
+      if (!r.ok) ++failures;
+      worst_whole = std::max(worst_whole, std::fabs(r.measured - r.typed) / v);
+      worst_share = std::max(worst_share, std::fabs(r.by_share - r.typed) / v);
+    }
+  std::printf("[test D] drawn-face path: whole voxels off by at most %.2f voxel (0.5 by "
+              "construction), protected share off by at most %.2f voxel (rule 3: 0.10)\n",
+              worst_whole, worst_share);
+  if (worst_whole > 0.5 + 1e-9 || worst_share > 0.10) ++failures;
+
+  std::printf("\n[lip] frozen voxels outside the prism under the patch (a face that is part of "
+              "a flat face)\n");
+  std::printf("%5s %8s %10s %22s %30s\n", "res", "voxel", "typed mm",
+              "by layers: in / outside", "by distance: in / outside / reach mm");
+  for (int res : {48, 96})
+    for (double typed : {2.0, 4.0, 10.0}) {
+      const LipRow a = measure_lip(res, typed, 0), d = measure_lip(res, typed, 1),
+                   rg = measure_lip(res, typed, 2);
+      std::printf("%5d %8.3f %10.1f %12lld / %-7lld %12lld / %-7lld / %.2f   region path %lld / %lld\n",
+                  res, a.voxel, typed, a.in_prism, a.outside, d.in_prism, d.outside, d.reach,
+                  rg.in_prism, rg.outside);
+    }
+
+  print_control();
+
+  // The thickness behind a face (what a pad follows): the plain box's bottom face
+  // has 16 mm of material behind it and its top the same; the 60 x 40 x 12 block's
+  // patch has 12 mm. Held to half a voxel at three resolutions.
+  std::printf("\n[backing] thickness of material behind a face, mm (true value, then measured at res 32 / 48 / 96)\n");
+  {
+    const StepModel box = build_plain_box(32.0, 32.0, 16.0);
+    const StepModel block = build_block(20.37, 10.71);
+    struct Case { const char* name; const StepModel* m; int face; double truth; };
+    const Case cases[3] = {{"box, bottom face", &box, 0, 16.0}, {"box, a side face", &box, 1, 32.0},
+                           {"block, the patch", &block, F_PATCH, kLz}};
+    for (const Case& c : cases) {
+      std::printf("%-18s %6.1f :", c.name, c.truth);
+      for (int res : {32, 48, 96}) {
+        const VoxelGrid g = topopt::voxelize(c.m->mesh, res);
+        const double t = topopt::face_backing_thickness_mm(
+            g, topopt::face_pieces(*c.m, {c.face}, 0.5 * g.spacing));
+        std::printf(" %7.2f", t);
+        if (std::fabs(t - c.truth) > 0.75 * g.spacing) ++failures;
+      }
+      std::printf("\n");
+    }
+  }
+
+  // The automatic pad's rule on the numbers the made sample parts gave (stage 1
+  // file, "A2"): at strength 0.2 a thin tab (3.91 mm behind it) gets 0.88 mm, the bracket's base (50 mm) 3.16 mm, the beam's end (120 mm)
+  // 4.90 mm; at 1.0 the same faces get 1.98 / 7.07 / 10.95 mm.
+  {
+    using topopt::auto_pad_depth_mm;
+    const auto near = [](double a, double b) { return std::fabs(a - b) < 0.006; };
+    if (!near(auto_pad_depth_mm(3.91, 0.2, 0.45), 0.884)) ++failures;
+    if (!near(auto_pad_depth_mm(50.0, 0.2, 0.45), 3.162)) ++failures;
+    if (!near(auto_pad_depth_mm(120.0, 0.2, 0.45), 4.899)) ++failures;
+    if (!near(auto_pad_depth_mm(3.91, 1.0, 0.45), 1.977)) ++failures;
+    if (!near(auto_pad_depth_mm(50.0, 1.0, 0.45), 7.071)) ++failures;
+    if (!near(auto_pad_depth_mm(120.0, 1.0, 0.45), 10.954)) ++failures;
+    if (!near(auto_pad_depth_mm(0.0, 0.2, 0.45), 0.45)) ++failures;    // nothing behind it: the floor, one line
+    if (!near(auto_pad_depth_mm(50.0, 0.2, 0.0), 3.162)) ++failures;   // no line width given: 0.45
+    // Doubling the thickness grows the pad by root two, not by two ("it slows down").
+    if (!near(auto_pad_depth_mm(200.0, 0.2, 0.45) / auto_pad_depth_mm(100.0, 0.2, 0.45), 1.41421)) ++failures;
+    std::printf("\n[pad] the automatic rule at 0.2: tab 3.91 mm -> %.2f, base 50 mm -> %.2f, beam end 120 mm -> %.2f mm\n",
+                auto_pad_depth_mm(3.91, 0.2, 0.45), auto_pad_depth_mm(50.0, 0.2, 0.45),
+                auto_pad_depth_mm(120.0, 0.2, 0.45));
+  }
 
   std::printf("[tests C, D] %s: %d failure(s)\n", gate ? "gate" : "measure only", failures);
   return failures == 0 ? 0 : 1;
