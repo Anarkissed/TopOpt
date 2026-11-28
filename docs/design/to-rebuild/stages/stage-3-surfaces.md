@@ -4,6 +4,14 @@ Branch `claude/topopt-stage-3-surfaces-7f58fd`, from 2b40bcf4. Status: IN PROGRE
 
 ## Where I stopped (read this first)
 
+- **11-28 00:05, C's four design-box parts at 64 (switch on, b92e3bd0, all rc=0):**
+  - pressing_box: no file (1,530 s). Frozen material is 0.99 of the part, every rung is below the margin, and the part as drawn stands at 0.51 against 1.5. That's the job's setup, not stage 3.
+  - pressing_strengthen: no file (55 s). The design box filled solid peaks at margin 0.62: "unreachable in this design space". The job again.
+  - base_strengthen: version 1 at margin 1.81 (target 1.5), 6,181 s; versions 2-3 out of the box's reach.
+  - carriage_strengthen128: version 1 at margin 1.83, 3,328 s; versions 2-3 out of reach.
+  - NEW: both written files dropped loose specks from the export: base 13 (451 mm3), carriage 38 (1,660 mm3). Not yet compared with stage 1 alone; an open item until it is.
+  No design-box refusals: the keep-out and Keep-clear fixes hold on all four.
+
 - **11-27 22:10, STOPPED for the weekly limit (his word: 99 %; resume after 00:01).** Nothing of mine runs or holds the lock. queue2.sh is DONE: test P, the knots, the stand at 128 re-run (rc=0), and C's four parts at 64 (pressing_box, base_strengthen, carriage_strengthen128, pressing_strengthen: all rc=0, results NOT yet read). Stand v4's re-run was stopped by the memory guard (free 29 %, swap rising; no file). On resume, one job at a time: read C's results, retry Stand v4 once, then the all-threads profile (lock hold), then the test P fixes.
 
 - **11-27 ~14:20, REPORT SENT as it stands (TOReview's call 19:19Z).** The stage does NOT close and the switch does NOT flip until test P passes. NEXT, in order:
