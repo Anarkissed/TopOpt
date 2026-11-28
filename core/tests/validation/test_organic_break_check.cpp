@@ -471,6 +471,19 @@ void steady(char** a) {
               r.size.material_voxels, r.rounds, r.seconds, r.peak_mb);
   std::printf("STEADY all points %.4f at (%.2f, %.2f, %.2f) %s %s; voxel %.3f mm%s\n", r.first_all.multiple, r.first_all.at.x, r.first_all.at.y,
               r.first_all.at.z, r.first_all.cls.c_str(), r.first_all.resolved ? "judged" : "not judged", ask.voxel_mm, ask.material_override ? ", binary" : "");
+  {
+    std::string pp, why;
+    for (std::size_t q = 0; q < r.post_paths.size(); ++q) {
+      char b[160];
+      std::snprintf(b, sizeof b, " post %zu %.2f %% (shaft %d foot %d top %d)", q, 100.0 * r.post_paths[q].share, r.post_paths[q].shaft, r.post_paths[q].foot,
+                    r.post_paths[q].top);
+      pp += b;
+    }
+    for (const std::string& x : r.not_proven_because) why += x + " ";
+    std::printf("STEADY load path: because [%s]; unresolved energy %.2f %%, largest region %.2f %% at (%.2f, %.2f, %.2f), %zu voxels;%s\n", why.c_str(),
+                100.0 * r.unresolved_energy_share, 100.0 * r.largest_unresolved_share, r.largest_unresolved_at.x, r.largest_unresolved_at.y,
+                r.largest_unresolved_at.z, r.largest_unresolved_voxels, pp.c_str());
+  }
   std::printf("STEADY places under the pass line:");
   for (const BreakPoint& q : r.not_judged_under) std::printf(" %.3f@(%.1f,%.1f,%.1f)%s", q.multiple, q.at.x, q.at.y, q.at.z, q.cls.c_str());
   std::printf("\n");
@@ -543,12 +556,67 @@ void remake(const std::string& job_path, const std::string& out) {
   std::printf("REMAKE posts (drawn centre, z, width): %s\n", list.c_str());
 }
 
+// C7: the load-path rule on two made shapes. Boxes written as one STL (each its own closed shell, overlapping a little).
+void write_boxes(const std::string& path, const std::vector<std::array<double, 6>>& boxes) {
+  std::ofstream f(path);
+  f << "solid boxes\n";
+  for (const auto& b : boxes) {
+    const Vec3 c[8] = {{b[0], b[1], b[2]}, {b[3], b[1], b[2]}, {b[3], b[4], b[2]}, {b[0], b[4], b[2]},
+                       {b[0], b[1], b[5]}, {b[3], b[1], b[5]}, {b[3], b[4], b[5]}, {b[0], b[4], b[5]}};
+    const int t[12][3] = {{0, 2, 1}, {0, 3, 2}, {4, 5, 6}, {4, 6, 7}, {0, 1, 5}, {0, 5, 4}, {3, 7, 6}, {3, 6, 2}, {0, 4, 7}, {0, 7, 3}, {1, 2, 6}, {1, 6, 5}};
+    for (const auto& q : t) {
+      f << " facet normal 0 0 0\n  outer loop\n";
+      for (int v : q) f << "   vertex " << c[v].x << " " << c[v].y << " " << c[v].z << "\n";
+      f << "  endloop\n endfacet\n";
+    }
+  }
+  f << "endsolid boxes\n";
+}
+BreakResult load_path_case(const std::string& name, const std::vector<std::array<double, 6>>& boxes) {
+  const std::string w = std::string(TMP_DIR) + "/organic_break_check/" + name;
+  std::filesystem::remove_all(w);
+  std::filesystem::create_directories(w);
+  // the part: the plain 10 x 3 x 3 bar (its two end faces are the hold and the load); the print: the boxes
+  write_boxes(w + "/part.stl", {{0, 0, 0, 10, 3, 3}});
+  write_boxes(w + "/print.stl", boxes);
+  const StepModel m = import_part_file_resolved(w + "/part.stl");
+  const StlMesh print = read_stl_file(w + "/print.stl");
+  BreakAsk ask;
+  ask.print = &print.mesh;
+  ask.part = &m;
+  ask.fixed_faces = {face_where(m, {-1, 0, 0}, 0, false)};
+  ask.loads = {{{face_where(m, {1, 0, 0}, 0, true)}, {1, 0, 0}}};   // 1 N: the neck's own reading stays over the pass line
+  ask.youngs_mpa = 3500;
+  ask.poisson = 0.35;
+  ask.yield_mpa = 31;
+  ask.z_knockdown = 0.55;
+  const BreakResult r = organic_break_check(ask);
+  std::string why;
+  for (const std::string& x : r.not_proven_because) why += x + " ";
+  std::printf("%s: verdict %s (%s); first break %.3f; unresolved energy %.4f, largest region %.4f at (%.2f, %.2f, %.2f), %zu voxels\n", name.c_str(),
+              r.verdict.c_str(), why.c_str(), r.first_resolved.multiple, r.unresolved_energy_share, r.largest_unresolved_share,
+              r.largest_unresolved_at.x, r.largest_unresolved_at.y, r.largest_unresolved_at.z, r.largest_unresolved_voxels);
+  return r;
+}
+void load_path() {
+  // a thick bar, 10 x 3 x 3, cut at mid-length and joined by a 0.4 x 0.4 mm neck 1.2 mm long: the neck is the load path
+  const BreakResult a = load_path_case("NECK", {{0, 0, 0, 4.45, 3, 3}, {5.55, 0, 0, 10, 3, 3}, {4.4, 1.3, 1.3, 5.6, 1.7, 1.7}});
+  check(a.ok && a.verdict == "not_proven" && a.unresolved_energy_share > kBreakLoadPathShare &&
+            std::fabs(a.largest_unresolved_at.x - 5.0) < 0.7,
+        "the load-path rule: a thin neck in the load path is named (not_proven, the region at the neck)");
+  // the same bar whole, with a 0.4 mm fin off the load path (on its +y face): not named
+  const BreakResult b = load_path_case("FIN", {{0, 0, 0, 10, 3, 3}, {4, 2.9, 1.3, 6, 5, 1.7}});
+  check(b.ok && b.verdict == "pass" && b.unresolved_energy_share <= kBreakLoadPathShare,
+        "the load-path rule: a thin fin off the load path is not named (pass)");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   gate();
   law();
   bar();
+  load_path();
   if (argc >= 4 && std::string(argv[1]) == "remake") { remake(argv[2], argv[3]); return 0; }
   if (argc >= 10 && std::string(argv[1]) == "steady") { steady(argv + 2); return 0; }   // argv[10], [11] optional (C5)
   if (argc >= 3 && std::string(argv[1]) == "oversize") oversize(argv[2]);

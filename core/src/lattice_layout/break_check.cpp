@@ -1041,15 +1041,108 @@ BreakResult organic_break_check(const BreakAsk& ask) {
       if (far) R.not_judged_under.push_back(point(e));
     }
   }
+  // 8b. C7, THE LOAD-PATH RULE. (i) Posts: each post's share of the load (its mid-height section force over the applied
+  // load), and whether its shaft (its own voxels) and each end joint (the material within one post width beyond each
+  // end of its box, in its footprint) are resolved. (ii) Everything else: the share of the strain energy (share-weighted,
+  // the material's stress and strain) that sits in not-resolved material, in total and in its largest connected
+  // (face-joined) region.
+  R.post_paths.assign(np, BreakResult::PostPath{});
+  for (std::size_t q = 0; q < np; ++q) {
+    BreakResult::PostPath& pp = R.post_paths[q];
+    pp.share = asked_n > 0.0 ? std::fabs(R.classes[q].section_force_n) / asked_n : 0.0;
+    const BreakPost& p = ask.posts[q];
+    const double w = p.width;
+    for (int k = 0; k < g.nz; ++k)
+      for (int j = 0; j < g.ny; ++j)
+        for (int i = 0; i < g.nx; ++i) {
+          const std::size_t e = g.index(i, j, k);
+          if (!mat[e] || res[e]) continue;
+          const Vec3 c = g.centre(i, j, k);
+          if (c.x < pbox[q][0] || c.x > pbox[q][1] || c.y < pbox[q][2] || c.y > pbox[q][3]) continue;
+          if (cls[e] == static_cast<int>(q)) pp.shaft = false;
+          else if (c.z >= p.z_bottom - w && c.z < p.z_bottom) pp.foot = false;
+          else if (c.z > p.z_top && c.z <= p.z_top + w) pp.top = false;
+        }
+  }
+  bool post_block = false;
+  int post_named = -1;
+  for (std::size_t q = 0; q < np; ++q) {
+    const BreakResult::PostPath& pp = R.post_paths[q];
+    if (pp.share > kBreakLoadPathShare && !(pp.shaft && pp.foot && pp.top)) {
+      if (post_named < 0 || pp.share > R.post_paths[static_cast<std::size_t>(post_named)].share) post_named = static_cast<int>(q);
+      post_block = true;
+    }
+  }
+  {
+    const double E0 = ask.youngs_mpa, nu = ask.poisson, vol = h * h * h;
+    std::vector<double> en(mat.size(), 0.0);
+    double total = 0.0, unres = 0.0;
+    for (std::size_t e = 0; e < mat.size(); ++e) {
+      if (!mat[e]) continue;
+      const auto& t = sig[e];
+      const double sxx = t[0], syy = t[1], szz = t[2], txy = t[3], tyz = t[4], tzx = t[5];
+      const double se = (sxx * sxx + syy * syy + szz * szz - 2.0 * nu * (sxx * syy + syy * szz + szz * sxx) +
+                         2.0 * (1.0 + nu) * (txy * txy + tyz * tyz + tzx * tzx)) / E0;   // sigma : epsilon
+      en[e] = 0.5 * frac[e] * se * vol;
+      total += en[e];
+      if (!res[e]) unres += en[e];
+    }
+    R.unresolved_energy_share = total > 0.0 ? unres / total : 0.0;
+    // the largest connected not-resolved region by its energy; its place = its most loaded voxel
+    std::vector<char> seen(mat.size(), 0);
+    std::vector<std::size_t> stack;
+    const int nb[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+    double best = -1.0;
+    for (std::size_t e0 = 0; e0 < mat.size(); ++e0) {
+      if (!mat[e0] || res[e0] || seen[e0]) continue;
+      double sum = 0.0, top = -1.0;
+      std::size_t at = e0, n = 0;
+      stack.assign(1, e0);
+      seen[e0] = 1;
+      while (!stack.empty()) {
+        const std::size_t e = stack.back();
+        stack.pop_back();
+        sum += en[e];
+        ++n;
+        if (en[e] > top) { top = en[e]; at = e; }
+        const int i = static_cast<int>(e % static_cast<std::size_t>(g.nx)), j = static_cast<int>((e / static_cast<std::size_t>(g.nx)) % static_cast<std::size_t>(g.ny)),
+                  k = static_cast<int>(e / (static_cast<std::size_t>(g.nx) * static_cast<std::size_t>(g.ny)));
+        for (const auto& d : nb) {
+          const int ii = i + d[0], jj = j + d[1], kk = k + d[2];
+          if (ii < 0 || jj < 0 || kk < 0 || ii >= g.nx || jj >= g.ny || kk >= g.nz) continue;
+          const std::size_t f = g.index(ii, jj, kk);
+          if (!mat[f] || res[f] || seen[f]) continue;
+          seen[f] = 1;
+          stack.push_back(f);
+        }
+      }
+      if (sum > best) {
+        best = sum;
+        R.largest_unresolved_share = total > 0.0 ? sum / total : 0.0;
+        R.largest_unresolved_voxels = n;
+        R.largest_unresolved_at = g.centre(static_cast<int>(at % static_cast<std::size_t>(g.nx)), static_cast<int>((at / static_cast<std::size_t>(g.nx)) % static_cast<std::size_t>(g.ny)),
+                                           static_cast<int>(at / (static_cast<std::size_t>(g.nx) * static_cast<std::size_t>(g.ny))));
+      }
+    }
+  }
+  const bool energy_block = R.unresolved_energy_share > kBreakLoadPathShare;
   // 9. the verdict
   // review 1.5: EVERY post whose file section reads under the pass line blocks a pass (whatever its weakest voxel)
   bool post_section_under = false;
   for (const BreakClass& bc : R.classes)
     if (bc.cls == "post" && bc.section_multiple > 0.0 && bc.section_multiple < ask.pass_line) post_section_under = true;
-  if (!R.first_resolved.found) R.verdict = "not_proven";
-  else if (R.first_resolved.multiple < ask.pass_line) R.verdict = "fail";
-  else if (any_under || post_section_under) R.verdict = "not_proven";
-  else R.verdict = "pass";
+  if (!R.first_resolved.found) {
+    R.verdict = "not_proven";
+    R.not_proven_because.push_back("nothing_judged");
+  } else if (R.first_resolved.multiple < ask.pass_line) {
+    R.verdict = "fail";   // a fail stays a fail
+  } else {
+    if (any_under) R.not_proven_because.push_back("thin_place_under_pass_line");
+    if (post_section_under) R.not_proven_because.push_back("post_section_under_pass_line");
+    if (post_block) R.not_proven_because.push_back("post_load_path_not_resolved");
+    if (energy_block) R.not_proven_because.push_back("unresolved_energy");
+    R.verdict = R.not_proven_because.empty() ? "pass" : "not_proven";
+  }
   for (std::size_t q = 0; q < nu; ++q) R.by_up.push_back({ask.other_ups[q], upJ[q], upA[q]});
   R.ok = true;
   R.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
@@ -1078,6 +1171,20 @@ BreakResult organic_break_check(const BreakAsk& ask) {
            ", \"first_break_all_points\": " + fin(R.by_up[q].all) + "}";
     }
     j += "]";
+  }
+  {   // C7: the load-path rule
+    j += ", \"not_proven_because\": [";
+    for (std::size_t q = 0; q < R.not_proven_because.size(); ++q) j += std::string(q ? ", " : "") + "\"" + R.not_proven_because[q] + "\"";
+    j += "], \"load_path\": {\"limit_share\": " + num(kBreakLoadPathShare) + ", \"posts\": [";
+    for (std::size_t q = 0; q < np; ++q) {
+      const BreakResult::PostPath& pp = R.post_paths[q];
+      j += std::string(q ? ", " : "") + "{\"post\": " + std::to_string(q) + ", \"share\": " + num(pp.share) + ", \"shaft_resolved\": " +
+           (pp.shaft ? "true" : "false") + ", \"foot_resolved\": " + (pp.foot ? "true" : "false") + ", \"top_resolved\": " +
+           (pp.top ? "true" : "false") + ", \"blocks\": " + (pp.share > kBreakLoadPathShare && !(pp.shaft && pp.foot && pp.top) ? "true" : "false") + "}";
+    }
+    j += "], \"unresolved_energy_share\": " + num(R.unresolved_energy_share) + ", \"largest_unresolved_region\": {\"share\": " +
+         num(R.largest_unresolved_share) + ", \"at\": " + vec_json(model_point(F, R.largest_unresolved_at)) + ", \"voxels\": " +
+         std::to_string(R.largest_unresolved_voxels) + "}}";
   }
   j += ", \"faces\": [" + faces_json + "], \"force_asked_n\": " + vec_json(model_dir(F, asked)) + ", \"force_applied_n\": " +
        vec_json(model_dir(F, applied));

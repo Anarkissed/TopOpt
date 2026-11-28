@@ -29,6 +29,11 @@
 
 namespace topopt::lattice_layout {
 
+// C7, THE LOAD-PATH RULE (a check constant, not a job setting): a number is shown only when every load path is
+// resolved. A post carrying over this share of the load whose shaft or an end joint is not resolved, or not-resolved
+// material holding over this share of the strain energy, gives "not_proven" (the post or the largest region named).
+constexpr double kBreakLoadPathShare = 0.05;
+
 // A bar of the lay as the file holds it (model frame), and a post as the print check laid it.
 struct BreakBar {
   Vec3 a{}, b{};
@@ -130,6 +135,15 @@ struct BreakResult {
   std::string not_checked;      // not ok: "too_big", "did_not_settle", "no_load", "stopped", "error"
   struct UpBreak { Vec3 up{}; double judged = 0.0, all = 0.0; };
   std::vector<UpBreak> by_up;
+  // C7, the load-path rule: per post its share of the load and whether its shaft and its two end joints are resolved;
+  // the share of the strain energy in not-resolved material, in total and in its largest connected region (and where);
+  // and why the verdict is not_proven (empty otherwise).
+  struct PostPath { double share = 0.0; bool shaft = true, foot = true, top = true; };
+  std::vector<PostPath> post_paths;
+  double unresolved_energy_share = 0.0, largest_unresolved_share = 0.0;
+  Vec3 largest_unresolved_at{};
+  std::size_t largest_unresolved_voxels = 0;
+  std::vector<std::string> not_proven_because;
   // also_connected_ball: the voxels whose ball holds material not connected to them inside it, and the first breaks
   // (judged, all points) smoothed over the connected material only.
   std::size_t connected_split_voxels = 0;
