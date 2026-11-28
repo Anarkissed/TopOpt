@@ -4,6 +4,8 @@ Branch `claude/topopt-stage-3-surfaces-7f58fd`, from 2b40bcf4. Status: IN PROGRE
 
 ## Where I stopped (read this first)
 
+- **11-28 01:30, Stand v4 retry (switch on, b92e3bd0, face loads, one lock hold): version 1 written, then the 4,800 s limit.** Version 1 at vf 0.68 after 47 min: effective margin 2.25 (target 1.5), ACCEPTED; 70 iterations, 14 re-fits took 180 s, 226,252 triangles. Rung 2 (vf 0.52) reached iteration 49 at about 30 s an iteration when the limit hit (rc=143). The limit is mine, not a refusal. NEXT: the all-threads profile (lock hold), then the test P fixes.
+
 - **11-28 00:05, C's four design-box parts at 64 (switch on, b92e3bd0, all rc=0):**
   - pressing_box: no file (1,530 s). Frozen material is 0.99 of the part, every rung is below the margin, and the part as drawn stands at 0.51 against 1.5. That's the job's setup, not stage 3.
   - pressing_strengthen: no file (55 s). The design box filled solid peaks at margin 0.62: "unreachable in this design space". The job again.
