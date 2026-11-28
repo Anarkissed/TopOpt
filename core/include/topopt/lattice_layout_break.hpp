@@ -104,6 +104,10 @@ struct BreakAsk {
   // A reading for the record only (the review's question 1.6), never in the verdict or the block: also smooth over the
   // material CONNECTED to the voxel inside its ball, and give that first break in BreakResult::connected_*.
   bool also_connected_ball = false;
+  // A TEST-ONLY reading for the record (C11, mark 6): the first breaks (judged, all points) smoothed by the plain ball at
+  // each of these radii (mm), from the SAME solve, in BreakResult::by_radius. Never in the verdict or the block; the file
+  // job never sets it.
+  std::vector<double> also_radii;
   // A TEST-ONLY input (C3 item b, the study's voxels at matched faces): the material voxels on the check's own grid,
   // given the grid (origin, spacing, size); null = the product voxeliser. The file job never sets it.
   std::function<std::vector<char>(const VoxelGrid&)> material_override;
@@ -179,6 +183,9 @@ struct BreakResult {
   // also_connected_ball: the voxels whose ball holds material not connected to them inside it, and the first breaks
   // (judged, all points) smoothed over the connected material only.
   std::size_t connected_split_voxels = 0;
+  // BreakAsk::also_radii (test-only): per radius, the first break judged and over all points
+  struct RadiusReading { double radius = 0.0; BreakPoint judged, all; };
+  std::vector<RadiusReading> by_radius;
   BreakPoint connected_judged, connected_all;   // per BreakAsk::other_ups (the ask's frame): the first break, judged and over all points
 };
 BreakResult organic_break_check(const BreakAsk& ask);

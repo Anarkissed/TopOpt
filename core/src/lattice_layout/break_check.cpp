@@ -1093,6 +1093,45 @@ BreakResult organic_break_check(const BreakAsk& ask) {
     if (std::isfinite(cj)) { R.connected_judged.found = true; R.connected_judged.multiple = cj; R.connected_judged.at = at_of(ej); }
     if (std::isfinite(ca)) { R.connected_all.found = true; R.connected_all.multiple = ca; R.connected_all.at = at_of(ea); }
   }
+  for (const double rho : ask.also_radii) {   // C11 (test-only): the same solved stresses smoothed at other radii
+    std::vector<std::array<int, 3>> bl;
+    const int RR = static_cast<int>(std::ceil(rho / h)) + 1;
+    for (int dk = -RR; dk <= RR; ++dk)
+      for (int dj = -RR; dj <= RR; ++dj)
+        for (int di = -RR; di <= RR; ++di)
+          if (std::sqrt(static_cast<double>(di * di + dj * dj + dk * dk)) * h <= rho + 1e-9) bl.push_back({di, dj, dk});
+    double bj = std::numeric_limits<double>::infinity(), ba = bj;
+    std::size_t ej = 0, ea = 0;
+    for (int k = 0; k < g.nz; ++k)
+      for (int j = 0; j < g.ny; ++j)
+        for (int i = 0; i < g.nx; ++i) {
+          if (!M(i, j, k)) continue;
+          double s6[6] = {0, 0, 0, 0, 0, 0}, wsum = 0.0;
+          for (const auto& o : bl) {
+            if (!M(i + o[0], j + o[1], k + o[2])) continue;
+            const std::size_t eo = g.index(i + o[0], j + o[1], k + o[2]);
+            for (int q = 0; q < 6; ++q) s6[q] += frac[eo] * sig[eo][static_cast<std::size_t>(q)];
+            wsum += frac[eo];
+          }
+          for (double& x : s6) x /= wsum;
+          const double a9[9] = {s6[0], s6[3], s6[5], s6[3], s6[1], s6[4], s6[5], s6[4], s6[2]};
+          double val[3], vec[9];
+          symmetric_eigen3(a9, val, vec);
+          const double m = static_cast<float>(law_of(val, vec, ask.yield_mpa, ask.z_knockdown, ask.up, nullptr));
+          const std::size_t e = g.index(i, j, k);
+          if (m < ba) { ba = m; ea = e; }
+          if (res[e] && m < bj) { bj = m; ej = e; }
+        }
+    BreakResult::RadiusReading rr;
+    rr.radius = rho;
+    const auto at_of = [&](std::size_t e) {
+      return g.centre(static_cast<int>(e % static_cast<std::size_t>(g.nx)), static_cast<int>((e / static_cast<std::size_t>(g.nx)) % static_cast<std::size_t>(g.ny)),
+                      static_cast<int>(e / (static_cast<std::size_t>(g.nx) * static_cast<std::size_t>(g.ny))));
+    };
+    if (std::isfinite(bj)) { rr.judged.found = true; rr.judged.multiple = bj; rr.judged.at = at_of(ej); }
+    if (std::isfinite(ba)) { rr.all.found = true; rr.all.multiple = ba; rr.all.at = at_of(ea); }
+    R.by_radius.push_back(rr);
+  }
   auto point = [&](std::size_t e) {
     BreakPoint p;
     p.found = true;

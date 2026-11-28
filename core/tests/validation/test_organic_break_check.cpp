@@ -218,6 +218,7 @@ std::vector<char> study_voxels(const TriangleMesh& mesh, const VoxelGrid& ref) {
 // reading); the product's default (0.9 mm radius, every material voxel in the ball) is never changed by them
 double g_smooth = BreakAsk{}.smooth_mm;   // C11: the shipping default unless "smooth:R" is given
 bool g_connected = false;
+std::vector<double> g_radii;   // C11 (TEST-ONLY): "radii:0.3,0.45,0.9" more smoothing radii read from the same solve
 bool g_big = false;   // C11, mark 6 (TEST-ONLY): "big" lets the steady mode run over 3 GB; run only while the lead holds HEAVY.lock
 double g_tol = 1e-2;   // the marks' solve tolerance (argv "tol:1e-8": the SPARSE split, C1 Piece 1)
 
@@ -466,7 +467,11 @@ void steady(char** a) {
   fea_set_matfree_threads(1);
   ask.smooth_mm = g_smooth;                // C10 G2 (test-only)
   ask.also_connected_ball = g_connected;
+  ask.also_radii = g_radii;                // C11 (test-only): more radii from the same solve
   const BreakResult r = organic_break_check(ask);
+  for (const auto& rr : r.by_radius)
+    std::printf("STEADY radius %.2f: judged %.4f at (%.2f, %.2f, %.2f); all points %.4f at (%.2f, %.2f, %.2f)\n", rr.radius, rr.judged.multiple,
+                rr.judged.at.x, rr.judged.at.y, rr.judged.at.z, rr.all.multiple, rr.all.at.x, rr.all.at.y, rr.all.at.z);
   if (g_connected)
     std::printf("STEADY connected ball (radius %.2f): judged %.4f at (%.2f, %.2f, %.2f); all points %.4f\n", g_smooth, r.connected_judged.multiple,
                 r.connected_judged.at.x, r.connected_judged.at.y, r.connected_judged.at.z, r.connected_all.multiple);
@@ -910,6 +915,11 @@ int main(int argc, char** argv) {
     if (std::string(argv[i]).rfind("smooth:", 0) == 0) g_smooth = std::atof(argv[i] + 7);
     if (std::string(argv[i]) == "connected") g_connected = true;
     if (std::string(argv[i]) == "big") g_big = true;
+    if (std::string(argv[i]).rfind("radii:", 0) == 0) {
+      std::stringstream ss(argv[i] + 6);
+      std::string one;
+      while (std::getline(ss, one, ',')) g_radii.push_back(std::atof(one.c_str()));
+    }
   }
   if (argc >= 2 && std::string(argv[1]) == "g2") { g2(); return 0; }   // C10: test-only, no default checks first
   // the steady mode (argv[10], [11] optional, C5) runs alone (C10: the default checks are not run first)
