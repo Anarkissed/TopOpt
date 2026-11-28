@@ -432,7 +432,8 @@ void steady(char** a) {
     std::string one;
     while (std::getline(ss, one, ';')) {
       BreakPost q;
-      std::sscanf(one.c_str(), "%lf,%lf,%lf,%lf", &q.x, &q.y, &q.z_bottom, &q.z_top);
+      double w = 0.0;   // C6: an optional fifth number, the drawn width (x, y then the drawn centre)
+      if (std::sscanf(one.c_str(), "%lf,%lf,%lf,%lf,%lf", &q.x, &q.y, &q.z_bottom, &q.z_top, &w) == 5 && w > 0.0) q.width = w;
       ask.posts.push_back(q);
     }
   }
@@ -475,12 +476,80 @@ void steady(char** a) {
   std::printf("\n");
 }
 
+// C6: "remake JOB OUTDIR" makes the made job's file (no strength job) once as it is, then again with EVERY post kept at
+// two lines or more: each post drawn max(post_mm, 2 x bead_mm) wide and moved inward where the part's surface would trim
+// it (the posts step's own MeshSpec::post_wide, set here by the test, no product input). Prints each post before and
+// after and the print check's verdict; the re-made file is OUTDIR/lattice.stl.
+double reach(const TriangleMesh& m, const Vec3& o, double dx, double dy) {
+  double best = 1e300;
+  for (const auto& t : m.triangles) {
+    const Vec3& a = m.vertices[static_cast<std::size_t>(t[0])];
+    const Vec3& b = m.vertices[static_cast<std::size_t>(t[1])];
+    const Vec3& c = m.vertices[static_cast<std::size_t>(t[2])];
+    const Vec3 e1{b.x - a.x, b.y - a.y, b.z - a.z}, e2{c.x - a.x, c.y - a.y, c.z - a.z};
+    const Vec3 pv{dy * e2.z, -dx * e2.z, dx * e2.y - dy * e2.x};
+    const double det = e1.x * pv.x + e1.y * pv.y + e1.z * pv.z;
+    if (std::fabs(det) < 1e-14) continue;
+    const Vec3 tv{o.x - a.x, o.y - a.y, o.z - a.z};
+    const double u = (tv.x * pv.x + tv.y * pv.y + tv.z * pv.z) / det;
+    if (u < 0.0 || u > 1.0) continue;
+    const Vec3 qv{tv.y * e1.z - tv.z * e1.y, tv.z * e1.x - tv.x * e1.z, tv.x * e1.y - tv.y * e1.x};
+    const double v = (dx * qv.x + dy * qv.y) / det;
+    if (v < 0.0 || u + v > 1.0) continue;
+    const double sd = (e2.x * qv.x + e2.y * qv.y + e2.z * qv.z) / det;
+    if (sd > 0.0) best = std::min(best, sd);
+  }
+  return best;
+}
+void remake(const std::string& job_path, const std::string& out) {
+  FileJob job;
+  StepModel model;
+  FileResult r;
+  if (!load_file_job(job_path, 1, job, model, r, nullptr)) { std::printf("REMAKE load failed: %s\n", r.why.c_str()); return; }
+  job.strength_job.clear();
+  std::filesystem::create_directories(out + "/before");
+  const FileResult r0 = make_lattice_file(model, job, out + "/before/lattice.stl", nullptr, nullptr, nullptr);
+  std::printf("REMAKE as made: ok %d code %s, posts %zu\n", r0.ok, r0.code.c_str(), r0.made.posts.size());
+  const double w = std::max(job.options.mesh.post_mm, 2.0 * job.settings.bead_mm);
+  std::vector<MeshSpec::PostWide> wide;
+  for (const MeshSpec::Post& p : r0.made.posts) {
+    double px = 1e300, nx = 1e300, py = 1e300, ny = 1e300;
+    for (int s2 = 0; s2 < 3; ++s2) {
+      const double z = s2 == 0 ? p.z_bottom + 0.3 : s2 == 1 ? 0.5 * (p.z_bottom + p.z_top) : p.z_top - 0.3;
+      px = std::min(px, reach(model.mesh, {p.x, p.y, z}, 1, 0));
+      nx = std::min(nx, reach(model.mesh, {p.x, p.y, z}, -1, 0));
+      py = std::min(py, reach(model.mesh, {p.x, p.y, z}, 0, 1));
+      ny = std::min(ny, reach(model.mesh, {p.x, p.y, z}, 0, -1));
+    }
+    const double h = 0.5 * w;
+    const double ox = px < h ? -(h - px) : nx < h ? (h - nx) : 0.0, oy = py < h ? -(h - py) : ny < h ? (h - ny) : 0.0;
+    wide.push_back({p.x, p.y, p.z_top, p.z_bottom, w, ox, oy});
+    std::printf("REMAKE post at (%.4f, %.4f) z %.2f-%.2f: room +x %.3f -x %.3f +y %.3f -y %.3f; drawn %.3f wide, moved (%.3f, %.3f)\n", p.x, p.y,
+                p.z_bottom, p.z_top, px, nx, py, ny, w, ox, oy);
+  }
+  job.options.mesh.post_wide = wide;
+  std::filesystem::create_directories(out);
+  const FileResult r1 = make_lattice_file(model, job, out + "/lattice.stl", nullptr, nullptr, nullptr);
+  std::printf("REMAKE re-made: ok %d code %s (%s), print clean %d, posts %zu\n", r1.ok, r1.code.c_str(), r1.why.c_str(), r1.made.print_clean,
+              r1.made.posts.size());
+  std::string list;
+  for (const MeshSpec::Post& p : r1.made.posts) {
+    double ww, cx, cy;
+    job.options.mesh.post_box(p, ww, cx, cy);
+    char b[160];
+    std::snprintf(b, sizeof b, "%s%.4f,%.4f,%.4f,%.4f,%.4f", list.empty() ? "" : ";", cx, cy, p.z_bottom, p.z_top, ww);
+    list += b;
+  }
+  std::printf("REMAKE posts (drawn centre, z, width): %s\n", list.c_str());
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   gate();
   law();
   bar();
+  if (argc >= 4 && std::string(argv[1]) == "remake") { remake(argv[2], argv[3]); return 0; }
   if (argc >= 10 && std::string(argv[1]) == "steady") { steady(argv + 2); return 0; }   // argv[10], [11] optional (C5)
   if (argc >= 3 && std::string(argv[1]) == "oversize") oversize(argv[2]);
   if (argc >= 5 && std::string(argv[1]) == "size") { size_of(argv[2], argv[3], std::atof(argv[4])); return failures == 0 ? 0 : 1; }
