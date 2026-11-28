@@ -220,7 +220,7 @@ In plain English (for Nadim): the new smoothing needs about half as many rounds 
 
 - Totals: 7,687 s today, 7,702 s new; without Stand v4, 4,805 -> 4,167 s (13 % less). Solves off multigrid: 0 in all 16 runs; Jacobi-CG fallbacks: 0 in all 16 runs.
 - Stand v4, read: the time is the 20 extra design steps (the solves differ in the last digits, so the design takes another path to the same volume and margin). Per step: wall 20.6 -> 22.1 s, CPU 58.0 -> 57.3 s; the Mac was shared during the new run (CPU/wall 2.6 against 2.8). Its rounds per solve fell 39 % with no fall in CPU per step, the one part where a round got dearer; not chased (lean ruling, 11-28). The side project's algebraic coarse level is the measured lever for this part (4-12x fewer rounds on the thin-walled parts).
-- The four coarse warm-start runs (base, pressing, Pillow Block L, Top Motor Mount with warm_start.coarse) follow on the lock; their rows go under "Levers".
+- The four coarse warm-start runs (base, pressing, Pillow Block L, Top Motor Mount with warm_start.coarse) are under "Levers": no gain, it stays off.
 
 ### Close-out (2026-11-28)
 In plain English (for Nadim): the new smoothing is now what every solve uses, and the temporary switch used to compare it with the old one is gone.
@@ -267,7 +267,16 @@ In plain English (for Nadim): the new smoothing is now what every solve uses, an
 
 ### Levers named in the brief, answered (none is called "not possible"; each is measured or reported "not done yet" with what is missing)
 - Trajectory warm start (warm_start.matfree; each solve starts from the previous design step's field): already on in his runs (the dumps carry a guess). Measured on the replays: today's solver gains little from it (Top Motor Mount 1,584 -> 1,495 cycles) because the slow modes dominate; with a coarse space that works it pays (algebraic + Chebyshev 2: 75 -> 51; Stand v4 139 -> 110). It stays on; its value rises with the coarse-grid work.
-- Coarse warm start (warm_start.coarse, the res/2 pre-solve of the design, job.cpp 1291-1305): off, and the app never sends it. NOT DONE YET: to measure as a full-run setting on the reference parts (off / coarse / coarse + matfree) once the solver changes are in, because a cheaper solve changes its trade.
+- Coarse warm start (warm_start.coarse, the res/2 pre-solve of the design, job.cpp 1291-1305): off, and the app never sends it. MEASURED (2026-11-28, cheb:2, his jobs with warm_start.coarse on, trajectory warm start on as shipped): it does not cut the rounds per solve, so it stays off.
+
+| part | run time, off -> coarse (solve share) | rounds per solve, mean (max) | versions: volume, margin |
+|---|---|---|---|
+| Base | 87 -> 117 s (60 -> 54 %) | 146 (200) -> 151 (203) | no version either way |
+| Pressing | 302 -> 345 s (31 -> 30 %) | 138 (244) -> 135 (248) | no version either way |
+| Pillow Block L | 203 -> 203 s (28 -> 24 %) | 55 (84) -> 57 (83) | no version either way |
+| Top Motor Mount | 2868 -> 2574 s (60 -> 58 %) | 964 (1119) -> 953 (1333) | margins 1.64/1.66/1.67/1.69 -> 1.64/1.65/1.66/1.70 |
+
+  The rounds per solve stay within 4 % on all four parts; the half-resolution pre-run adds 30-43 s on the small parts. Top Motor Mount's 10 % shorter run comes with the same rounds per solve and the same design steps (200), so it is the shared Mac, not the setting (CPU 6,730 -> 6,403 s, 5 %). In plain words (for Nadim): starting from a quick rough version first does not make the solves any easier, so it stays off.
 - Resolution continuation (solve coarse, carry the design up, finish fine): not in the code, and the optimiser loop is not my file. NOT DONE YET: its smallest form needs minimize_plastic / plsm changes; named to TOReview as an optimiser-side item.
 - GenEO settings sweep (block 20, cut 0.05, 8^3 cores, overlap 1): GenEO acts only inside the Jacobi-CG FALLBACK. With the stage-5 smoother the fallback should rarely run (the replays count it). If it never engages on the reference table, GenEO is unused machinery, and the rebuild's rule is to delete it, not tune it; if it engages, sweep cut and block size at three settings each on those solves. To decide from the replay and reference-run counts. MEASURED (2026-11-28): the fallback ran 0 times in all 16 reference runs (today's smoother and the new one), so GenEO never engaged; by the rebuild's rule it is unused machinery to delete, proposed for the close-out with TOReview's word.
 - Active Domain (band 0, disarmed after PR 209 measured it net-negative in the stagnation regime): the stagnation cause is now known and fixed under the switch, so the old verdict no longer stands. NOT DONE YET: the band is a production.cpp constant with no per-job switch, so measuring it needs a job or observability override (not my file; to TOReview) or a harness run; three bands (0 / auto / auto+2).
