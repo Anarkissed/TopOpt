@@ -422,6 +422,25 @@ static void test_clearances_manual() {
       "manual: negative radius_mm rejected");
 }
 
+// TO rebuild stage 1 (For #362): loads.pad_mm, the Manual pad in mm. Absent or
+// negative = the automatic pad; > 0 = the typed depth. RED controls: zero and a
+// non-number are refused, so the reader is really reading the key.
+static void test_pad_mm() {
+  const std::string head = R"({
+  "model": "part.step", "material": "PLA", "mode": "minimize_plastic", "resolution": 48,
+  "output": { "report": "report.json", "mesh_format": "3mf", "mesh_prefix": "variant" },
+  "loads": { "anchor_face_ids": [8], "groups": [ { "face_ids": [0], "force": [0,0,-50] } ])";
+  const JobDescription absent = parse_job(head + " } }");
+  CHECK(absent.loads.pad_mm < 0.0, "pad_mm: absent = automatic (negative)");
+  const JobDescription typed = parse_job(head + ", \"pad_mm\": 2.5 } }");
+  CHECK(typed.loads.pad_mm == 2.5, "pad_mm: a typed 2.5 mm is read");
+  const JobDescription neg = parse_job(head + ", \"pad_mm\": -1 } }");
+  CHECK(neg.loads.pad_mm < 0.0, "pad_mm: negative = automatic");
+  check_rejects(head + ", \"pad_mm\": 0 } }", "pad_mm: zero refused");
+  check_rejects(head + ", \"pad_mm\": 2000 } }", "pad_mm: over 1000 mm refused");
+  check_rejects(head + ", \"pad_mm\": \"auto\" } }", "pad_mm: a string refused");
+}
+
 // Width-aware knockdown slicer metadata crossing the bridge (handoff
 // 2026-07-26-width-aware-knockdown): loads.wall_loops / loads.wall_line_width_mm.
 static void test_wall_loops() {
@@ -1599,6 +1618,7 @@ int main() {
   test_clearances();
   test_clearances_manual();
   test_wall_loops();
+  test_pad_mm();
   test_lattice_block();
   test_grading_block();
   test_growth_requires_a_stated_layer_height();

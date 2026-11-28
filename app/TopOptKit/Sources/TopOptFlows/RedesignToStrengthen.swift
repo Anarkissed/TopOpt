@@ -356,10 +356,12 @@ public enum StrengthenText {
         return [capLine(blocks)].compactMap { $0 } + rejectionLines(blocks) + (thin ? [someThinJointsLine] : [])
     }
 
-    /// The run's rejection lines in plain words (item 47), once each.
+    /// The run's rejection lines in plain words (item 47), once each. ★ TO rebuild: a version whose load lost its path to
+    /// every anchor (the connection rule) — plain words, never a solver failure.
     public static func rejectionLines(_ blocks: RunReportBlocks) -> [String] {
-        blocks.rows.contains { !$0.accepted && $0.rejectionReason == anchoredDetachedReason }
-            ? [anchoredLetGoLine] : []
+        (blocks.rows.contains { !$0.accepted && $0.rejectionReason == anchoredDetachedReason } ? [anchoredLetGoLine] : [])
+            + (blocks.rows.contains { !$0.accepted && $0.rejectionReason == TrueLoadsReport.noPathReason }
+                ? [TrueLoadsWords.noPathLine] : [])
     }
 
     /// Whether the accepted variant printed at `printedFraction` was JOINED by bridges: it has some, every one held, and it

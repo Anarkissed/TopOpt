@@ -10194,7 +10194,11 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
                j_safety_margin, j_wall_loops,
                j_wall_line_width_mm, j_wall_line_width_outer_mm,
                j_top_solid_layers, j_bottom_solid_layers, j_top_solid_mm,
-               j_bottom_solid_mm] = job.loads;
+               j_bottom_solid_mm, j_pad_mm] = job.loads;
+  // NOT CARRIED YET, on purpose (TO rebuild stage 1): the Manual pad. The TO rebuild
+  // reads it where it reads TOPOPT_PAD_MM (TOReview's to wire); named here so the
+  // ledger stays complete.
+  (void)j_pad_mm;
   // NOT CARRIED, on purpose (notes30): the solid top / bottom skins the user set are PRINTER profile values, like
   // `layer_height_mm` below: no load case, solve or ladder reads them. The TO rebuild's printed-grams figure reads them
   // from `job.loads` directly. Named here so the ledger stays complete.
@@ -11288,7 +11292,6 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   // whole reason this job takes the original model plus a stored design rather
   // than the variant's exported mesh (a TO surface has no faces to select).
   const std::string model_path = join_path(job_dir, job.model);
-  const bool model_is_mesh = part_format_for_path(job.model) != PartFormat::Step;
   try {
     result.model = import_part_file_resolved(model_path);
   } catch (const std::exception& e) {
@@ -11341,9 +11344,9 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
         resolve_selectors(result.model, job.fixture_faces, "fixture_faces");
     std::size_t tagged = 0;
     for (const int f : result.fixture_face_ids)
-      tagged += model_is_mesh
-                    ? tag_mesh_face(model_grid, result.model, f, VoxelTag::Fixture)
-                    : tag_step_face(model_grid, result.model, f, VoxelTag::Fixture);
+      // TO rebuild stage 1 (For #362 item 3): the stage switch picks the rule;
+      // tag_mesh_face and tag_step_face run one body, so a mesh tags the same.
+      tagged += tag_face_by_stage(model_grid, result.model, f, VoxelTag::Fixture);
     if (tagged == 0)
       throw JobError(
           "lattice_variant: fixture faces tagged no voxels (resolution too "
@@ -12630,7 +12633,6 @@ ll::StrengthDone strength_setup(const ll::StrengthAsk& ask, const std::string& m
   }
 
   // ── the load case: the SAME mapping the old Lattice run makes (lattice_variant_job).
-  const bool model_is_mesh = part_format_for_path(job.model) != PartFormat::Step;
   VoxelGrid& model_grid = S.model_grid;
   std::vector<DirichletBC>& bcs = S.bcs;
   MinimizePlasticOptions& options = S.options;
@@ -12652,8 +12654,8 @@ ll::StrengthDone strength_setup(const ll::StrengthAsk& ask, const std::string& m
     const std::vector<int> fixture = resolve_selectors(model, job.fixture_faces, "fixture_faces");
     std::size_t tagged = 0;
     for (const int f : fixture)
-      tagged += model_is_mesh ? tag_mesh_face(model_grid, model, f, VoxelTag::Fixture)
-                              : tag_step_face(model_grid, model, f, VoxelTag::Fixture);
+      // TO rebuild stage 1 (For #362 item 3): the stage switch picks the rule.
+      tagged += tag_face_by_stage(model_grid, model, f, VoxelTag::Fixture);
     if (tagged == 0)
       return strength_no("strength_failed", 1,
                          "The strength job's supports hold no part of the part, so its strength could not be "

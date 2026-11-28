@@ -371,8 +371,8 @@ public struct ResultVariantVM: Equatable, Sendable {
     public let savingsLabel: String
     /// Printed mass in grams (spacing-aware, from the core).
     public let massGrams: Double
-    /// Formatted mass, e.g. "199 g" / "1.24 kg".
-    public let massLabel: String
+    /// Formatted mass, e.g. "199 g" / "1.24 kg" (★ TO rebuild stage 2: "85 g printed" when they are printed grams).
+    public var massLabel: String
     /// Support-material estimate for the chosen orientation (cm³).
     public let supportCm3: Double
     /// Formatted support, e.g. "3.8 cm³" or "minimal".
@@ -874,6 +874,10 @@ public final class ResultsModel: ObservableObject {
         m.relay = m.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         return m
     }()
+    /// ★ TO rebuild stages 1-2: the report's true-loads keys (TrueLoadsReport); empty while core's switches are off.
+    public private(set) var trueLoads = TrueLoadsReport()
+    /// ★ TO rebuild: a pad's face or cut piece by its plain name (the workspace's `ProjectModel.padPlaceName`); nil → "A face".
+    public var placeName: (@MainActor (TrueLoadsReport.Pad) -> String?)?
     public private(set) var reportBlocks: RunReportBlocks?   // Flexible (PR #362) H56f: redesign to strengthen (overnight plan 2026-10-25) — the strengthen cards + bodies (RedesignToStrengthen.swift)
 
     /// THE HEADLINE OF A GROWTH RUN: how much plastic the SELECTED variant adds and
@@ -1247,6 +1251,7 @@ public final class ResultsModel: ObservableObject {
         // numbers as reduction numbers mid-run.
         ladderMode = outcome.growthLadder ? .growth : .reduction
         if let d = outcome.reportJSON { reportBlocks = RunReportBlocks.decode(reportJSON: d) }   // Flexible (PR #362) H56f: redesign to strengthen (overnight plan 2026-10-25) — a streamed partial (no report) never erases it
+        if let d = outcome.reportJSON { trueLoads = TrueLoadsReport.decode(reportJSON: d) }   // ★ TO rebuild: a partial never erases it
         // Only a timing-bearing outcome updates the duration: `apply` also runs for
         // every STREAMED partial (which has no timing yet), and a partial landing
         // after the authoritative final must not erase the run's recorded duration.
@@ -1275,6 +1280,10 @@ public final class ResultsModel: ObservableObject {
                                       knockdown: latticeAnswer == nil ? infillKnockdown : 1,
                                       remote: outcome.computedRemotely)
         if let g = latticeAnswer?.governing { tabs = tabs.map { $0.withWorstCaseMargin(g) } }
+        // ★ TO rebuild stage 2: with its switch on each version's grams are printed grams, and the label says so
+        if trueLoads.printedGrams {
+            tabs = tabs.map { var t = $0; if !t.isLatticed, t.massGrams > 0 { t.massLabel = TrueLoadsWords.printed(t.massLabel) }; return t }
+        }
         // ★ notes30 (362's review): a load on bare vines has no valid margin — its words stand in the number's place (the list
         // row, Compare), and no scenario says a margin either
         if let w = OrganicBareVines.marginWords(reportJSON: outcome.reportJSON) {

@@ -190,18 +190,24 @@ public struct ResultsScreen: View {
                 printOrientation: ResultsPrintOrientation? = nil,
                 printUp: SIMD3<Float>? = nil, chosenFace: Bool = false,
                 orientation: PrintOrientationHost? = nil,
+                placeName: (@MainActor (TrueLoadsReport.Pad) -> String?)? = nil,   // ★ TO rebuild: a pad's face by its plain name
                 certify: OrganicCertifyCard? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
         // through an injected scheduler / runner / notifier the same way). The screen
         // owns its ResultsModel as a @StateObject, so a test hosting this view has no
         // other way to read what the screen actually shows. Production passes nil.
-        _model = StateObject(wrappedValue: resultsModel ?? ResultsModel(
+        // ★ TO rebuild: the pads' namer rides on the model (a class), so this screen's own size never grows
+        _model = StateObject(wrappedValue: { () -> ResultsModel in
+            let m = resultsModel ?? ResultsModel(
             projectName: projectName, outcome: outcome,
             materialName: materialName, yieldStrengthMPa: yieldStrengthMPa,
             appliedLoadKg: appliedLoadKg, loadUnit: loadUnit,
             infillPercent: infillPercent, infillPattern: infillPattern,
             loadLocations: loadLocations,
-            loadDirections: loadDirections, anchorPoints: anchorPoints, solidWallMM: solidWallMM))
+            loadDirections: loadDirections, anchorPoints: anchorPoints, solidWallMM: solidWallMM)
+            if let placeName { m.placeName = placeName }
+            return m
+        }())
         self.liveOutcome = outcome
         self.streaming = streaming
         self.run = run

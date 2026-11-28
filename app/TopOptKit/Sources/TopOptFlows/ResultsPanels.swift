@@ -315,6 +315,10 @@ extension ResultsModel {
             add("Version", version?.title)
             add("Struts", reportBlocks?.latticeFile?.strutsLine)   // ★ his ruling 11-17: on Structural the struts must pass too
             if let tab { add("Plastic", tab.massLabel + " · " + (version?.headline ?? tab.headlineLabel)) }
+            // ★ TO rebuild stage 2: the part as drawn, in printed grams, its (i) the solid figure
+            if let d = trueLoads.drawnPart, let v = TrueLoadsWords.drawnPartValue(d) {
+                r.append(ResultsDetailRow(label: TrueLoadsWords.drawnPartLabel, value: v, info: TrueLoadsWords.drawnPartInfo(d)))
+            }
             if isSelected { add("Mesh vs grid", selectedMassComparison.flatMap { $0.divergesBeyond1Percent || $0.meshIsEstimate ? $0.summary : nil }) }
             add("Stress scale", stressLegend.caption)
             if let tab, tab.maxStressMPa > 0 { add("Peak stress", String(format: "%.1f MPa", tab.maxStressMPa)) }
@@ -357,6 +361,12 @@ extension ResultsModel {
             add("This device", remoteComputeNote)
             for n in clearanceNotes { add("Keep clear", n) }
             for n in faceProtectionNotes { add("Protect", n) }
+            // ★ TO rebuild stage 1: the pad each anchor and load face got — one short line, each face by name behind its (i)
+            if let v = TrueLoadsWords.padValue(trueLoads.pads) {
+                let names = trueLoads.pads.map { placeName?($0) }
+                r.append(ResultsDetailRow(label: TrueLoadsWords.padLabel, value: v,
+                                          info: TrueLoadsWords.padInfo(trueLoads.pads, names: names)))
+            }
             for n in latticeNotes { add("Lattice", n) }
             if isSelected {
                 add("Latticed mass", latticeMassProvenanceLine)
