@@ -87,9 +87,13 @@ RunFinish make_run_finish(const JobDescription& job, const MinimizePlasticOption
       if (cut_once != nullptr && *cut_once != nullptr) {
         f.keep_clear_cut = *cut_once;
       } else {
+        const auto t_cut0 = std::chrono::steady_clock::now();
         f.keep_clear_cut = std::make_shared<const KeepClearCut>(
             make_keep_clear_cut(cad->drawn_mesh(), f.keep_clears, job.keep_regions));
         if (cut_once != nullptr) *cut_once = f.keep_clear_cut;
+        std::fprintf(stderr, "[timing] Keep-clear cutter made: %.2f s (%zu clears, %zu keep regions)\n",
+                     std::chrono::duration<double>(std::chrono::steady_clock::now() - t_cut0).count(),
+                     f.keep_clears.size(), job.keep_regions.size());
       }
     }
   }
@@ -576,6 +580,15 @@ std::string export_variant_mesh(const MinimizePlasticVariant& variant,
                                 const std::vector<KeepRegion>& keeps = {},
                                 const RunFinish* fin = nullptr,
                                 const TriangleMesh* finished = nullptr) {
+  // Test P's split (TOReview 11-28): each file's export time, on stderr only.
+  struct ExportTimer {
+    double vf;
+    std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+    ~ExportTimer() {
+      std::fprintf(stderr, "[timing] export of vf %.4g: %.2f s\n", vf,
+                   std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+    }
+  } export_timer{variant.requested_volume_fraction};
   const std::string path = join_path(
       out_dir, mesh_file_name(out.mesh_prefix, variant.requested_volume_fraction,
                               out.mesh_format));

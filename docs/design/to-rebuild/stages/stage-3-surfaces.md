@@ -18,6 +18,14 @@ Branch `claude/topopt-stage-3-surfaces-7f58fd`, from 2b40bcf4. Status: IN PROGRE
   **Built (02:30, b2.sh pfix):**
   - The cutter slot: make_run_finish(..., cut_once), one per run_job and one per strengthen_versions.
   - The probe: analyze_fixed_design(..., initial_guess) on the first solve only; PlsmOptions::margin_probe takes (density, warm); plsm passes &sc.solution only when surf.on and there are no scenarios.
+  **Checks (11-28 03:23-04:04, one hold, checks_p.sh; old = d0d1ed1a, new = 32048cef; the stand at 64, Top Motor Mount at 32):**
+  - Switch off: old = new bytes on both parts.
+  - Switch on: old = new bytes on both parts; margins unchanged.
+  - The probe: stand 20.8 / 27.0 s against 25.2 s (l1 cycles 7,508 → 6,414); Top Motor Mount 1.2 against 1.4 s. The warm start buys little.
+  - Test K: twice at 6 threads identical and twice at 1 thread identical, both parts.
+  - Wall (6 threads): stand 54 s off, 69 / 84 s on; Top Motor Mount 113-129 s off, 213 / 222 s on.
+  **OPEN: the stand's switch-on file differs between 1 and 6 threads** (c9300fd5 against 75a5cf3c; the OLD build at 1 thread is c9300fd5 too, so it predates the fixes; Top Motor Mount is the same across thread counts). To trace only on TOReview's word.
+  **Next (running from 04:09):** pfix2 adds [timing] lines (the cutter, each export; stderr only), then P at the reference resolutions with the split (p_ref.sh: the stand at 128, then Top Motor Mount at 96, off and on, two holds).
   **OPEN (TOReview 11-28): loose specks in the analysis with the switch on.** On the stand at 64, 34 of 42 solves take loose specks out (5-58 pieces of 1-8 voxels) against 1 of 42 off. A surface that sheds specks into the analysis is a quality question for the stage's close, apart from P.
 
 - **11-28 01:30, Stand v4 retry (switch on, b92e3bd0, face loads, one lock hold): version 1 written, then the 4,800 s limit.** Version 1 at vf 0.68 after 47 min: effective margin 2.25 (target 1.5), ACCEPTED; 70 iterations, 14 re-fits took 180 s, 226,252 triangles. Rung 2 (vf 0.52) reached iteration 49 at about 30 s an iteration when the limit hit (rc=143). The limit is mine, not a refusal. NEXT: the all-threads profile (lock hold), then the test P fixes.
