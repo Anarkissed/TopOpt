@@ -170,3 +170,24 @@ endif()
 # corner) and its job, for the measurements his own parts cannot give.
 add_executable(to_sample_part tests/tools/to_sample_part.cpp)
 target_link_libraries(to_sample_part PRIVATE topopt)
+
+# Graded voxels, side piece: the two-way global-local loop AROUND the unchanged solver (a fine box
+# re-solved inside a coarse model, Aitken-accelerated) against a whole fine solve. Measure only.
+#   ctest -C Long -R to_zoom_two_way
+add_executable(test_to_zoom_two_way tests/unit/test_to_zoom_two_way.cpp)
+target_link_libraries(test_to_zoom_two_way PRIVATE topopt)
+add_test(NAME to_zoom_two_way CONFIGURATIONS Long COMMAND test_to_zoom_two_way)
+set_tests_properties(to_zoom_two_way PROPERTIES TIMEOUT 1800)
+
+# Stage 4a: the level-set optimiser's MMA step with m constraints at once
+# (plsm_mma_update_m): m = 1 the same bytes as today, textbook optima, an
+# infeasible start. Header-only, seconds.
+add_executable(test_to_stage4_mma tests/unit/test_to_stage4_mma.cpp)
+target_link_libraries(test_to_stage4_mma PRIVATE topopt)
+add_test(NAME to_stage4_mma COMMAND test_to_stage4_mma)
+
+# Stage 4, test I (detection): sealed pockets on a made 24^3 cube, by both readers
+# of the rule (plsm_void_topology and sealed_pocket_summary). Seconds.
+add_executable(test_to_stage4_pocket tests/unit/test_to_stage4_pocket.cpp)
+target_link_libraries(test_to_stage4_pocket PRIVATE topopt)
+add_test(NAME to_stage4_pocket COMMAND test_to_stage4_pocket)

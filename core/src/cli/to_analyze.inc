@@ -238,6 +238,8 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     model_grid = std::move(setup.grid);
     bcs = std::move(setup.bcs);
     options = std::move(setup.options);
+    options.top_skin_mm = job.loads.top_solid_mm;      // stage 2: the user's skins, for printed grams
+    options.bottom_skin_mm = job.loads.bottom_solid_mm;
     for (const ProductionLoadCase::LoadGroup& g : lc.load_groups)
       for (const int fid : g.face_ids) load_freeze_face_ids.push_back(fid);
   } else {
@@ -508,7 +510,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   // construction. width_aware defaults false → the scalar f^1.5 gate.
   // TO rebuild stage 2 (see to_setup.inc); set here, after the load case has
   // replaced the options.
-  if (strength_mode() == StrengthMode::Size)
+  if (strength_mode() == StrengthMode::Size || strength_mode() == StrengthMode::Surface)
     options.stress_reading_mm = reading_size_for_job_mm(job.material);
   const KnockdownSpec knockdown = knockdown_spec_for(options);
 

@@ -114,6 +114,13 @@ struct DensitySnapshotEvent {
 // Inputs that shape one minimize_plastic run (beyond the part, material, BCs
 // and rule table passed to minimize_plastic()).
 struct MinimizePlasticOptions {
+  // TO rebuild stage 2, TOPOPT_STRENGTH=surface only (empty otherwise, and empty =
+  // none): the DRAWN part's fill per voxel of the PART grid build_job_setup made
+  // (file_fill_fractions of the model's mesh, 8 per voxel edge). minimize_plastic
+  // solves and reads the margin probe's and the certificate's stress on the drawn
+  // faces at these fills (its stress view); nothing else reads it.
+  std::vector<double> drawn_fill;
+
   // The volume-fraction ladder to walk, in the order given. Must be non-empty and
   // STRICTLY DESCENDING (heaviest/strongest first), and it is one of exactly two
   // KINDS — mixing them is refused, because one run reduces plastic against the
@@ -511,6 +518,13 @@ struct MinimizePlasticOptions {
   // is the common 0.4 mm-nozzle default and the value 191/192 measured with. Only read
   // when width_aware_knockdown is armed AND wall_loops > 0. Must be >= 0.
   double wall_line_width_mm = 0.45;
+  // TO rebuild stage 2 (the maintainer, 2026-11-26: the print settings the user set
+  // travel with the part): the solid top and bottom skins the slicer lays, in mm, for
+  // the PRINTED GRAMS only (no solve reads them). < 0 = not stated: the usual 1.0 mm
+  // top and 0.6 mm bottom (printed_mass.hpp). Set by the CLI from the job's
+  // loads.top_solid_mm / bottom_solid_mm (#362's notes30 keys).
+  double top_skin_mm = -1.0;
+  double bottom_skin_mm = -1.0;
   // The slicer extrusion/line width (mm) of the single OUTER wall loop. Bambu Studio /
   // OrcaSlicer expose the outermost perimeter's width SEPARATELY from the inner loops
   // (users routinely run a narrower outer for surface quality, a wider inner for
@@ -1023,7 +1037,32 @@ struct MinimizePlasticOptions {
   // ~1% on the harness grids). 1 = a single OC step per reseed. Ignored unless the
   // design trigger is armed.
   int draft_probe_iters = 1;
+
+  // TO rebuild stage 4, piece "pocket" (TOPOPT_STAGE4 contains pocket; read only
+  // then): the job will be LATTICED afterwards (a "lattice" block), so a sealed
+  // pocket is the lattice pass's to refuse and the solid part's report line and
+  // [pocket] log line are not written. run_job sets it; the multiscale and frozen
+  // lattice options count as latticed too.
+  bool pocket_lattice_posture = false;
 };
+
+// TO rebuild stage 4, piece "pocket": the sealed pockets of a printed field, by
+// plsm_void_topology's rule (plsm_topology.hpp): the void inside the part
+// (in_part and occ <= iso) is walked 6-CONNECTED; a pocket is sealed when the
+// whole not-printed set (Empty voxels outside the part included) gives it no
+// face-connected route to one of the grid's six boundary planes. Edge- or
+// corner-only contact is NOT a way out. Read-only, deterministic, O(voxels).
+// Adds what the topology counters lack: the largest pocket.
+struct SealedPocketSummary {
+  long long count = 0;
+  long long voxels = 0;
+  long long largest_voxels = 0;
+  double volume_mm3 = 0.0;
+  double largest_mm3 = 0.0;
+};
+SealedPocketSummary sealed_pocket_summary(int nx, int ny, int nz, double h,
+                                          const std::vector<double>& occ, double iso,
+                                          const std::vector<char>& in_part);
 
 // Handoff 131 — the VariantReport::rejection_reason a rung ended on the
 // rung-infeasibility signature carries. One definition, shared by the driver, the

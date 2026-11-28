@@ -108,6 +108,10 @@ struct KnockdownSpec {
   bool width_aware = false;
   double infill_percent = 100.0;
   double wall_thickness_mm = 0.0;
+  // TO rebuild stage 2: the solid top / bottom skins for the printed grams, mm;
+  // < 0 = the usual ones (kStage2TopSkinMm / kStage2BottomSkinMm). No solve reads them.
+  double top_skin_mm = -1.0;
+  double bottom_skin_mm = -1.0;
   // The infill curve's exponent and floor, as the width-aware per-voxel core term reads them (Install 3: the
   // strength check's settings). The defaults ARE infill_margin_knockdown's constants, so every caller that leaves
   // them is byte-for-byte as before.
@@ -126,6 +130,12 @@ struct KnockdownSpec {
 
 // Install 3: numbers of the analysis that the new engine's strength check lets a job set (strength_settings).
 // Null (the default, every other caller): the constants below, byte-for-byte.
+// See analyze_fixed_design's `stress_view`.
+struct StressView {
+  VoxelGrid grid;
+  std::vector<double> density;
+};
+
 struct AnalysisKnobs {
   int contact_rounds = 6;                           // bearing anchors: most contact solves
   double sliding_share_max = 0.05;                  // == kAnchorsSlidingShare
@@ -178,6 +188,15 @@ struct FixedDesignAnalysis {
   // today's one-voxel reading because their member is thinner than
   // kStressThinMemberSizes sizes.
   std::size_t stress_thick_member_voxels = 0, stress_thin_member_voxels = 0;
+  // TO rebuild stage 2, TOPOPT_STRENGTH=surface only (0 otherwise): the surface
+  // reading's counts (stress_measure.hpp, SurfaceCarry) for the readout: concave
+  // points too tight for the grid, points with too few full voxels behind them,
+  // points on a loaded face; the largest value the surface reading gave; and the
+  // printed voxels whose member is under kSurfaceResolvedThroughVoxels voxels through
+  // (0 where no member width was measured on that path).
+  std::size_t surface_tight_points = 0, surface_unresolved_points = 0, surface_loaded_points = 0;
+  double surface_read_peak = 0.0;
+  std::size_t surface_thin_voxels = 0;
   double max_interlayer_tension = 0.0;
   StressMargin margin;  // SOLID margin (the reported/displayed value)
   V3Report v3;          // §7 V3 suite on the fixed density (min-feature count, mesh, ...)
@@ -463,7 +482,14 @@ FixedDesignAnalysis analyze_fixed_design(
     // other case, including an armed gate the law could not evaluate.
     bool gate_on_strut_strength = false,
     // Install 3: the strength check's numbers (AnalysisKnobs). Null: the constants, as before.
-    const AnalysisKnobs* knobs = nullptr);
+    const AnalysisKnobs* knobs = nullptr,
+    // TO rebuild stage 2, TOPOPT_STRENGTH=surface only (null everywhere else, which is
+    // byte-for-byte today): the grid and density the STRESS is solved and read on (the
+    // drawn faces at their fills; minimize_plastic's stress view). The solve, the
+    // stress fields and the margins use the view; the mass, the printed grams and
+    // counts, the support proxy and the V3 / exported density keep `grid` and
+    // `density`. Same dimensions as `grid`. Ignored when `lattice` is given.
+    const StressView* stress_view = nullptr);
 
 // ═══ THE MARGIN-REPRODUCTION BAND ═══════════════════════════════════════════
 // (task 2026-08-08-lattice-variant-margin-tolerance, S1)

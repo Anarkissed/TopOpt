@@ -206,6 +206,12 @@ void emit_variant(std::string& out, const VariantReport& v,
     }
     out += "]}";
   }
+  // Stage 4 "pocket": a solid part's sealed pockets, only when there are any.
+  if (v.sealed_pockets > 0)
+    out += ",\n" + in2 + "\"sealed_pockets\": {\"count\": " +
+           std::to_string(v.sealed_pockets) + ", \"volume_mm3\": " +
+           num_json(v.sealed_pockets_volume_mm3) + ", \"largest_mm3\": " +
+           num_json(v.sealed_pockets_largest_mm3) + "}";
   if (v.finish.ran) out += ",\n" + in2 + "\"finish\": " + finish_json(v.finish);
   // CORE LIST items 41 + 47 — the rung's bodies (report.hpp), only when there is
   // more than one body, a speck or a lost anchor to report.

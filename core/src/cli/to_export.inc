@@ -23,9 +23,12 @@ RunFinish make_run_finish(const JobDescription& job, const MinimizePlasticOption
   RunFinish f;
   const double outer = o.wall_line_width_outer_mm > 0.0 ? o.wall_line_width_outer_mm
                                                          : o.wall_line_width_mm;
-  f.ctx.min_thickness_mm = outer > 0.0 ? 2.0 * outer : 0.0;
+  // Stage 4, piece "wall" (to_stage_switch.hpp): a solid part's smallest wall is ONE
+  // line (the maintainer's ruling of 2026-11-26); unset, today's two.
+  const int wall_lines = stage4_on("wall") ? 1 : 2;
+  f.ctx.min_thickness_mm = outer > 0.0 ? wall_lines * outer : 0.0;
   char src[96];
-  std::snprintf(src, sizeof src, "2 \u00D7 outer wall line width (%.2f mm)", outer);
+  std::snprintf(src, sizeof src, "%d \u00D7 outer wall line width (%.2f mm)", wall_lines, outer);
   f.ctx.min_thickness_source = src;
   f.ctx.cell_mm = sg.spacing / static_cast<double>(std::max(1, job.output.smooth_factor));
   f.ctx.grid = &sg;
@@ -321,6 +324,14 @@ FinishRecheck recheck_file(const TriangleMesh& m, const TriangleMesh& raw, const
   const std::vector<char> occ = file_occupancy(m, sg), occ0 = file_occupancy(raw, sg);
   fb.recheck_ran = true;
   fb.margin = a.analysis.margin_effective;
+  // Interim (to_stage_switch.hpp, TOPOPT_SHOWN=lower): never show, or judge on,
+  // more than the loop certified. `fb.margin_before` is the certificate where the
+  // caller has set it (the run's finish); 0 = not set, nothing changes.
+  if (shown_margin_lower_on() && fb.margin_before > 0.0 && fb.margin_before < fb.margin) {
+    std::fprintf(stderr, "[shown] the re-check reads %.4g, the loop certified %.4g: the lower one is shown\n",
+                 fb.margin, fb.margin_before);
+    fb.margin = fb.margin_before;
+  }
   // ANY material in a Keep clear refuses (ruling 2026-11-03 19:55), each voxel confirmed
   // on the file and outside the part's own solid.
   fb.keep_clear_voxels = file_keep_clear_exact(m, sg, occ, clearance, exclude, part);

@@ -459,6 +459,8 @@ KnockdownSpec knockdown_spec_for(const MinimizePlasticOptions& opts) {
       opts.wall_loops > 0
           ? outer_w + static_cast<double>(opts.wall_loops - 1) * inner_w
           : 0.0;
+  knockdown.top_skin_mm = opts.top_skin_mm;
+  knockdown.bottom_skin_mm = opts.bottom_skin_mm;
   return knockdown;
 }
 

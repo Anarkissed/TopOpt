@@ -44,7 +44,12 @@ inline bool to_stage1_on() { return face_load_mode() != FaceLoadMode::Voxel; }
 //             together: never more than 5 % below the textbook at any
 //             resolution (reviewer, 2026-11-26). A material with no published
 //             length says so and keeps today's solve and reading whole.
-enum class StrengthMode { Today, Stiff, Size };
+//   "surface" : as "size" in everything, EXCEPT that wherever "size" falls back to
+//             today's solve and one-voxel reading (a size under the switch point:
+//             the whole part; thin members: those voxels) it reads the real-
+//             stiffness solve at the TRUE SURFACE instead (stress_carried_to_surface,
+//             shape 1; the reviewer's ruling 2026-11-27).
+enum class StrengthMode { Today, Stiff, Size, Surface };
 
 inline StrengthMode strength_mode() {
   const char* v = std::getenv("TOPOPT_STRENGTH");
@@ -52,6 +57,7 @@ inline StrengthMode strength_mode() {
   const std::string m(v);
   if (m == "stiff") return StrengthMode::Stiff;
   if (m == "size") return StrengthMode::Size;
+  if (m == "surface") return StrengthMode::Surface;
   return StrengthMode::Today;
 }
 
@@ -74,6 +80,46 @@ inline int recheck_fill_sub() {
   if (s.rfind("fill", 0) != 0) return 0;
   const int k = s.size() > 5 && s[4] == ':' ? std::atoi(s.c_str() + 5) : 0;
   return k >= 1 ? k : 8;
+}
+
+// THE SHOWN MARGIN IS THE LOWER ONE (stage 2, interim; the reviewer's ruling of
+// 2026-11-27 16:34Z, maintainer-approved). TOPOPT_SHOWN=lower makes the margin shown
+// for a finished version, and the margin it is judged on, the LOWER of the loop's
+// certificate and the finished file's re-check. The two are different analyses of
+// the voxels the surface cuts (ledger A-07) and today the re-check can show more
+// than the loop certified (the sample hook: 2.66 certified, 3.89 shown). With the
+// switch the screen never shows more than was certified. Unset = today's bytes.
+// It goes when one judge flips with the real cut-voxel reading.
+inline bool shown_margin_lower_on() {
+  const char* v = std::getenv("TOPOPT_SHOWN");
+  return v != nullptr && std::string(v) == "lower";
+}
+
+// STAGE 4, RULES INSIDE THE OPTIMISER (started 2026-11-27 by the maintainer's word).
+// TOPOPT_STAGE4 is a comma-separated list of the stage's pieces to turn on, or
+// "all": each piece sits behind its own name until the stage's gate passes.
+//   wall : a SOLID part's smallest wall is ONE outer line width (his ruling of
+//          2026-11-26; two lines is the lattice's rule), where today's finish
+//          holds two.
+//   pocket : a sealed pocket (an enclosed void nothing can drain from) is
+//          ALLOWED in a solid part and told: a "sealed_pockets" block on the
+//          version's report line and one [pocket] log line; in a lattice it
+//          stays refused, with the plain reason "A sealed pocket has no way out".
+// Unset = today's bytes.
+inline bool stage4_on(const char* piece) {
+  const char* v = std::getenv("TOPOPT_STAGE4");
+  if (v == nullptr) return false;
+  const std::string s(v), want(piece);
+  if (s == "all") return true;
+  std::size_t from = 0;
+  while (from <= s.size()) {
+    const std::size_t to = s.find(',', from);
+    const std::string item = s.substr(from, to == std::string::npos ? std::string::npos : to - from);
+    if (item == want) return true;
+    if (to == std::string::npos) break;
+    from = to + 1;
+  }
+  return false;
 }
 
 // THE CONNECTION RULE (stage 5; the reviewer's ruling of 2026-11-26, maintainer-
