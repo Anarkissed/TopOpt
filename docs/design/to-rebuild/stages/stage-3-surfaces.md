@@ -4,6 +4,8 @@ Branch `claude/topopt-stage-3-surfaces-7f58fd`, from 2b40bcf4. Status: IN PROGRE
 
 ## Where I stopped (read this first)
 
+- **11-27 22:10, STOPPED for the weekly limit (his word: 99 %; resume after 00:01).** Nothing of mine runs or holds the lock. queue2.sh is DONE: test P, the knots, the stand at 128 re-run (rc=0), and C's four parts at 64 (pressing_box, base_strengthen, carriage_strengthen128, pressing_strengthen: all rc=0, results NOT yet read). Stand v4's re-run was stopped by the memory guard (free 29 %, swap rising; no file). On resume, one job at a time: read C's results, retry Stand v4 once, then the all-threads profile (lock hold), then the test P fixes.
+
 - **11-27 ~14:20, REPORT SENT as it stands (TOReview's call 19:19Z).** The stage does NOT close and the switch does NOT flip until test P passes. NEXT, in order:
   1. queue2.sh's runs (Stand v4 re-run, then C's four parts);
   2. an ALL-THREADS profile of the stand at 64, switch on, in a lock hold;
