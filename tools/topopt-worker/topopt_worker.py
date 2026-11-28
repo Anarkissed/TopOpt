@@ -657,6 +657,26 @@ def run_job_thread(job):
             SCHED.on_finished(job)
 
 
+BREAK_CACHE_NAME = "break_cache"
+
+
+def _link_break_cache(tmpdir):
+    """★ A1 (the Organic break check's cache): core keeps the check's answers only in a folder the job NAMES (job.json
+    `break_cache`, a bare folder name beside the job file). The worker makes a new folder per job, so the answers would die with
+    it; this keeps ONE folder under the worker's own data root (`<workdir>/break-cache`) and puts a symlink named
+    `break_cache` beside the job that points at it (core opens, lists and renames files through the link). Best-effort:
+    returns False (no key is written, every check is made afresh) when the folder or the link cannot be made."""
+    try:
+        root = os.path.join(CFG.workdir, "break-cache")
+        os.makedirs(root, exist_ok=True)
+        link = os.path.join(tmpdir, BREAK_CACHE_NAME)
+        if not os.path.lexists(link):
+            os.symlink(root, link)
+        return True
+    except OSError:
+        return False
+
+
 def _chained_file_job(job):
     """The print-file job a finished strengthening makes itself (its `then` = file): the SAME inputs (the model and every
     file beside its job), its job.json with `strengthened` naming the last round's strengthened.json, that round's
@@ -688,6 +708,8 @@ def _chained_file_job(job):
             shutil.copy2(os.path.join(os.path.dirname(spath), adds), os.path.join(tmp2, adds))
             shutil.copy2(spath, os.path.join(tmp2, "strengthened.json"))
             doc["strengthened"] = "strengthened.json"
+        if BREAK_CACHE_NAME in doc and not _link_break_cache(tmp2):
+            doc.pop(BREAK_CACHE_NAME, None)
         job_path = os.path.join(tmp2, "job.json")
         with open(job_path, "w") as f:
             json.dump(doc, f)
@@ -1034,6 +1056,11 @@ class Handler(BaseHTTPRequestHandler):
             with open(os.path.join(tmpdir, rname), "wb") as f:
                 f.write(fields["recheck_mesh"]["data"])
             orc["mesh"] = rname
+        # ★ A1: only an Organic print-file job with a strength job (it carries the stress `tensor`) names the break check's
+        # cache; every other job's job.json stays byte for byte as it was (core refuses a key it does not know).
+        if job_doc.get("mode") == "lattice_file" and "strength_job" in job_doc and "tensor" in job_doc \
+                and _link_break_cache(tmpdir):
+            job_doc[BREAK_CACHE_NAME] = BREAK_CACHE_NAME
         job_path = os.path.join(tmpdir, "job.json")
         with open(job_path, "w") as f:
             json.dump(job_doc, f)
