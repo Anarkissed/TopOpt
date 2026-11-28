@@ -1054,3 +1054,16 @@ READ PLAINLY: on a real inside-corner fillet of 6 voxels of radius, NOT flagged,
 
 ORDER, one at a time: the fillet at 8 and 12 voxels (item 3); the indeterminate section-force case (item 2); the design-box loose end (item 4); measurements 3 to 5 under the lock.
 
+### The inside fillet at 8 and 12 voxels of radius, with the reference checked (the ruling's item 3); 2026-11-27 22:00
+
+The L bracket bent open; arms 8 thick for R = 4 and 6, 12 thick for R = 8, 16 thick for R = 12; 6 through. The surface reading at the base, 2 x and 4 x grids; "settled" = the 2 x to 4 x change under 2 %; the limit extrapolated from 2 x and 4 x (error taken as linear / as square in the voxel).
+
+| R, voxels | base / 2 x / 4 x, MPa | 2 x to 4 x | base against 4 x | base against the extrapolated limit (linear / square) |
+|---|---|---|---|---|
+| 4 (flagged tight) | 24.81 / 30.75 / 27.28 | -11.3 %: NOT settled, and not moving one way | -9.0 % | +4.2 / -5.0 % (means little) |
+| 6 | 22.69 / 23.46 / 24.76 | +5.5 %: NOT settled | -8.3 % | -12.9 / -9.9 % |
+| 8 | 20.78 / 21.48 / 21.54 | +0.3 %: settled | -3.5 % | -3.8 / -3.6 % |
+| 12 | 19.72 / 20.99 / 21.17 | +0.9 %: settled | -6.8 % | -7.6 / -7.1 % |
+
+So: at R = 8 the reading is inside the bar (-3.5 %); at R = 6 it is 10 to 13 % under the extrapolated value (worse than the -8.3 % against 4 x); and at R = 12 IT STILL MISSES (-7 %), on a settled reference, and is worse than at 8. A reading that gets worse as the raiser gets gentler is missing a term: with a larger fillet on a thicker arm the stress at the corner is more and more the BENDING stress of the arm (falling linearly through its thickness) and less the 1 / r^2 concentration; the two full voxels behind the surface are fitted to A + B / r^2 alone, which bends the wrong way for a linear fall. By the ruling ("only if 12 still misses the 5 % bar, try the carry with the bending gradient"): next is the carry A + B / r^2 + C x depth through THREE full voxels on curved free surfaces, measured on all the shapes.
+

@@ -260,6 +260,10 @@ double peak_ratio(int radius_voxels, bool exact_fill, double penalty, bool* ok,
 // or 4: the same physical bracket (base voxel 1 mm) at that many voxels per base voxel.
 // The readings and the counts are restricted to a box within R + 4 base voxels of the
 // fillet centre in x and y (the clamp and the loaded face are outside it).
+// `arm` and `length` (base voxels; 8 and 28 for R = 4 and 6): the reviewer's ruling of
+// 2026-11-27 measures R = 8 and 12 too, with the bracket scaled so the arms stay clearly
+// thicker than the fillet is deep: arm max(8, R + 4), length max(28, 3 R + 12); the grid
+// is length + 2 base voxels square (30 for the first bracket, as before).
 struct FilletReading {
   bool ok = false, non_convergent = false;
   double carry = 0.0;      // stress_carried_to_surface shape 1 on the boxed field, MPa
@@ -269,9 +273,9 @@ struct FilletReading {
   int nx = 0, nz = 0;
 };
 
-FilletReading fillet_reading(double R, int scale) {
+FilletReading fillet_reading(double R, int scale, int arm = 8, int length = 28) {
   FilletReading out;
-  const int n = 30 * scale, nzv = 6 * scale;
+  const int n = (length + 2) * scale, nzv = 6 * scale;
   VoxelGrid g;
   g.nx = n;
   g.ny = n;
@@ -284,7 +288,7 @@ FilletReading fillet_reading(double R, int scale) {
 
   // In base voxels.
   const double ox = 1.29, oy = 1.59;          // the outer faces
-  const double ix = ox + 8.0, iy = oy + 8.0;  // the inside corner (before the fillet)
+  const double ix = ox + arm, iy = oy + arm;  // the inside corner (before the fillet)
   const double fcx = ix + R, fcy = iy + R;    // the fillet's centre
   auto inside = [&](double x, double y, double z) {
     if (z < 0.0 || z > 6.0 || x < ox || y < oy) return false;
@@ -307,6 +311,14 @@ FilletReading fillet_reading(double R, int scale) {
         density[idx] = static_cast<double>(in) / (kSub * kSub * kSub);
         if (in > 0) g.tags[idx] = topopt::VoxelTag::Interior;
       }
+  {
+    std::size_t solid = 0;
+    for (double d : density)
+      if (d > 0.0) ++solid;
+    std::printf("[fillet] R = %.0f, %dx: %zu voxels in the grid, %zu with material (before the solve)\n", R, scale,
+                density.size(), solid);
+    std::fflush(stdout);
+  }
 
   // Clamp: every node of the material's faces on y = top.
   std::vector<DirichletBC> bcs;
@@ -601,11 +613,23 @@ int main(int argc, char** argv) {
     std::printf("\n[fillet] L bracket, arms 8 voxels thick, extruded 6, inside-corner fillet, the corner opened by a 1 MPa "
                 "end traction; readings in a box within R + 4 voxels of the fillet centre; the reference is the same "
                 "bracket at 4 x the voxels per axis\n");
-    for (double R : {4.0, 6.0}) {
+    for (double R : {4.0, 6.0, 8.0, 12.0}) {
+      // R = 4 and 6 keep the first bracket (arm 8, length 28) so their rows stay as they
+      // were; R = 8 and 12 are scaled: arm max(8, R + 4), length max(28, 3 R + 12).
+      const int Ri = static_cast<int>(R);
+      const int arm = R <= 6.0 ? 8 : std::max(8, Ri + 4);
+      const int length = R <= 6.0 ? 28 : std::max(28, 3 * Ri + 12);
+      // The finest grid: 4x, or 3x when 4x would hold over about 3 million solid voxels
+      // (solid area estimated from the L and the fillet, times the 6-voxel extrusion).
+      const double area = 2.0 * arm * length - static_cast<double>(arm) * arm + (1.0 - std::acos(-1.0) / 4.0) * R * R;
+      const int fine = area * 6.0 * 64.0 > 3.0e6 ? 3 : 4;
+      std::printf("[fillet] R = %.0f: arms %d voxels thick, %d long (grid %d x %d base voxels), extruded 6; finest grid %dx%s\n",
+                  R, arm, length, length + 2, length + 2, fine,
+                  fine == 3 ? " (4x would exceed about 3 million solid voxels)" : "");
       FilletReading fr[3];
-      const int scales[3] = {1, 2, 4};
+      const int scales[3] = {1, 2, fine};
       for (int q = 0; q < 3; ++q) {
-        fr[q] = fillet_reading(R, scales[q]);
+        fr[q] = fillet_reading(R, scales[q], arm, length);
         std::printf("[fillet] R = %.0f, %dx (%d x %d x %d voxels): ", R, scales[q], fr[q].nx, fr[q].nx, fr[q].nz);
         if (fr[q].ok)
           std::printf("shape-1 carry %.3f MPa, tight %zu, unresolved %zu; plain per-voxel peak %.3f MPa\n",
@@ -636,6 +660,26 @@ int main(int argc, char** argv) {
                     "base plain per-voxel peak %+.1f %%\n",
                     R, fr[1].carry, 100.0 * (fr[0].carry / fr[1].carry - 1.0),
                     100.0 * (fr[0].per_voxel / fr[1].carry - 1.0));
+      }
+      // HAS THE REFERENCE SETTLED (the reviewer's ruling 2026-11-27)? The 2x-to-finest
+      // change, and Richardson-style limits from the two finest readings assuming the
+      // error falls with the voxel size (linear) or with its square: with r the ratio of
+      // the voxel sizes (2 for 4x over 2x), limit = f + (f - f2) / (r - 1) and
+      // f + (f - f2) / (r^2 - 1); for r = 2: 4x + (4x - 2x) and 4x + (4x - 2x) / 3.
+      if (ref == 2 && fr[1].ok) {
+        const double f2 = fr[1].carry, f = fr[2].carry, rr = scales[2] / 2.0;
+        const double lin = f + (f - f2) / (rr - 1.0), sq = f + (f - f2) / (rr * rr - 1.0);
+        const double change = 100.0 * (f / f2 - 1.0);
+        std::printf("[fillet] R = %.0f: carry base %.3f, 2x %.3f, %dx %.3f MPa; 2x to %dx change %+.1f %% (%s); "
+                    "limit if linear in the voxel %.3f, if square %.3f MPa\n",
+                    R, fr[0].carry, f2, scales[2], f, scales[2], change,
+                    std::fabs(change) < 2.0 ? "settled" : "NOT settled", lin, sq);
+        std::printf("[fillet] R = %.0f: base carry against %dx / linear limit / square limit: %+.1f / %+.1f / %+.1f %%; "
+                    "2x carry: %+.1f / %+.1f / %+.1f %%\n",
+                    R, scales[2], 100.0 * (fr[0].carry / f - 1.0), 100.0 * (fr[0].carry / lin - 1.0),
+                    100.0 * (fr[0].carry / sq - 1.0), 100.0 * (f2 / f - 1.0), 100.0 * (f2 / lin - 1.0),
+                    100.0 * (f2 / sq - 1.0));
+        std::fflush(stdout);
       }
     }
   }
