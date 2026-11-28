@@ -33,6 +33,19 @@ namespace topopt::lattice_layout {
 // resolved. A post carrying over this share of the load whose shaft or an end joint is not resolved, or not-resolved
 // material holding over this share of the strain energy, gives "not_proven" (the post or the largest region named).
 constexpr double kBreakLoadPathShare = 0.05;
+// C8, RULE BY CORES (the lead's design), on the 0.1 mm samples, everything scaling with the voxel:
+//  - CORE: material at least r from the outside, r = min_voxels_across / 2 voxels (1.5 voxels: 0.3 mm at 0.2 mm).
+//  - THICK: material within r of CORE (the opening by a ball of diameter 3 voxels); THIN: material not THICK.
+//  - FAR: material farther than r + d from CORE, d = kBreakFarMarginVoxels voxels (1.25: 0.25 mm at 0.2 mm), which
+//    covers the sliver an opening removes at a square edge (0.12 mm) and at a cube's corner (0.22 mm).
+//  - A voxel is resolved (THICK) when at least half of its filled samples are THICK. BODIES = the face-connected
+//    components of THICK voxels. Each face-connected THIN region is (A) a SLIVER (no FAR material, touching at most one
+//    BODY: part of that body's surface, left out of the load-path measures), (B) a THIN MEMBER (holds FAR material:
+//    measured by the energy share and the force through it), or (C) a CONNECTOR (no FAR material, touching two or more
+//    BODIES, e.g. a kissing contact or a short joint: measured by the force through it).
+//  Known limit: a thin patch in parallel with a thick bridge between the same two blocks makes ONE body, so the patch is
+//  a sliver and is not measured.
+constexpr double kBreakFarMarginVoxels = 1.25;
 
 // A bar of the lay as the file holds it (model frame), and a post as the print check laid it.
 struct BreakBar {
@@ -146,8 +159,10 @@ struct BreakResult {
   // C8, (iii): each not-resolved region's load share (the largest net force through any one-voxel slice of it along
   // any axis, over the applied load), with its energy share, place and voxels; those over 1 %, largest first, at most 10.
   // A region over kBreakLoadPathShare gives not_proven ("unresolved_joint").
-  struct Region { double load_share = 0.0, energy_share = 0.0; Vec3 at{}; std::size_t voxels = 0, first = 0; };
+  struct Region { double load_share = 0.0, energy_share = 0.0; Vec3 at{}; std::size_t voxels = 0, first = 0, bodies = 0; bool member = true; };
   std::vector<Region> joint_regions;
+  std::size_t unresolved_voxels = 0;   // material voxels the gate does not judge
+  std::size_t sliver_regions = 0, sliver_voxels = 0, member_regions = 0, connector_regions = 0;   // C8, rule by cores
   std::vector<std::string> not_proven_because;
   // also_connected_ball: the voxels whose ball holds material not connected to them inside it, and the first breaks
   // (judged, all points) smoothed over the connected material only.

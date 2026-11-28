@@ -262,7 +262,7 @@ void edt3(std::vector<float>& a, int nx, int ny, int nz) {
 // (the union of every ball of that radius that fits in the material): the samples at least that far from the empty
 // (the erosion), then every material sample within that radius of the erosion. A voxel is judged when any of its
 // samples is. The box is padded by one empty sample on every side.
-std::vector<char> judged_fine(const BreakAsk& ask, const Grid& g, const std::vector<char>& mat) {
+std::vector<char> judged_fine(const BreakAsk& ask, const Grid& g, const std::vector<char>& mat, std::vector<char>* far_out = nullptr) {
   const int m = 2;
   const int NX = g.nx * m + 2, NY = g.ny * m + 2, NZ = g.nz * m + 2;
   const double hs = g.h / m;
@@ -278,15 +278,34 @@ std::vector<char> judged_fine(const BreakAsk& ask, const Grid& g, const std::vec
   for (std::size_t e = 0; e < N; ++e) core[e] = in[e] && (std::sqrt(static_cast<double>(a[e])) - 0.5) * hs >= r - 1e-9;
   for (std::size_t e = 0; e < N; ++e) a[e] = core[e] ? 0.0f : 1e12f;   // sites: the erosion
   edt3(a, NX, NY, NZ);
-  std::vector<char> res(mat.size(), 0);
+  // C8 (the lead's ruling, the principle of option c): a voxel is RESOLVED when at least half of its FILLED samples lie
+  // in the opened set, so a face voxel of a thick body (its filled samples belong to the thick body) is resolved however
+  // little of it is filled, and a thin neck or joint (none of its samples opened) is not. A material voxel with no
+  // filled fine sample (its share read at 4 x 4 x 4 is over the floor but none of its 2 x 2 x 2 samples is inside) is
+  // read by all its samples the same way (within the opening's reach of the erosion).
+  std::vector<unsigned char> filled(mat.size(), 0), opened(mat.size(), 0), near(mat.size(), 0);
   for (int k = 1; k < NZ - 1; ++k)
     for (int j = 1; j < NY - 1; ++j)
       for (int i = 1; i < NX - 1; ++i) {
         const std::size_t e = idx(i, j, k);
-        if (!in[e] || std::sqrt(static_cast<double>(a[e])) * hs > r + 1e-9) continue;
         const std::size_t v = g.index((i - 1) / m, (j - 1) / m, (k - 1) / m);
-        if (mat[v]) res[v] = 1;
+        if (!mat[v]) continue;
+        const double dc = std::sqrt(static_cast<double>(a[e])) * hs;   // the distance to CORE
+        const bool reach = dc <= r + 1e-9;
+        if (reach) ++near[v];
+        if (in[e]) {
+          ++filled[v];
+          if (reach) ++opened[v];
+          // C8, RULE BY CORES: FAR = material farther than r + d from CORE (d = kBreakFarMarginVoxels voxels)
+          if (far_out && dc > r + kBreakFarMarginVoxels * g.h + 1e-9) (*far_out)[v] = 1;
+        }
       }
+  std::vector<char> res(mat.size(), 0);
+  const int per = m * m * m;
+  for (std::size_t v = 0; v < mat.size(); ++v) {
+    if (!mat[v]) continue;
+    res[v] = filled[v] > 0 ? 2 * opened[v] >= filled[v] : 2 * near[v] >= per;
+  }
   return res;
 }
 
@@ -870,7 +889,10 @@ BreakResult organic_break_check(const BreakAsk& ask) {
   }
   // 6. judged (resolved): break_judged (the gate the verdict reads)
   // C4: the gate from the fine samples, in mm (judged_fine); a test's own voxels keep the whole-voxel gate
-  const std::vector<char> res = ask.material_override ? break_judged(mat, g.nx, g.ny, g.nz, ask.min_voxels_across) : judged_fine(ask, g, mat);
+  std::vector<char> far(mat.size(), 0);
+  const std::vector<char> res = ask.material_override ? break_judged(mat, g.nx, g.ny, g.nz, ask.min_voxels_across) : judged_fine(ask, g, mat, &far);
+  if (ask.material_override)   // a test's own whole voxels: every not-judged voxel is read as FAR (a member), as before
+    for (std::size_t e = 0; e < mat.size(); ++e) far[e] = mat[e] && !res[e];
   // 7. the smoothed multiple per material voxel
   std::vector<std::array<int, 3>> ball;
   const int RB = static_cast<int>(std::ceil(ask.smooth_mm / h)) + 1;
@@ -1087,7 +1109,35 @@ BreakResult organic_break_check(const BreakAsk& ask) {
       total += en[e];
       if (!res[e]) unres += en[e];
     }
-    R.unresolved_energy_share = total > 0.0 ? unres / total : 0.0;
+    // C8, RULE BY CORES: BODIES = the face-connected components of the resolved (THICK) voxels, labelled in scan order.
+    std::vector<int> body(mat.size(), -1);
+    {
+      int nbody = 0;
+      std::vector<std::size_t> st;
+      const int nbd[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+      for (std::size_t e0 = 0; e0 < mat.size(); ++e0) {
+        if (!mat[e0] || !res[e0] || body[e0] >= 0) continue;
+        body[e0] = nbody;
+        st.assign(1, e0);
+        while (!st.empty()) {
+          const std::size_t e = st.back();
+          st.pop_back();
+          const int i = static_cast<int>(e % static_cast<std::size_t>(g.nx)), j = static_cast<int>((e / static_cast<std::size_t>(g.nx)) % static_cast<std::size_t>(g.ny)),
+                    k = static_cast<int>(e / (static_cast<std::size_t>(g.nx) * static_cast<std::size_t>(g.ny)));
+          for (const auto& d : nbd) {
+            const int ii = i + d[0], jj = j + d[1], kk = k + d[2];
+            if (ii < 0 || jj < 0 || kk < 0 || ii >= g.nx || jj >= g.ny || kk >= g.nz) continue;
+            const std::size_t f = g.index(ii, jj, kk);
+            if (!mat[f] || !res[f] || body[f] >= 0) continue;
+            body[f] = nbody;
+            st.push_back(f);
+          }
+        }
+        ++nbody;
+      }
+    }
+    unres = 0.0;   // summed below over the THIN MEMBERS (kind B) only
+    R.unresolved_energy_share = 0.0;
     // the largest connected not-resolved region by its energy; its place = its most loaded voxel
     std::vector<char> seen(mat.size(), 0);
     std::vector<std::size_t> stack, members;
@@ -1097,6 +1147,8 @@ BreakResult organic_break_check(const BreakAsk& ask) {
       if (!mat[e0] || res[e0] || seen[e0]) continue;
       double sum = 0.0, top = -1.0;
       std::size_t at = e0, n = 0;
+      bool has_far = false;
+      std::vector<int> touches;   // the BODIES this thin region touches
       stack.assign(1, e0);
       seen[e0] = 1;
       members.clear();
@@ -1104,6 +1156,7 @@ BreakResult organic_break_check(const BreakAsk& ask) {
         const std::size_t e = stack.back();
         stack.pop_back();
         members.push_back(e);
+        has_far = has_far || far[e];
         sum += en[e];
         ++n;
         if (en[e] > top) { top = en[e]; at = e; }
@@ -1113,11 +1166,20 @@ BreakResult organic_break_check(const BreakAsk& ask) {
           const int ii = i + d[0], jj = j + d[1], kk = k + d[2];
           if (ii < 0 || jj < 0 || kk < 0 || ii >= g.nx || jj >= g.ny || kk >= g.nz) continue;
           const std::size_t f = g.index(ii, jj, kk);
-          if (!mat[f] || res[f] || seen[f]) continue;
+          if (!mat[f]) continue;
+          if (res[f]) {
+            if (std::find(touches.begin(), touches.end(), body[f]) == touches.end()) touches.push_back(body[f]);
+            continue;
+          }
+          if (seen[f]) continue;
           seen[f] = 1;
           stack.push_back(f);
         }
       }
+      // (A) a SLIVER (no FAR material, touching at most one BODY): part of that body's surface, left out of (ii) and (iii)
+      if (!has_far && touches.size() <= 1) { ++R.sliver_regions; R.sliver_voxels += n; continue; }
+      const bool member = has_far;   // (B) a THIN MEMBER; else (C) a CONNECTOR between two or more BODIES
+      if (member) { ++R.member_regions; unres += sum; } else ++R.connector_regions;
       // (iii) C8: the force through the region. Every one-voxel slice of the region along each axis (the region's own
       // voxels in that layer): its net force = sum of filled share x h^2 x (the material's stress . the axis); the
       // region's load share = the largest magnitude over every slice and axis / the applied load.
@@ -1141,11 +1203,13 @@ BreakResult organic_break_check(const BreakAsk& ask) {
         rg.energy_share = total > 0.0 ? sum / total : 0.0;
         rg.voxels = n;
         rg.first = e0;
+        rg.member = member;
+        rg.bodies = touches.size();
         rg.at = g.centre(static_cast<int>(at % static_cast<std::size_t>(g.nx)), static_cast<int>((at / static_cast<std::size_t>(g.nx)) % static_cast<std::size_t>(g.ny)),
                          static_cast<int>(at / (static_cast<std::size_t>(g.nx) * static_cast<std::size_t>(g.ny))));
         if (rg.load_share > 0.01) R.joint_regions.push_back(rg);
       }
-      if (sum > best) {
+      if (member && sum > best) {   // the largest THIN MEMBER by its energy (measure (ii))
         best = sum;
         R.largest_unresolved_share = total > 0.0 ? sum / total : 0.0;
         R.largest_unresolved_voxels = n;
@@ -1153,7 +1217,9 @@ BreakResult organic_break_check(const BreakAsk& ask) {
                                            static_cast<int>(at / (static_cast<std::size_t>(g.nx) * static_cast<std::size_t>(g.ny))));
       }
     }
+    R.unresolved_energy_share = total > 0.0 ? unres / total : 0.0;   // over the regions that are not skin only
   }
+  for (std::size_t e = 0; e < mat.size(); ++e) R.unresolved_voxels += mat[e] && !res[e];
   const bool energy_block = R.unresolved_energy_share > kBreakLoadPathShare;
   // (iii) the regions by their load share, largest first (ties: the region's first voxel), at most ten kept
   std::sort(R.joint_regions.begin(), R.joint_regions.end(), [](const BreakResult::Region& a, const BreakResult::Region& b) {
@@ -1218,12 +1284,15 @@ BreakResult organic_break_check(const BreakAsk& ask) {
            (pp.shaft ? "true" : "false") + ", \"foot_resolved\": " + (pp.foot ? "true" : "false") + ", \"top_resolved\": " +
            (pp.top ? "true" : "false") + ", \"blocks\": " + (pp.share > kBreakLoadPathShare && !(pp.shaft && pp.foot && pp.top) ? "true" : "false") + "}";
     }
-    j += "], \"unresolved_energy_share\": " + num(R.unresolved_energy_share) + ", \"largest_unresolved_region\": {\"share\": " +
+    j += "], \"thin_regions\": {\"slivers\": " + std::to_string(R.sliver_regions) + ", \"members\": " + std::to_string(R.member_regions) +
+         ", \"connectors\": " + std::to_string(R.connector_regions) + "}";
+    j += ", \"unresolved_voxels\": " + std::to_string(R.unresolved_voxels) + ", \"unresolved_energy_share\": " + num(R.unresolved_energy_share) + ", \"largest_unresolved_region\": {\"share\": " +
          num(R.largest_unresolved_share) + ", \"at\": " + vec_json(model_point(F, R.largest_unresolved_at)) + ", \"voxels\": " +
          std::to_string(R.largest_unresolved_voxels) + "}, \"regions_by_load\": [";
     for (std::size_t q = 0; q < R.joint_regions.size(); ++q) {
       const BreakResult::Region& rg = R.joint_regions[q];
-      j += std::string(q ? ", " : "") + "{\"load_share\": " + num(rg.load_share) + ", \"energy_share\": " + num(rg.energy_share) + ", \"at\": " +
+      j += std::string(q ? ", " : "") + "{\"kind\": \"" + (rg.member ? "thin_member" : "connector") + "\", \"bodies_touched\": " +
+           std::to_string(rg.bodies) + ", \"load_share\": " + num(rg.load_share) + ", \"energy_share\": " + num(rg.energy_share) + ", \"at\": " +
            vec_json(model_point(F, rg.at)) + ", \"voxels\": " + std::to_string(rg.voxels) + "}";
     }
     j += "]}";

@@ -480,6 +480,8 @@ void steady(char** a) {
       pp += b;
     }
     for (const std::string& x : r.not_proven_because) why += x + " ";
+    std::printf("STEADY load path: %zu voxels not resolved; thin regions: %zu slivers (%zu voxels, left out), %zu members, %zu connectors\n",
+                r.unresolved_voxels, r.sliver_regions, r.sliver_voxels, r.member_regions, r.connector_regions);
     std::printf("STEADY load path: because [%s]; unresolved energy %.2f %%, largest region %.2f %% at (%.2f, %.2f, %.2f), %zu voxels;%s\n", why.c_str(),
                 100.0 * r.unresolved_energy_share, 100.0 * r.largest_unresolved_share, r.largest_unresolved_at.x, r.largest_unresolved_at.y,
                 r.largest_unresolved_at.z, r.largest_unresolved_voxels, pp.c_str());
@@ -563,9 +565,26 @@ void remake(const std::string& job_path, const std::string& out) {
 }
 
 // C7: the load-path rule on two made shapes. Boxes written as one STL (each its own closed shell, overlapping a little).
+// extra convex prisms: each a list of triangles, oriented outward from the prism's own centroid
+std::vector<std::vector<std::array<Vec3, 3>>> g_prisms;
 void write_boxes(const std::string& path, const std::vector<std::array<double, 6>>& boxes) {
   std::ofstream f(path);
   f << "solid boxes\n";
+  for (const auto& pr : g_prisms) {
+    Vec3 cen{0, 0, 0};
+    int nv = 0;
+    for (const auto& t : pr)
+      for (const Vec3& v : t) { cen = {cen.x + v.x, cen.y + v.y, cen.z + v.z}; ++nv; }
+    cen = {cen.x / nv, cen.y / nv, cen.z / nv};
+    for (auto t : pr) {
+      const Vec3 u{t[1].x - t[0].x, t[1].y - t[0].y, t[1].z - t[0].z}, w{t[2].x - t[0].x, t[2].y - t[0].y, t[2].z - t[0].z};
+      const Vec3 n{u.y * w.z - u.z * w.y, u.z * w.x - u.x * w.z, u.x * w.y - u.y * w.x};
+      if (n.x * (t[0].x - cen.x) + n.y * (t[0].y - cen.y) + n.z * (t[0].z - cen.z) < 0) std::swap(t[1], t[2]);
+      f << " facet normal 0 0 0\n  outer loop\n";
+      for (const Vec3& v : t) f << "   vertex " << v.x << " " << v.y << " " << v.z << "\n";
+      f << "  endloop\n endfacet\n";
+    }
+  }
   for (const auto& b : boxes) {
     const Vec3 c[8] = {{b[0], b[1], b[2]}, {b[3], b[1], b[2]}, {b[3], b[4], b[2]}, {b[0], b[4], b[2]},
                        {b[0], b[1], b[5]}, {b[3], b[1], b[5]}, {b[3], b[4], b[5]}, {b[0], b[4], b[5]}};
@@ -584,7 +603,12 @@ BreakResult load_path_case(const std::string& name, const std::vector<std::array
   std::filesystem::remove_all(w);
   std::filesystem::create_directories(w);
   // the part: the plain 10 x 3 x 3 bar (its two end faces are the hold and the load); the print: the boxes
-  write_boxes(w + "/part.stl", part_is_print ? boxes : std::vector<std::array<double, 6>>{{0, 0, 0, 10, 3, 3}});
+  {
+    const auto keep = g_prisms;
+    g_prisms.clear();   // the part has no prisms
+    write_boxes(w + "/part.stl", part_is_print ? boxes : std::vector<std::array<double, 6>>{{0, 0, 0, 10, 3, 3}});
+    g_prisms = keep;
+  }
   write_boxes(w + "/print.stl", boxes);
   const StepModel m = import_part_file_resolved(w + "/part.stl");
   const StlMesh print = read_stl_file(w + "/print.stl");
@@ -603,9 +627,12 @@ BreakResult load_path_case(const std::string& name, const std::vector<std::array
   std::printf("%s: verdict %s (%s); first break %.3f; unresolved energy %.4f, largest region %.4f at (%.2f, %.2f, %.2f), %zu voxels\n", name.c_str(),
               r.verdict.c_str(), why.c_str(), r.first_resolved.multiple, r.unresolved_energy_share, r.largest_unresolved_share,
               r.largest_unresolved_at.x, r.largest_unresolved_at.y, r.largest_unresolved_at.z, r.largest_unresolved_voxels);
+  std::printf("%s: thin regions: %zu slivers (%zu voxels), %zu members, %zu connectors\n", name.c_str(), r.sliver_regions, r.sliver_voxels,
+              r.member_regions, r.connector_regions);
   if (!r.joint_regions.empty())
-    std::printf("%s: the region with the most load: %.4f of the load at (%.2f, %.2f, %.2f), %zu voxels\n", name.c_str(), r.joint_regions.front().load_share,
-                r.joint_regions.front().at.x, r.joint_regions.front().at.y, r.joint_regions.front().at.z, r.joint_regions.front().voxels);
+    std::printf("%s: the region with the most load: %s, %.4f of the load at (%.2f, %.2f, %.2f), %zu voxels, touching %zu bodies\n", name.c_str(),
+                r.joint_regions.front().member ? "thin member" : "connector", r.joint_regions.front().load_share, r.joint_regions.front().at.x,
+                r.joint_regions.front().at.y, r.joint_regions.front().at.z, r.joint_regions.front().voxels, r.joint_regions.front().bodies);
   return r;
 }
 void load_path() {
@@ -619,8 +646,33 @@ void load_path() {
   // joint is measured by the strain-energy share of its not-resolved material (posts by their section force); named.
   const BreakResult c = load_path_case("JOINT", {{0, 0, 0, 5, 3, 3}, {4.9, 2.6, 2.6, 10, 5.6, 5.6}}, 0.1, true);
   check(c.ok && c.verdict == "not_proven" && !c.joint_regions.empty() && c.joint_regions.front().load_share > kBreakLoadPathShare &&
-            std::hypot(std::hypot(c.largest_unresolved_at.x - 4.95, c.largest_unresolved_at.y - 2.8), c.largest_unresolved_at.z - 2.8) < 1.5,
+            std::hypot(std::hypot(c.joint_regions.front().at.x - 4.95, c.joint_regions.front().at.y - 2.8), c.joint_regions.front().at.z - 2.8) < 1.5,
         "the load-path rule: a thin joint in the load path is named (not_proven, the region at the joint)");
+  // the gate on a thick block whose faces fall inside voxels (the lead's ruling on C8): a 6 x 6 x 6 mm block at
+  // (0.03, 0.07, 0.11), so every face voxel is partly filled. Its face and edge voxels must all read resolved except at
+  // most a line along each of the 12 sharp edges (12 x 32 voxels at 0.2 mm).
+  {
+    const BreakResult d = load_path_case("BLOCK", {{0.03, 0.07, 0.11, 6.03, 6.07, 6.11}}, 1.0, true);
+    std::printf("BLOCK: %zu material voxels not resolved, %zu of them in slivers (verdict %s)\n", d.unresolved_voxels, d.sliver_voxels, d.verdict.c_str());
+    check(d.ok && d.unresolved_voxels <= 12 * 32 && d.member_regions == 0 && d.connector_regions == 0 && d.verdict == "pass",
+          "the gate: a thick block's partly filled face and edge voxels are resolved or slivers (exempt): pass");
+  }
+  // C8 rule by cores, two more made shapes (no pass marks: what they read is recorded)
+  {   // a 60-degree knife edge: an equilateral prism (side 1.5 mm) along y on the bar's top face at its loaded end
+    const double zt = 3.0 + 0.75 * std::sqrt(3.0);
+    const Vec3 A0{8.5, 0, 3}, B0{10, 0, 3}, C0{9.25, 0, zt}, A1{8.5, 3, 3}, B1{10, 3, 3}, C1{9.25, 3, zt};
+    g_prisms = {{{A0, B0, C0}, {A1, C1, B1}, {A0, B0, B1}, {A0, B1, A1}, {B0, C0, C1}, {B0, C1, B1}, {C0, A0, A1}, {C0, A1, C1}}};
+    const BreakResult k = load_path_case("KNIFE", {{0, 0, 0, 10, 3, 3}}, 1.0);
+    g_prisms.clear();
+    std::printf("KNIFE reads: verdict %s, members %zu, the largest measured load share %.4f, unresolved energy %.4f\n", k.verdict.c_str(),
+                k.member_regions, k.joint_regions.empty() ? 0.0 : k.joint_regions.front().load_share, k.unresolved_energy_share);
+  }
+  {   // two thick blocks joined by a thick bridge AND, in parallel, a short thin patch: one BODY, so the patch is a sliver
+    const BreakResult q = load_path_case("PARALLEL", {{0, 0, 0, 4.9, 3, 3}, {5.1, 0, 0, 10, 3, 3}, {4.8, 0, 0, 5.2, 1.5, 3}, {4.8, 2.6, 2.6, 5.2, 3.0, 3.0}},
+                                         1.0, true);
+    std::printf("PARALLEL reads: verdict %s, slivers %zu, members %zu, connectors %zu (the known limit: the patch is not measured)\n",
+                q.verdict.c_str(), q.sliver_regions, q.member_regions, q.connector_regions);
+  }
   // the same bar whole, with a 0.4 mm fin off the load path (on its +y face): not named
   const BreakResult b = load_path_case("FIN", {{0, 0, 0, 10, 3, 3}, {4, 2.9, 1.3, 6, 5, 1.7}});
   check(b.ok && b.verdict == "pass" && b.unresolved_energy_share <= kBreakLoadPathShare,
