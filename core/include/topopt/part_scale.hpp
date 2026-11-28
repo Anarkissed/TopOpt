@@ -16,7 +16,9 @@
 // of local_member_thickness_mm over the part as drawn).
 #pragma once
 
+#include <cmath>
 #include <initializer_list>
+#include <limits>
 #include <vector>
 
 #include "topopt/voxel.hpp"
@@ -65,6 +67,53 @@ inline double thickest_section_mm(const VoxelGrid& grid, int cap_radius_voxels) 
   for (double t : local_member_thickness_mm(grid, drawn, 0.5, cap_radius_voxels, true))
     if (t > thickest) thickest = t;
   return thickest;
+}
+
+// TO rebuild stage 4, piece "member" (a NOTICE ONLY; TOPOPT_STAGE4 contains
+// member). Stage 2 measured (ledger A-06) that a member under 8 voxels through,
+// in bending, is not read reliably (2 through reads 67 % low, 4: 32 %, 6: 20 %):
+// "resolved" = 8 voxels through. This finds the THINNEST printed member of a
+// voxel design and the resolution (voxels along the grid's longest side) at which
+// it would be 8 through. It changes nothing: not the resolution, not a verdict.
+//
+// The width is NOT a new algorithm: it is lattice_member_width_mm (voxel.hpp),
+// the measure analyze.cpp's thin-member rule reads, with the floor at 8 voxels:
+// the largest inscribed ball, the grid's outside void, and the convex edges and
+// corners of a thick member JOINED to it (without the join every edge of every
+// part reads one or two voxels thin). min_feature_violations (voxelize.cpp) was
+// not used: it only says yes or no at 2 voxels and gives no width.
+// ITS GRAIN: the ball radius is a whole number of voxels and the width is twice
+// it, so a member reads in EVEN voxel counts, an odd one rounded UP (3 through
+// reads 4, 7 reads 8).
+inline constexpr double kMemberResolvedVoxels = 8.0;
+
+struct ThinMember {
+  double thinnest_mm = std::numeric_limits<double>::infinity();
+  double voxels_through = std::numeric_limits<double>::infinity();
+  bool resolved = true;          // voxels_through >= 8 (or nothing printed)
+  int resolution_now = 0;        // voxels along the grid's longest side
+  int resolution_needed = 0;     // the same at which the thinnest is 8 through
+};
+
+inline ThinMember thin_member(const VoxelGrid& grid, const std::vector<double>& density,
+                              double iso, int cap_radius_voxels = 8) {
+  ThinMember m;
+  const double h = grid.spacing;
+  m.resolution_now = grid.nx > grid.ny ? (grid.nx > grid.nz ? grid.nx : grid.nz)
+                                       : (grid.ny > grid.nz ? grid.ny : grid.nz);
+  m.resolution_needed = m.resolution_now;
+  if (!(h > 0.0) || density.size() != grid.voxel_count()) return m;
+  const std::vector<double> w = lattice_member_width_mm(
+      grid, density, iso, cap_radius_voxels, kMemberResolvedVoxels * h, h);
+  for (double t : w)
+    if (t > 0.0 && t < m.thinnest_mm) m.thinnest_mm = t;
+  if (!std::isfinite(m.thinnest_mm)) return m;
+  m.voxels_through = m.thinnest_mm / h;
+  m.resolved = m.voxels_through >= kMemberResolvedVoxels - 1e-9;
+  if (!m.resolved)
+    m.resolution_needed = static_cast<int>(
+        std::ceil(m.resolution_now * kMemberResolvedVoxels / m.voxels_through - 1e-9));
+  return m;
 }
 
 // AUTOMATIC RESOLUTION (the maintainer, 2026-11-26: "The automatic resolution

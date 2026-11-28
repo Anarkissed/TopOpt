@@ -80,6 +80,33 @@ int main() {
     CHECK(auto_resolution(0.0, 0.45).resolution == 0);
   }
 
+  // Stage 4 "member": the thinnest member against 8 voxels through (a notice).
+  // The width is lattice_member_width_mm's, whose grain is EVEN voxel counts (the
+  // inscribed ball's radius is whole voxels): 4 through reads 4.0; 3 through
+  // reads 4.0 too (an odd count is rounded UP).
+  {
+    const VoxelGrid p4 = block(40, 30, 4, 0.25);  // a plate 4 voxels thick, grid longest 40
+    const ThinMember m = thin_member(p4, std::vector<double>(p4.voxel_count(), 1.0), 0.5);
+    std::printf("member: plate 4 voxels thick: thinnest %.3f mm = %.2f through, resolved %d, "
+                "resolution %d -> %d\n", m.thinnest_mm, m.voxels_through, m.resolved ? 1 : 0,
+                m.resolution_now, m.resolution_needed);
+    CHECK(std::fabs(m.voxels_through - 4.0) < 1e-9 && !m.resolved);
+    CHECK(m.resolution_now == 40 && m.resolution_needed == 80);  // 8/4 x 40
+
+    const VoxelGrid p3 = block(40, 30, 3, 0.25);  // 3 voxels thick
+    const ThinMember m3 = thin_member(p3, std::vector<double>(p3.voxel_count(), 1.0), 0.5);
+    std::printf("member: plate 3 voxels thick: %.2f through (the grain: odd rounds up), "
+                "resolved %d, resolution %d -> %d\n", m3.voxels_through, m3.resolved ? 1 : 0,
+                m3.resolution_now, m3.resolution_needed);
+    CHECK(std::fabs(m3.voxels_through - 4.0) < 1e-9 && !m3.resolved && m3.resolution_needed == 80);
+
+    const VoxelGrid p10 = block(40, 30, 10, 0.25);  // 10 voxels thick: resolved, no block
+    const ThinMember m10 = thin_member(p10, std::vector<double>(p10.voxel_count(), 1.0), 0.5);
+    std::printf("member: plate 10 voxels thick: thinnest %.2f through, resolved %d\n",
+                m10.voxels_through, m10.resolved ? 1 : 0);
+    CHECK(m10.resolved && m10.voxels_through >= 8.0 - 1e-9);
+  }
+
   std::printf(g_fail ? "FAILED (%d)\n" : "PASSED\n", g_fail);
   return g_fail ? 1 : 0;
 }

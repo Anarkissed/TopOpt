@@ -8,6 +8,7 @@
 
 #include "topopt/to_stage_switch.hpp"  // TO rebuild stage 1
 #include "topopt/pipeline.hpp"
+#include "topopt/part_scale.hpp"  // TO rebuild stage 4 "member"
 #include "topopt/plsm.hpp"
 
 #include <optional>
@@ -3436,6 +3437,24 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
                      "[pocket] version vf %.2f: %lld sealed pocket(s), %.1f mm3 in all "
                      "(allowed in a solid part)\n",
                      variant.requested_volume_fraction, sp.count, sp.volume_mm3);
+        std::fflush(stderr);
+      }
+    }
+    // TO rebuild stage 4, piece "member": a NOTICE on an accepted version whose
+    // thinnest member is under 8 voxels through (part_scale.hpp thin_member). It
+    // changes nothing else: not the resolution, not the verdict.
+    if (stage4_on("member") && variant.accepted) {
+      const ThinMember tm = thin_member(G, variant.optimization.physical_density, kIso);
+      if (!tm.resolved) {
+        vr.thin_member_reported = true;
+        vr.thin_member_mm = tm.thinnest_mm;
+        vr.thin_member_voxels_through = tm.voxels_through;
+        vr.thin_member_resolution_needed = tm.resolution_needed;
+        std::fprintf(stderr,
+                     "[member] version vf %.2f: thinnest member %.2f mm = %.1f voxels through "
+                     "(8 needed); resolution %d would resolve it\n",
+                     variant.requested_volume_fraction, tm.thinnest_mm, tm.voxels_through,
+                     tm.resolution_needed);
         std::fflush(stderr);
       }
     }

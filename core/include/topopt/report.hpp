@@ -365,6 +365,14 @@ struct VariantReport {
   long long sealed_pockets = 0;
   double sealed_pockets_volume_mm3 = 0.0;
   double sealed_pockets_largest_mm3 = 0.0;
+  // TO rebuild stage 4, piece "member" (TOPOPT_STAGE4 contains member): an
+  // accepted version whose thinnest member is under 8 voxels through (part_scale.hpp
+  // thin_member). report.json "thin_member" only when thin_member_reported, which
+  // only the switch sets. A notice: nothing else changes.
+  bool thin_member_reported = false;
+  double thin_member_mm = 0.0;
+  double thin_member_voxels_through = 0.0;
+  int thin_member_resolution_needed = 0;
   // E1: the finished shape (ran == false: none, an older report).
   FinishBlock finish;
   // Where (mm, the solve grid's model frame): the midpoint of each joint's first
