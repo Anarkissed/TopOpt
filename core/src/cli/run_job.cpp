@@ -14166,7 +14166,7 @@ ll::StrengthDone with_break_check(const ll::StrengthAsk& ask, StrengthSetup& S, 
           const std::size_t nl2 = t.find('\n', nl + 1);
           if (nl2 != std::string::npos) {
             bool good = true;
-            {   // C3: the post readings line: "posts N" then six numbers per post
+            {   // C3: the post readings line: "posts N" then eleven numbers per post (C9: path_open, share, shaft, foot, top)
               std::istringstream in(t.substr(nl + 1, nl2 - nl - 1));
               std::string word;
               std::size_t n = 0;
@@ -14174,11 +14174,15 @@ ll::StrengthDone with_break_check(const ll::StrengthAsk& ask, StrengthSetup& S, 
               good = in && word == "posts" && n == b.posts.size();
               for (std::size_t q = 0; good && q < n; ++q) {
                 ll::BreakPostReading pr;
-                int res = 0, fb = 0;
-                in >> pr.all >> res >> pr.judged >> pr.section >> pr.section_mm2 >> fb;
+                int res = 0, fb = 0, po = 0, sh = 0, ft = 0, tp = 0;
+                in >> pr.all >> res >> pr.judged >> pr.section >> pr.section_mm2 >> fb >> po >> pr.path_share >> sh >> ft >> tp;   // C9
                 good = !in.fail();
                 pr.all_resolved = res != 0;
                 pr.first_break = fb != 0;
+                pr.path_open = po != 0;
+                pr.path_shaft = sh != 0;
+                pr.path_foot = ft != 0;
+                pr.path_top = tp != 0;
                 kept.break_posts.push_back(pr);
               }
             }
@@ -14232,6 +14236,15 @@ ll::StrengthDone with_break_check(const ll::StrengthAsk& ask, StrengthSetup& S, 
     pr.section_mm2 = c.section_mm2;
     pr.first_break = r.first_resolved.found && r.first_resolved.cls == "post" && r.first_resolved.post == c.post;
   }
+  // C9: the posts the load-path rule names (break_check.cpp, step 8b: share over the limit, shaft or an end not resolved)
+  for (std::size_t q = 0; q < r.post_paths.size() && q < done.break_posts.size(); ++q) {
+    const ll::BreakResult::PostPath& pp = r.post_paths[q];
+    done.break_posts[q].path_open = pp.share > ll::kBreakLoadPathShare && !(pp.shaft && pp.foot && pp.top);
+    done.break_posts[q].path_share = pp.share;
+    done.break_posts[q].path_shaft = pp.shaft;
+    done.break_posts[q].path_foot = pp.foot;
+    done.break_posts[q].path_top = pp.top;
+  }
   std::string block = r.json;
   block.insert(1, "\"cache\": \"made\", ");
   add_break(done, block);
@@ -14247,7 +14260,8 @@ ll::StrengthDone with_break_check(const ll::StrengthAsk& ask, StrengthSetup& S, 
       f << key << r.verdict << "\nposts " << done.break_posts.size();
       for (const ll::BreakPostReading& pr : done.break_posts)
         f << " " << g17(pr.all) << " " << (pr.all_resolved ? 1 : 0) << " " << g17(pr.judged) << " " << g17(pr.section) << " " << g17(pr.section_mm2)
-          << " " << (pr.first_break ? 1 : 0);
+          << " " << (pr.first_break ? 1 : 0) << " " << (pr.path_open ? 1 : 0) << " " << g17(pr.path_share) << " " << (pr.path_shaft ? 1 : 0)
+          << " " << (pr.path_foot ? 1 : 0) << " " << (pr.path_top ? 1 : 0);
       f << "\n" << r.json;
       f.close();
       written = !f.fail();

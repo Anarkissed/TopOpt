@@ -184,6 +184,12 @@ struct BreakPostReading {
   double section = 0.0;       // its file section's multiple (0: not read)
   double section_mm2 = 0.0;
   bool first_break = false;   // the check's first judged break is in this post
+  // C9: the load-path rule names it (its share of the load over the limit and its shaft or an end not resolved: the
+  // reason post_load_path_not_resolved).
+  bool path_open = false;
+  // and what the rule read: its share of the load, and whether its shaft and its two ends are resolved
+  double path_share = 0.0;
+  bool path_shaft = true, path_foot = true, path_top = true;
 };
 using BreakPostReadings = std::vector<BreakPostReading>;
 

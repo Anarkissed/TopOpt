@@ -27,6 +27,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <unordered_map>
@@ -105,7 +106,13 @@ struct MeshSpec {
   // CUT 1b, the posts step (C3): a post the break check found weak, drawn wider. Matched to a decided post by its
   // place (x, y, z_top, z_bottom exactly); drawn `width` across, its box moved by (ox, oy) so it grows inward where the
   // part's outer face would trim it. Empty (every job but a posts step's re-make): every post as before.
-  struct PostWide { double x = 0.0, y = 0.0, z_top = 0.0, z_bottom = 0.0, width = 0.0, ox = 0.0, oy = 0.0; };
+  // C9, flared ends (the owner, 2026-11-27: "push it to cut 1"): `flare_mm` > 0 gives the post a foot and a head, each a
+  // frustum with flat sloped sides over `flare_mm` of height, from the post's width at the shaft to a wide end where it
+  // meets what it stands on (the foot) and what it holds up (the head); the wide end runs into that material by the
+  // post's own run-in (0.25 mm). `foot` and `head` are how far the wide end reaches past the post's box on each side,
+  // in the order +x, -x, +y, -y (0: that side stays vertical). 0 (every post but a flared one): the box as before.
+  struct PostWide { double x = 0.0, y = 0.0, z_top = 0.0, z_bottom = 0.0, width = 0.0, ox = 0.0, oy = 0.0;
+                    double flare_mm = 0.0; std::array<double, 4> foot{}, head{}; };
   std::vector<PostWide> post_wide;
   // The box a post is drawn as: its width and centre (post_mm at its own axis, or its posts-step entry).
   void post_box(const Post& p, double& w, double& cx, double& cy) const {
@@ -118,6 +125,13 @@ struct MeshSpec {
         cx = p.x + q.ox;
         cy = p.y + q.oy;
       }
+  }
+  // C9: the post's posts-step entry when it is flared (null: drawn as its box alone).
+  const PostWide* post_flare(const Post& p) const {
+    const PostWide* f = nullptr;
+    for (const PostWide& q : post_wide)
+      if (q.x == p.x && q.y == p.y && q.z_top == p.z_top && q.z_bottom == p.z_bottom) f = q.flare_mm > 0.0 ? &q : nullptr;
+    return f;
   }
   // O8, stands along the way (the owner's OR10: "a preference for stands along the way to keep it up"). A whole
   // shallow run of a weave (stage 1c's run, of the bars the bridge rules keep) that goes farther than this between two
