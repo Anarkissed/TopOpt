@@ -5,6 +5,7 @@
 // by the file job from the made inputs in DIR (the study's made jobs: BR.stl, BR.tensor, BRT_d_job.json,
 // BRG_d_job.json, SP.stl, SP.tensor, SP_job.json), each through organic_break_check at 0.2 mm and tolerance 1e-2.
 #include <cmath>
+#include <algorithm>
 #include <array>
 #include <functional>
 #include <map>
@@ -155,13 +156,13 @@ void bar() {
               r.json.substr(r.json.find("\"force_asked_n\""), 90).c_str());
   check(sz.material_voxels == 11250 && std::fabs(sz.bytes - want_bytes) < 1.0 && r.size.material_voxels == 11250,
         "the bar's size before the solve: 11,250 material voxels and their bytes, the same count the solve uses");
-  // C11: with the 0.3 mm ball (the lead's ruling) the first break is read at the held face's corner, where the full
-  // clamp (every direction held, so Poisson's contraction is stopped there) concentrates the stress: 10.88, 22 % under
-  // the hand number. The 0.9 mm ball averaged it away (13.36). So the mark is: pass, never more than 10 % over the hand
-  // number, and at most 25 % under it (the safe side, the clamp's own concentration).
+  // C12: with the 0.45 mm ball (the lead's ruling) the first break is read at the held face, 11.90, 14.7 % under the hand
+  // number 13.95: the full clamp (every direction held, Poisson's contraction stopped there) concentrates the stress at
+  // the held face (C11's 0.3 ball read 10.88 there, C9's 0.9 ball 13.36). The mark: pass, from 20 % under (the safe side,
+  // the clamp's own concentration) to 10 % over the hand number.
   const double hand = 31.0 / (20.0 / 9.0), ratio = r.first_resolved.multiple / hand;
-  check(r.ok && r.verdict == "pass" && r.first_resolved.found && ratio <= 1.10 && ratio >= 0.75,
-        "the bar's verdict is pass and its first break is from 25 % under to 10 % over 31 / 2.22 (the held corner's concentration)");
+  check(r.ok && r.verdict == "pass" && r.first_resolved.found && ratio <= 1.10 && ratio >= 0.80,
+        "the bar's verdict is pass and its first break is from 20 % under to 10 % over 31 / 2.22 (the held face's concentration)");
 }
 
 int face_where(const StepModel& m, const Vec3& n, int axis, bool want_max) {
@@ -818,6 +819,27 @@ void review_fixes() {
   }
 }
 
+// C12, the pass allowance: a made bar (4 x 2 x 2 mm, held at -x, pulled along +x) read once at 1 N, then loaded so its
+// first break lands just above the pass line x 1.5 (pass), inside the band (not_proven "close_to_pass_line") and under
+// the pass line (fail). The reading is linear in the force, so each multiple is the 1 N reading over the force.
+void allowance() {
+  auto x = made("ALLOW_1N", {{0, 0, 0, 4, 2, 2}}, {1.0, 0, 0});
+  const BreakResult r1 = organic_break_check(x->ask);
+  const double m1 = r1.first_resolved.multiple, P = x->ask.pass_line, A = kBreakPassAllowance;
+  struct Case { const char* name; double want; const char* verdict; const char* reason; };
+  for (const Case& c : {Case{"ALLOW_ABOVE", P * A * 1.05, "pass", ""}, Case{"ALLOW_BAND", P * 0.5 * (1.0 + A), "not_proven", "close_to_pass_line"},
+                        Case{"ALLOW_BELOW", P * 0.9, "fail", ""}}) {
+    auto y = made(c.name, {{0, 0, 0, 4, 2, 2}}, {m1 / c.want, 0, 0});
+    const BreakResult r = organic_break_check(y->ask);
+    const bool reason = std::string(c.reason).empty() ||
+                        std::find(r.not_proven_because.begin(), r.not_proven_because.end(), std::string(c.reason)) != r.not_proven_because.end();
+    std::printf("allowance %s: first break %.4f (pass line %.2f, needs %.2f): %s\n", c.name, r.first_resolved.multiple, P, P * A, r.verdict.c_str());
+    char what[160];
+    std::snprintf(what, sizeof what, "C12 allowance: a first break of %.3f reads %s", r.first_resolved.multiple, c.verdict);
+    check(r.ok && r.verdict == c.verdict && reason, what);
+  }
+}
+
 // C10 G1 (review 1): two thick blocks (2 x 2 x 2 mm) joined by a 0.4 x 0.4 mm neck, all the load through the neck in
 // tension along x (in a layer), PA6 (31 MPa, 0.40 across). Every neck length 0.2 to 0.8 mm must lie in a measured region
 // and give not_proven naming it.
@@ -931,6 +953,7 @@ int main(int argc, char** argv) {
   load_path();
   review_fixes();
   g1_necks();
+  allowance();
   if (argc >= 4 && std::string(argv[1]) == "remake") { remake(argv[2], argv[3]); return 0; }
   if (argc >= 3 && std::string(argv[1]) == "oversize") oversize(argv[2]);
   if (argc >= 5 && std::string(argv[1]) == "size") { size_of(argv[2], argv[3], std::atof(argv[4])); return failures == 0 ? 0 : 1; }

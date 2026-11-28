@@ -2572,7 +2572,10 @@ std::string file_result_json(const FileResult& r) {
   // review C2 A1: the file's answer (Organic): which check gave it, accepted, its verdict and a not-checked reason
   if (r.strength_ran && !r.answer_by.empty())
     o += "  \"strength_answer\": {\"by\": \"" + r.answer_by + "\", \"accepted\": " + (r.strength_accepted ? "true" : "false") +
-         ", \"verdict\": \"" + r.answer_verdict + "\", \"reason\": \"" + r.answer_reason + "\"},\n";
+         ", \"verdict\": \"" + r.answer_verdict + "\", \"reason\": \"" + r.answer_reason + "\"" +
+         // C12: the pass line and the allowance the break check's verdict used (the record; the app shows nothing new)
+         (r.answer_by == "break" ? ", \"pass_line\": " + pnum(r.break_pass_line) + ", \"pass_allowance\": " + pnum(kBreakPassAllowance)
+                                 : std::string()) + "},\n";
   if (!r.posts_step_json.empty()) o += "  \"posts_step\": " + r.posts_step_json + ",\n";   // C3
   // P4: written only when the check gave the six candidates' numbers.
   if (!r.orientation_json.empty()) o += "  \"print_orientation\": " + r.orientation_json + ",\n";

@@ -1384,6 +1384,8 @@ BreakResult organic_break_check(const BreakAsk& ask) {
   } else if (R.first_resolved.multiple < ask.pass_line) {
     R.verdict = "fail";   // a fail stays a fail
   } else {
+    // C12: the smoothed first break passes only at the pass line x kBreakPassAllowance or more
+    if (R.first_resolved.multiple < ask.pass_line * kBreakPassAllowance) R.not_proven_because.push_back("close_to_pass_line");
     if (any_under) R.not_proven_because.push_back("thin_place_under_pass_line");
     if (post_section_under) R.not_proven_because.push_back("post_section_under_pass_line");
     if (post_block) R.not_proven_because.push_back("post_load_path_not_resolved");
@@ -1397,7 +1399,8 @@ BreakResult organic_break_check(const BreakAsk& ask) {
   R.peak_mb = process_memory().peak_rss_mb;
   // 10. the JSON block
   const PrintFrame& F = ask.frame;
-  std::string j = "{\"verdict\": \"" + R.verdict + "\", \"pass_line\": " + num(ask.pass_line) + ", \"first_break\": " + point_json(R.first_resolved, F) +
+  std::string j = "{\"verdict\": \"" + R.verdict + "\", \"pass_line\": " + num(ask.pass_line) + ", \"pass_allowance\": " +
+                  num(kBreakPassAllowance) + ", \"first_break_needs\": " + num(ask.pass_line * kBreakPassAllowance) + ", \"first_break\": " + point_json(R.first_resolved, F) +
                   ", \"first_break_all_points\": " + point_json(R.first_all, F) + ", \"classes\": [";
   for (std::size_t q = 0; q < R.classes.size(); ++q) {
     const BreakClass& bc = R.classes[q];

@@ -33,6 +33,13 @@ namespace topopt::lattice_layout {
 // resolved. A post carrying over this share of the load whose shaft or an end joint is not resolved, or not-resolved
 // material holding over this share of the strain energy, gives "not_proven" (the post or the largest region named).
 constexpr double kBreakLoadPathShare = 0.05;
+// C12, THE PASS ALLOWANCE (the lead's ruling; a check constant, not a job setting): the smoothed first break passes only
+// at the pass line x 1.5 or more; between the pass line and that it is "not_proven" ("close_to_pass_line"); under the
+// pass line it fails. 1.5 covers the 0.45 mm ball's over-read of the thinnest vine in pure bending (2.12x its first yield
+// against a plastic hinge at 1.5x: 1.41) and the 4 % the reading moves with the grid (0.2 against 0.1 mm). It applies
+// ONLY to the smoothed first break: the section readings (thin places, post sections, the posts step's naming) keep the
+// plain pass line.
+constexpr double kBreakPassAllowance = 1.5;
 // C8, RULE BY CORES (the lead's design), on the 0.1 mm samples, everything scaling with the voxel:
 //  - CORE: material at least r from the outside, r = min_voxels_across / 2 voxels (1.5 voxels: 0.3 mm at 0.2 mm).
 //  - THICK: material within r of CORE (the opening by a ball of diameter 3 voxels); THIN: material not THICK.
@@ -84,10 +91,11 @@ struct BreakAsk {
   // The grid is anchored at the PART's box low corner + grid_shift x voxel_mm (0: on the part's box; the study's blocks
   // were solved at -0.5, -0.5, 0), and extended by whole voxels to hold the whole print.
   Vec3 grid_shift{0.0, 0.0, 0.0};
-  // C11 (the lead's ruling on G2): the smoothing ball's RADIUS, 0.3 mm (was 0.9: a 0.9 mm vine in bending read at 7x
-  // its first yield). Only the smoothed reading uses it; every load-path distance (CORE, THICK, FAR, members, contacts)
-  // is set by min_voxels_across and kBreakFarMarginVoxels, not by this.
-  double smooth_mm = 0.3;
+  // C12 (the lead's ruling): the smoothing ball's RADIUS, 0.45 mm (C11 0.3 followed the grid, 36 % across placements;
+  // C9 0.9 read a 0.9 mm vine in bending at 7x its first yield), with kBreakPassAllowance on the verdict. Only the smoothed
+  // reading uses it; every load-path distance (CORE, THICK, FAR, members, contacts) is set by min_voxels_across and
+  // kBreakFarMarginVoxels, not by this.
+  double smooth_mm = 0.45;
   int min_voxels_across = 3;            // the judged (resolved) gate
   double near_post_mm = 2.0;            // the class "solid near a post's end"
   double tolerance = 1e-2;              // the solve's relative residual
