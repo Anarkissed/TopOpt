@@ -24,8 +24,20 @@ Branch `claude/topopt-stage-3-surfaces-7f58fd`, from 2b40bcf4. Status: IN PROGRE
   - The probe: stand 20.8 / 27.0 s against 25.2 s (l1 cycles 7,508 → 6,414); Top Motor Mount 1.2 against 1.4 s. The warm start buys little.
   - Test K: twice at 6 threads identical and twice at 1 thread identical, both parts.
   - Wall (6 threads): stand 54 s off, 69 / 84 s on; Top Motor Mount 113-129 s off, 213 / 222 s on.
-  **OPEN: the stand's switch-on file differs between 1 and 6 threads** (c9300fd5 against 75a5cf3c; the OLD build at 1 thread is c9300fd5 too, so it predates the fixes; Top Motor Mount is the same across thread counts). To trace only on TOReview's word.
-  **Next (running from 04:09):** pfix2 adds [timing] lines (the cutter, each export; stderr only), then P at the reference resolutions with the split (p_ref.sh: the stand at 128, then Top Motor Mount at 96, off and on, two holds).
+  **OPEN: the stand's switch-on file differs between 1 and 6 threads** (c9300fd5 against 75a5cf3c; the OLD build at 1 thread is c9300fd5 too, so it predates the fixes; Top Motor Mount is the same across thread counts). TOReview 09:51Z: it breaks the same-bytes rule and must be closed before stage 3 closes; trace it AFTER P at 128 / 96, starting from what the stand has that Top Motor Mount lacks under the switch. Keep the warm start (same bytes, no harm).
+  **Test P at the reference resolutions: FAILS (11-28 04:10-07:29, pfix2 = 32048cef + [timing] lines, 6 threads, lock held).** The off arms ran twice: p_ref.sh wrote off and on into one folder, so the on run deleted the off split; p_off.sh re-ran off in its own folders.
+  | | stand at 128 off | on | Top Motor Mount at 96 off | on |
+  |---|---|---|---|---|
+  | total wall | 398 s (first run 481 s) | 568 s | 2,578 s (first run 3,029 s) | 3,851 s |
+  | against off | | +43 % (+18 % against the first run) | | +49 % (+27 % against the first run) |
+  | CPU (user) | 1,116 s | 1,508 s (+35 %) | 6,914 s | 9,445 s (+37 %) |
+  | iterations | 40 | 40 | 190 | 180 |
+  | margin probe | 48.8 s | 74.3 s (+25.5) | 44.3 s | 43.8 s (-0.5) |
+  | Keep-clear cutter (once) | 1.5 s | 6.5 s (+5.0) | 3.7 s | 19.1 s (+15.4) |
+  | export: surface mesh ([surface] mesh) | none | 22.2 s | none | 82 + 107 + 117 + 146 = 453 s |
+  | export: writing the file | 0.01 s | 0.02 s | 4 x 0.02 s | 4 x 0.01 s |
+  | the rest | | about +117 s | | about +805 s |
+  Reading: (1) The off wall varies 17-21 % between two runs on the same build, so wall alone cannot judge a 10 % bar; CPU says the switch costs about +36 % at full size (+9 % at 64 on one thread). (2) On Top Motor Mount the export alone (the four surface meshes, 453 s) is 18 % of the off total: per TOReview 07:27Z that goes to the reviewer for the bar; I do not move it. (3) "The rest" is the larger share on both parts. (4) The cutter is the same work in both arms but 4-5x slower with the switch on; not yet explained.
   **OPEN (TOReview 11-28): loose specks in the analysis with the switch on.** On the stand at 64, 34 of 42 solves take loose specks out (5-58 pieces of 1-8 voxels) against 1 of 42 off. A surface that sheds specks into the analysis is a quality question for the stage's close, apart from P.
 
 - **11-28 01:30, Stand v4 retry (switch on, b92e3bd0, face loads, one lock hold): version 1 written, then the 4,800 s limit.** Version 1 at vf 0.68 after 47 min: effective margin 2.25 (target 1.5), ACCEPTED; 70 iterations, 14 re-fits took 180 s, 226,252 triangles. Rung 2 (vf 0.52) reached iteration 49 at about 30 s an iteration when the limit hit (rc=143). The limit is mine, not a refusal. NEXT: the all-threads profile (lock hold), then the test P fixes.
