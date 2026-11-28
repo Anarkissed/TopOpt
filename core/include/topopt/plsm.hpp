@@ -246,7 +246,11 @@ struct PlsmOptions {
   // threshold, none of which an optimiser should learn about. Null (the default
   // when nothing attaches one) leaves the historical compliance-plateau rule in
   // place, so this whole block is inert unless a caller opts in.
-  std::function<PlsmMarginProbe(const std::vector<double>& density)> margin_probe;
+  // `warm` (may be null): the iteration's own solution for this density, a starting
+  // iterate for the probe's solve. Passed only with TOPOPT_SURFACE on and no load
+  // scenarios (TOReview's ruling 11-28, test P); null keeps the cold probe.
+  std::function<PlsmMarginProbe(const std::vector<double>& density, const FeaSolution* warm)>
+      margin_probe;
 
   // ★ THE CADENCE, AND ITS COST. A probe is ONE tight cold certification solve.
   // On his part that is about the cost of an iteration, so probing every

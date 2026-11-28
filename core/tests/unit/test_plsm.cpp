@@ -429,7 +429,7 @@ void test_margin_plateau_stop_returns_the_peak() {
   p.max_iterations = 120;
   p.margin_probe_every = 10;
   p.margin_plateau_probes = 3;
-  p.margin_probe = [&](const std::vector<double>&) {
+  p.margin_probe = [&](const std::vector<double>&, const topopt::FeaSolution*) {
     topopt::PlsmMarginProbe mp;
     const int i = calls < 12 ? calls : 11;
     mp.margin = curve[i];

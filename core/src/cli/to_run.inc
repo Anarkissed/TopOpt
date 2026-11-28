@@ -1982,6 +1982,9 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     } catch (const std::exception&) {
     }
   };
+  // The run's one Keep-clear cutter, made on the first make_run_finish and shared by the
+  // streamed versions, the finish check and the final files (test P, 11-28).
+  std::shared_ptr<const KeepClearCut> keep_cut_once;
   if (emit_progress) {
     options.progress = [](std::size_t rung, std::size_t rungs, int iter) {
       std::printf("PROGRESS rung=%zu rungs=%zu iter=%d\n", rung, rungs, iter);
@@ -1998,7 +2001,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       // identical files it always did.
       publish_artifacts_so_far(evaluated_so_far);
       if (!v.accepted) return;
-      const RunFinish fin = make_run_finish(job, options, &result.model, solved_grid);
+      const RunFinish fin = make_run_finish(job, options, &result.model, solved_grid, &keep_cut_once);
       const RunFinish safe = safe_finish(fin);  // a strengthen version that fell back
       std::string p;
       if (strengthen_run) {  // verified (and finished) inside strengthen_versions
@@ -2619,7 +2622,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   std::map<double, TriangleMesh> finished_meshes;  // by requested_volume_fraction
   if (!(job.loads.present && job.loads.redesign == "strengthen")) {
     const VoxelGrid& sg = result.pipeline.solved_grid;
-    const RunFinish fin = make_run_finish(job, options, &result.model, sg);
+    const RunFinish fin = make_run_finish(job, options, &result.model, sg, &keep_cut_once);
     const std::string check_dir = join_path(out_dir, "finish_check");
     const DesignMask* clearance =
         !options.clearance_void.empty() && options.clearance_void.size() == sg.voxel_count()
@@ -2915,7 +2918,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // E1: every file is the finished shape — the very mesh (e) re-checked, or, on a
     // strengthen run, the same finishing its verify ran.
     const RunFinish final_fin =
-        make_run_finish(job, options, &result.model, result.pipeline.solved_grid);
+        make_run_finish(job, options, &result.model, result.pipeline.solved_grid, &keep_cut_once);
     const RunFinish final_safe = safe_finish(final_fin);
     for (const MinimizePlasticVariant& variant : result.pipeline.evaluated) {
       if (!variant.accepted) continue;

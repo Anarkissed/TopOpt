@@ -897,7 +897,10 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     // would make the rule select the worst design in the run. The same is true
     // of a certification solve that did not converge.
     if (margin_rule && it % plsm.margin_probe_every == 0) {
-      const PlsmMarginProbe mp = plsm.margin_probe(rho);
+      // Test P (TOReview's ruling 11-28): with the switch on, the probe starts from
+      // this iteration's solution of the same rho (same tolerance); off, it is cold.
+      const PlsmMarginProbe mp = plsm.margin_probe(
+          rho, surf.on && options.scenarios.empty() ? &sc.solution : nullptr);
       out.margin_probe_iterations.push_back(it);
       out.margin_probe_values.push_back(mp.margin);
       out.margin_probe_load_path_ok.push_back(

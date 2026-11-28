@@ -4,6 +4,22 @@ Branch `claude/topopt-stage-3-surfaces-7f58fd`, from 2b40bcf4. Status: IN PROGRE
 
 ## Where I stopped (read this first)
 
+- **11-28 02:22, the ALL-THREADS profile (stand at 64, switch on, topopt-cli-night, one lock hold; prof_stand_mt_on.txt, parser tools/sample_tree.py):** 118.6 s wall, 143.9 s CPU. The main thread is busy 81 % of the run; the three solver workers 19 % each. Against test P's off run (pOff1, 50.5 s) the on run (pOn1, 112.0 s) loses:
+  1. **+39.5 s in the margin probe** (run_info plsm_margin_probe_wall_s 44.1 s on against 4.6 s off; the iteration solves themselves are 26.7 against 24.5 s). Every probe is a cold solve at the run's tolerance. Over solves 6-47 the l1 multigrid takes 7,501 cycles / 61.4 s on against 4,332 / 19.3 s off: 1.7x the cycles AND 1.9x the cost per cycle. 34 of the 42 solves take loose specks out (1 of 42 off): the sub-cell density leaves specks of 1-8 voxels at the surface. The serial share sits in the coarse levels (Eigen jacobi_sweep and LDLT on the main thread).
+  2. **About 19 s building the Keep-clear cutter** (make_keep_clear_cut, Manifold BatchUnion; Manifold is built serial). It is built on every make_run_finish call: once per accepted version in the streaming callback (to_run.inc:2001) and again for the finish check (to_run.inc:2622), each on the 0.01 mm drawn mesh. 1 version here = 2 builds; 4 versions = 5.
+  3. About 7 s in the surface export itself (level-set mesh, Manifold LevelSet and MeshDistance, mostly serial).
+  Fix 2 is same-bytes: build the cutter once per run and share it. Fix 1 changes numbers, so it needs TOReview's ruling (asked 11-28).
+  **TOReview's ruling (11-28 07:27Z):**
+  - Fix 2: go.
+  - Fix 1: option (a), behind the switch only. Each probe warm-starts from the iteration's own solution for the same rho, at the SAME tolerance; with TOPOPT_SURFACE unset the probes stay cold and every byte is today's.
+  - To show: test K at 1 and 6 threads; the stand's and Top Motor Mount's margins before and after (the largest move, inside the solver's tolerance); the probe's wall time.
+  - Not (b): do not change the analysed shape to buy speed. Not (c): do not wait on TOSolver.
+  - P is judged as the user feels it: the WHOLE path including the export, at the reference resolutions (the stand at 128, Top Motor Mount at 96), with the split (probe / cutter / export / the rest) beside the total. If the export alone still breaks 10 % after both fixes, bring the numbers; the reviewer rules on the bar.
+  **Built (02:30, b2.sh pfix):**
+  - The cutter slot: make_run_finish(..., cut_once), one per run_job and one per strengthen_versions.
+  - The probe: analyze_fixed_design(..., initial_guess) on the first solve only; PlsmOptions::margin_probe takes (density, warm); plsm passes &sc.solution only when surf.on and there are no scenarios.
+  **OPEN (TOReview 11-28): loose specks in the analysis with the switch on.** On the stand at 64, 34 of 42 solves take loose specks out (5-58 pieces of 1-8 voxels) against 1 of 42 off. A surface that sheds specks into the analysis is a quality question for the stage's close, apart from P.
+
 - **11-28 01:30, Stand v4 retry (switch on, b92e3bd0, face loads, one lock hold): version 1 written, then the 4,800 s limit.** Version 1 at vf 0.68 after 47 min: effective margin 2.25 (target 1.5), ACCEPTED; 70 iterations, 14 re-fits took 180 s, 226,252 triangles. Rung 2 (vf 0.52) reached iteration 49 at about 30 s an iteration when the limit hit (rc=143). The limit is mine, not a refusal. NEXT: the all-threads profile (lock hold), then the test P fixes.
 
 - **11-28 00:05, C's four design-box parts at 64 (switch on, b92e3bd0, all rc=0):**

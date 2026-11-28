@@ -172,7 +172,8 @@ FixedDesignAnalysis analyze_fixed_design(
     bool load_path_ok, double part_solid, const LatticePosture* lattice,
     bool score_build_orientation, bool build_direction_inferred,
     bool auto_apply_build_orientation, double printed_iso,
-    bool gate_on_strut_strength, const AnalysisKnobs* knobs) {
+    bool gate_on_strut_strength, const AnalysisKnobs* knobs,
+    const FeaSolution* initial_guess) {
   const AnalysisKnobs kn = knobs ? *knobs : AnalysisKnobs{};
   // THE PRINTED-SET THRESHOLD for this analysis. Shadows the file-scope M3.5
   // constant so every "is there material here" test in this function asks the
@@ -327,8 +328,10 @@ FixedDesignAnalysis analyze_fixed_design(
       // the reading over a size gets its own real-stiffness solve further down.
       SimpParams solve_params = params;
       if (strength_mode() == StrengthMode::Stiff) solve_params.penalty = 1.0;
+      // The first solve only (a bearing part's later contact rounds stay cold).
       sc = simp_compliance(grid, solve_params, density, B, loads, cg_tolerance,
-                           cg_max_iterations, /*initial_guess=*/nullptr,
+                           cg_max_iterations,
+                           out.contact_rounds == 0 ? initial_guess : nullptr,
                            /*solver=*/nullptr, solver_kind);
       if (solver_kind == SolverKind::MultigridCG_Matfree) {
         const std::vector<int>& lv = fea_matfree_last_dropped_islands();

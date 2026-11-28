@@ -279,6 +279,9 @@ MinimizePlasticResult strengthen_versions(
   sr.vf_step = 0.0;  // bracketing search, no per-step cap (see above)
   sr.margin_required = options.margin_stop;
   const double iso = run_printed_iso(options);
+  // One Keep-clear cutter for every attempt's verify (test P, 11-28): the same part,
+  // Keep clears and Keep regions each time.
+  std::shared_ptr<const KeepClearCut> keep_cut_once;
 
   // PROGRESS lines through the whole pass (the worker only understands
   // `PROGRESS rung=<i> rungs=<n> iter=<k>`; extra keys are ignored). The three
@@ -540,7 +543,7 @@ MinimizePlasticResult strengthen_versions(
                               std::to_string(attempt) + ".stl");
       // E1: the version is verified on its FINISHED file, the one it exports: slim,
       // and when that file fails, the safe finish's (his fallback ruling 2026-11-03).
-      const RunFinish fin = make_run_finish(job, options, &model, r.solved_grid);
+      const RunFinish fin = make_run_finish(job, options, &model, r.solved_grid, &keep_cut_once);
       const RunFinish safe_fin = safe_finish(fin);
       auto verify_file = [&](const TriangleMesh& m) {
         write_stl_file(stl, m);

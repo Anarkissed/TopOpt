@@ -35,8 +35,14 @@ struct RunFinish {
   std::vector<DesignBox> keep_outs;
 };
 
+// `cut_once` (may be null): a run's one Keep-clear cutter. The cutter depends only on
+// the part as drawn, its Keep clears and its Keep regions, none of which a run changes,
+// so a run makes it on its first call and shares it after (test P, 11-28: on the
+// 0.01 mm drawn mesh one build is about 9.5 s, and a run made one per version plus one
+// for the finish check). The same object, so the same bytes.
 RunFinish make_run_finish(const JobDescription& job, const MinimizePlasticOptions& o,
-                          const StepModel* cad, const VoxelGrid& sg) {
+                          const StepModel* cad, const VoxelGrid& sg,
+                          std::shared_ptr<const KeepClearCut>* cut_once = nullptr) {
   RunFinish f;
   const double outer = o.wall_line_width_outer_mm > 0.0 ? o.wall_line_width_outer_mm
                                                          : o.wall_line_width_mm;
@@ -77,9 +83,15 @@ RunFinish make_run_finish(const JobDescription& job, const MinimizePlasticOption
   if (cad != nullptr && !cad->mesh.empty()) {  // every file is cut out of its Keep clears
     f.keep_clears = lattice_keep_outs_from_job(job, *cad);
     f.part = &cad->drawn_mesh();  // stage 3: the 0.01 mm copy when made
-    if (!f.keep_clears.empty() || !job.keep_regions.empty())
-      f.keep_clear_cut = std::make_shared<const KeepClearCut>(
-          make_keep_clear_cut(cad->drawn_mesh(), f.keep_clears, job.keep_regions));
+    if (!f.keep_clears.empty() || !job.keep_regions.empty()) {
+      if (cut_once != nullptr && *cut_once != nullptr) {
+        f.keep_clear_cut = *cut_once;
+      } else {
+        f.keep_clear_cut = std::make_shared<const KeepClearCut>(
+            make_keep_clear_cut(cad->drawn_mesh(), f.keep_clears, job.keep_regions));
+        if (cut_once != nullptr) *cut_once = f.keep_clear_cut;
+      }
+    }
   }
   f.ctx.slim_line_mm = 2.0 * f.ctx.min_thickness_mm;  // his ruling 2026-11-03: slim
   // A latticed job's versions carry a lattice companion built from the unfinished shape.

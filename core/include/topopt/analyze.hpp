@@ -463,7 +463,12 @@ FixedDesignAnalysis analyze_fixed_design(
     // other case, including an armed gate the law could not evaluate.
     bool gate_on_strut_strength = false,
     // Install 3: the strength check's numbers (AnalysisKnobs). Null: the constants, as before.
-    const AnalysisKnobs* knobs = nullptr);
+    const AnalysisKnobs* knobs = nullptr,
+    // TO stage 3, test P (TOReview's ruling 11-28): a starting iterate for the FIRST
+    // certification solve, at the same tolerance. Only the stage 3 margin probe passes
+    // one (the iteration's own solution for the same density, switch on); the field
+    // lands inside the same residual ball. Null: the cold solve, byte-for-byte.
+    const FeaSolution* initial_guess = nullptr);
 
 // ═══ THE MARGIN-REPRODUCTION BAND ═══════════════════════════════════════════
 // (task 2026-08-08-lattice-variant-margin-tolerance, S1)

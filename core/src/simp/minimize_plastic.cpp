@@ -2277,7 +2277,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       plsm_opts.line_width_mm = options.wall_line_width_mm;  // TO stage 3 (P-03)
       if (plsm_opts.margin_probe_every > 0 && !options.multiscale_lattice) {
         plsm_opts.margin_probe =
-            [&](const std::vector<double>& density) -> PlsmMarginProbe {
+            [&](const std::vector<double>& density,
+                const FeaSolution* warm) -> PlsmMarginProbe {
           PlsmMarginProbe mp;
           const auto t0 = std::chrono::steady_clock::now();
           mp.load_path_ok = load_path_connected(G, density, kIso);
@@ -2287,7 +2288,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
               mp.load_path_ok, part_solid, /*lattice=*/nullptr,
               /*score_build_orientation=*/false,
               /*build_direction_inferred=*/false,
-              /*auto_apply_build_orientation=*/false, kIso);
+              /*auto_apply_build_orientation=*/false, kIso,
+              /*gate_on_strut_strength=*/false, /*knobs=*/nullptr, warm);
           mp.margin = a.margin.worst_case;
           if (to_stage1_on() && a.max_von_mises > 0.0 &&
               a.von_mises_field.size() == G.tags.size()) {
