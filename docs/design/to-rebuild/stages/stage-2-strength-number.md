@@ -1040,3 +1040,17 @@ The two-voxel plates did not flatter the reading: at six thick the plate and the
 
 READ PLAINLY: on a real inside-corner fillet of 6 voxels of radius, NOT flagged, the reading is 8.3 % under the 4 x reference: it MISSES the bar (5 %). It is far better than the per-voxel peak (25 to 30 % under), and at R = 6 it closes as the grid refines (-8.3, -5.2), but it is not inside 5 % at the resolved limit. And at R = 4 the 2 x grid reads 12.7 % ABOVE the 4 x one, so the reference itself is not settled there (the reading does not converge steadily at that radius). The round hole in a plate passed from 5 voxels; a fillet in bending, where the raiser sits on a member only 8 voxels thick and the stress falls away through the thickness as well as around the corner, is harder. So either "resolved" for an inside fillet is more than 6 voxels of radius (to be measured at 8 and 12), or the shape of the carry there needs the bending gradient as well as the 1 / r^2 term. For the reviewer; the reading stays behind its switch.
 
+### THE REVIEWER'S RULING OF 2026-11-28 02:21Z (11-27 21:21 EST), maintainer-approved (word for word)
+
+> 1. Your reading of (a) is right: the ball stays where it applies today, and the surface carry on a real-stiffness solve replaces the one-voxel reading wherever the code falls back to it.
+>
+> 2. Section-force stress: agreed, not yet the reading under 8 through. Next is the statically indeterminate case as you propose (two members of different thickness sharing a load, the section from the model's own fills, against a fine solve).
+>
+> 3. The 3D inside fillet: measure radius 8 and 12 voxels first, and state whether the 4x reference has settled (the 2x-to-4x trend); if it has not, judge against the extrapolated value. Only if 12 still misses the 5 % bar, try the carry with the bending gradient. "Resolved" for an inside fillet is set by that measurement, not before.
+>
+> 4. Before any flip: the loose end on drawn faces under grown material in a design box, and measurements 3 to 5 under the lock.
+>
+> Lean: one thing at a time; report at stage ends.
+
+ORDER, one at a time: the fillet at 8 and 12 voxels (item 3); the indeterminate section-force case (item 2); the design-box loose end (item 4); measurements 3 to 5 under the lock.
+
