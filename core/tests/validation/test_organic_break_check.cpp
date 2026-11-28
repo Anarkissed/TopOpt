@@ -483,6 +483,12 @@ void steady(char** a) {
     std::printf("STEADY load path: because [%s]; unresolved energy %.2f %%, largest region %.2f %% at (%.2f, %.2f, %.2f), %zu voxels;%s\n", why.c_str(),
                 100.0 * r.unresolved_energy_share, 100.0 * r.largest_unresolved_share, r.largest_unresolved_at.x, r.largest_unresolved_at.y,
                 r.largest_unresolved_at.z, r.largest_unresolved_voxels, pp.c_str());
+    if (!r.joint_regions.empty())
+      std::printf("STEADY load path: the region with the most load %.2f %% at (%.2f, %.2f, %.2f), %zu voxels (energy %.2f %%)\n",
+                  100.0 * r.joint_regions.front().load_share, r.joint_regions.front().at.x, r.joint_regions.front().at.y, r.joint_regions.front().at.z,
+                  r.joint_regions.front().voxels, 100.0 * r.joint_regions.front().energy_share);
+    else
+      std::printf("STEADY load path: no region carries over 1 %% of the load\n");
   }
   std::printf("STEADY places under the pass line:");
   for (const BreakPoint& q : r.not_judged_under) std::printf(" %.3f@(%.1f,%.1f,%.1f)%s", q.multiple, q.at.x, q.at.y, q.at.z, q.cls.c_str());
@@ -597,6 +603,9 @@ BreakResult load_path_case(const std::string& name, const std::vector<std::array
   std::printf("%s: verdict %s (%s); first break %.3f; unresolved energy %.4f, largest region %.4f at (%.2f, %.2f, %.2f), %zu voxels\n", name.c_str(),
               r.verdict.c_str(), why.c_str(), r.first_resolved.multiple, r.unresolved_energy_share, r.largest_unresolved_share,
               r.largest_unresolved_at.x, r.largest_unresolved_at.y, r.largest_unresolved_at.z, r.largest_unresolved_voxels);
+  if (!r.joint_regions.empty())
+    std::printf("%s: the region with the most load: %.4f of the load at (%.2f, %.2f, %.2f), %zu voxels\n", name.c_str(), r.joint_regions.front().load_share,
+                r.joint_regions.front().at.x, r.joint_regions.front().at.y, r.joint_regions.front().at.z, r.joint_regions.front().voxels);
   return r;
 }
 void load_path() {
@@ -609,7 +618,7 @@ void load_path() {
   // they touch only along a 0.4 x 0.4 mm patch 0.1 mm long (x 4.9 to 5.0): the joint carries the whole load. A general
   // joint is measured by the strain-energy share of its not-resolved material (posts by their section force); named.
   const BreakResult c = load_path_case("JOINT", {{0, 0, 0, 5, 3, 3}, {4.9, 2.6, 2.6, 10, 5.6, 5.6}}, 0.1, true);
-  check(c.ok && c.verdict == "not_proven" && c.unresolved_energy_share > kBreakLoadPathShare &&
+  check(c.ok && c.verdict == "not_proven" && !c.joint_regions.empty() && c.joint_regions.front().load_share > kBreakLoadPathShare &&
             std::hypot(std::hypot(c.largest_unresolved_at.x - 4.95, c.largest_unresolved_at.y - 2.8), c.largest_unresolved_at.z - 2.8) < 1.5,
         "the load-path rule: a thin joint in the load path is named (not_proven, the region at the joint)");
   // the same bar whole, with a 0.4 mm fin off the load path (on its +y face): not named

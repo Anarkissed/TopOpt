@@ -143,6 +143,11 @@ struct BreakResult {
   double unresolved_energy_share = 0.0, largest_unresolved_share = 0.0;
   Vec3 largest_unresolved_at{};
   std::size_t largest_unresolved_voxels = 0;
+  // C8, (iii): each not-resolved region's load share (the largest net force through any one-voxel slice of it along
+  // any axis, over the applied load), with its energy share, place and voxels; those over 1 %, largest first, at most 10.
+  // A region over kBreakLoadPathShare gives not_proven ("unresolved_joint").
+  struct Region { double load_share = 0.0, energy_share = 0.0; Vec3 at{}; std::size_t voxels = 0, first = 0; };
+  std::vector<Region> joint_regions;
   std::vector<std::string> not_proven_because;
   // also_connected_ball: the voxels whose ball holds material not connected to them inside it, and the first breaks
   // (judged, all points) smoothed over the connected material only.

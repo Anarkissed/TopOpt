@@ -1090,7 +1090,7 @@ BreakResult organic_break_check(const BreakAsk& ask) {
     R.unresolved_energy_share = total > 0.0 ? unres / total : 0.0;
     // the largest connected not-resolved region by its energy; its place = its most loaded voxel
     std::vector<char> seen(mat.size(), 0);
-    std::vector<std::size_t> stack;
+    std::vector<std::size_t> stack, members;
     const int nb[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
     double best = -1.0;
     for (std::size_t e0 = 0; e0 < mat.size(); ++e0) {
@@ -1099,9 +1099,11 @@ BreakResult organic_break_check(const BreakAsk& ask) {
       std::size_t at = e0, n = 0;
       stack.assign(1, e0);
       seen[e0] = 1;
+      members.clear();
       while (!stack.empty()) {
         const std::size_t e = stack.back();
         stack.pop_back();
+        members.push_back(e);
         sum += en[e];
         ++n;
         if (en[e] > top) { top = en[e]; at = e; }
@@ -1116,6 +1118,33 @@ BreakResult organic_break_check(const BreakAsk& ask) {
           stack.push_back(f);
         }
       }
+      // (iii) C8: the force through the region. Every one-voxel slice of the region along each axis (the region's own
+      // voxels in that layer): its net force = sum of filled share x h^2 x (the material's stress . the axis); the
+      // region's load share = the largest magnitude over every slice and axis / the applied load.
+      {
+        double fmax = 0.0;
+        for (int a = 0; a < 3; ++a) {
+          std::map<int, std::array<double, 3>> layer;
+          for (const std::size_t e : members) {
+            const int ii = static_cast<int>(e % static_cast<std::size_t>(g.nx)), jj = static_cast<int>((e / static_cast<std::size_t>(g.nx)) % static_cast<std::size_t>(g.ny)),
+                      kk = static_cast<int>(e / (static_cast<std::size_t>(g.nx) * static_cast<std::size_t>(g.ny)));
+            const int L = a == 0 ? ii : a == 1 ? jj : kk;
+            const auto& t = sig[e];   // xx yy zz xy yz zx
+            const double tn[3] = {a == 0 ? t[0] : a == 1 ? t[3] : t[5], a == 0 ? t[3] : a == 1 ? t[1] : t[4], a == 0 ? t[5] : a == 1 ? t[4] : t[2]};
+            auto& v = layer[L];
+            for (int c = 0; c < 3; ++c) v[static_cast<std::size_t>(c)] += frac[e] * h * h * tn[c];
+          }
+          for (const auto& [L, v] : layer) fmax = std::max(fmax, std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]));
+        }
+        BreakResult::Region rg;
+        rg.load_share = asked_n > 0.0 ? fmax / asked_n : 0.0;
+        rg.energy_share = total > 0.0 ? sum / total : 0.0;
+        rg.voxels = n;
+        rg.first = e0;
+        rg.at = g.centre(static_cast<int>(at % static_cast<std::size_t>(g.nx)), static_cast<int>((at / static_cast<std::size_t>(g.nx)) % static_cast<std::size_t>(g.ny)),
+                         static_cast<int>(at / (static_cast<std::size_t>(g.nx) * static_cast<std::size_t>(g.ny))));
+        if (rg.load_share > 0.01) R.joint_regions.push_back(rg);
+      }
       if (sum > best) {
         best = sum;
         R.largest_unresolved_share = total > 0.0 ? sum / total : 0.0;
@@ -1126,6 +1155,12 @@ BreakResult organic_break_check(const BreakAsk& ask) {
     }
   }
   const bool energy_block = R.unresolved_energy_share > kBreakLoadPathShare;
+  // (iii) the regions by their load share, largest first (ties: the region's first voxel), at most ten kept
+  std::sort(R.joint_regions.begin(), R.joint_regions.end(), [](const BreakResult::Region& a, const BreakResult::Region& b) {
+    return a.load_share != b.load_share ? a.load_share > b.load_share : a.first < b.first;
+  });
+  const bool joint_block = !R.joint_regions.empty() && R.joint_regions.front().load_share > kBreakLoadPathShare;
+  if (R.joint_regions.size() > 10) R.joint_regions.resize(10);
   // 9. the verdict
   // review 1.5: EVERY post whose file section reads under the pass line blocks a pass (whatever its weakest voxel)
   bool post_section_under = false;
@@ -1141,6 +1176,7 @@ BreakResult organic_break_check(const BreakAsk& ask) {
     if (post_section_under) R.not_proven_because.push_back("post_section_under_pass_line");
     if (post_block) R.not_proven_because.push_back("post_load_path_not_resolved");
     if (energy_block) R.not_proven_because.push_back("unresolved_energy");
+    if (joint_block) R.not_proven_because.push_back("unresolved_joint");
     R.verdict = R.not_proven_because.empty() ? "pass" : "not_proven";
   }
   for (std::size_t q = 0; q < nu; ++q) R.by_up.push_back({ask.other_ups[q], upJ[q], upA[q]});
@@ -1184,7 +1220,13 @@ BreakResult organic_break_check(const BreakAsk& ask) {
     }
     j += "], \"unresolved_energy_share\": " + num(R.unresolved_energy_share) + ", \"largest_unresolved_region\": {\"share\": " +
          num(R.largest_unresolved_share) + ", \"at\": " + vec_json(model_point(F, R.largest_unresolved_at)) + ", \"voxels\": " +
-         std::to_string(R.largest_unresolved_voxels) + "}}";
+         std::to_string(R.largest_unresolved_voxels) + "}, \"regions_by_load\": [";
+    for (std::size_t q = 0; q < R.joint_regions.size(); ++q) {
+      const BreakResult::Region& rg = R.joint_regions[q];
+      j += std::string(q ? ", " : "") + "{\"load_share\": " + num(rg.load_share) + ", \"energy_share\": " + num(rg.energy_share) + ", \"at\": " +
+           vec_json(model_point(F, rg.at)) + ", \"voxels\": " + std::to_string(rg.voxels) + "}";
+    }
+    j += "]}";
   }
   j += ", \"faces\": [" + faces_json + "], \"force_asked_n\": " + vec_json(model_dir(F, asked)) + ", \"force_applied_n\": " +
        vec_json(model_dir(F, applied));
