@@ -209,6 +209,10 @@ std::vector<char> study_voxels(const TriangleMesh& mesh, const VoxelGrid& ref) {
   return out;
 }
 
+// C10 G2, TEST-ONLY candidates (argv "smooth:R" the smoothing ball's radius in mm, "connected" also the connected-ball
+// reading); the product's default (0.9 mm radius, every material voxel in the ball) is never changed by them
+double g_smooth = 0.9;
+bool g_connected = false;
 double g_tol = 1e-2;   // the marks' solve tolerance (argv "tol:1e-8": the SPARSE split, C1 Piece 1)
 
 struct Piece {
@@ -454,7 +458,14 @@ void steady(char** a) {
   std::printf("STEADY size at %.3f mm: %zu material voxels (centre count), %.2f GB estimate\n", ask.voxel_mm, sz0.material_voxels, sz0.bytes / 1e9);
   if (sz0.bytes > 3e9) { std::printf("STEADY skipped: over 3 GB\n"); return; }
   fea_set_matfree_threads(1);
+  ask.smooth_mm = g_smooth;                // C10 G2 (test-only)
+  ask.also_connected_ball = g_connected;
   const BreakResult r = organic_break_check(ask);
+  if (g_connected)
+    std::printf("STEADY connected ball (radius %.2f): judged %.4f at (%.2f, %.2f, %.2f); all points %.4f\n", g_smooth, r.connected_judged.multiple,
+                r.connected_judged.at.x, r.connected_judged.at.y, r.connected_judged.at.z, r.connected_all.multiple);
+  else
+    std::printf("STEADY ball radius %.2f\n", g_smooth);
   double pf = 0.0;
   std::string per;
   for (const BreakClass& c : r.classes)
@@ -796,6 +807,79 @@ void review_fixes() {
   }
 }
 
+// C10 G1 (review 1): two thick blocks (2 x 2 x 2 mm) joined by a 0.4 x 0.4 mm neck, all the load through the neck in
+// tension along x (in a layer), PA6 (31 MPa, 0.40 across). Every neck length 0.2 to 0.8 mm must lie in a measured region
+// and give not_proven naming it.
+void set_pa6(BreakAsk& a) {
+  a.youngs_mpa = 3760;
+  a.poisson = 0.39;
+  a.yield_mpa = 31;
+  a.z_knockdown = 0.40;
+}
+void g1_necks() {
+  for (const double L : {0.2, 0.3, 0.4, 0.5, 0.6, 0.8}) {
+    char name[40];
+    std::snprintf(name, sizeof name, "G1_NECK_%.1f", L);
+    auto x = made(name, {{0, 0, 0, 2, 2, 2}, {2 + L, 0, 0, 4 + L, 2, 2}, {1.95, 0.8, 0.8, 2.05 + L, 1.2, 1.2}}, {0.1, 0, 0});
+    set_pa6(x->ask);
+    const BreakResult r = organic_break_check(x->ask);
+    std::string why;
+    for (const std::string& w : r.not_proven_because) why += w + " ";
+    const bool named = !r.joint_regions.empty() && r.joint_regions.front().load_share > kBreakLoadPathShare &&
+                       std::fabs(r.joint_regions.front().at.x - (2.0 + 0.5 * L)) <= 0.5 * L + 0.3 &&
+                       std::hypot(r.joint_regions.front().at.y - 1.0, r.joint_regions.front().at.z - 1.0) < 0.6;
+    std::printf("G1 neck %.1f mm: %s (%s); first break %.3f; slivers %zu, members %zu, connectors %zu; the region with the most load: %s "
+                "%.4f at (%.2f, %.2f, %.2f), %zu voxels\n",
+                L, r.verdict.c_str(), why.c_str(), r.first_resolved.multiple, r.sliver_voxels, r.member_regions, r.connector_regions,
+                r.joint_regions.empty() ? "none" : r.joint_regions.front().member ? "member" : "connector",
+                r.joint_regions.empty() ? 0.0 : r.joint_regions.front().load_share, r.joint_regions.empty() ? 0.0 : r.joint_regions.front().at.x,
+                r.joint_regions.empty() ? 0.0 : r.joint_regions.front().at.y, r.joint_regions.empty() ? 0.0 : r.joint_regions.front().at.z,
+                r.joint_regions.empty() ? std::size_t{0} : r.joint_regions.front().voxels);
+    char what[120];
+    std::snprintf(what, sizeof what, "G1: a %.1f mm neck between two blocks lies in a measured region and is named (not_proven)", L);
+    check(r.ok && r.verdict == "not_proven" && named, what);
+  }
+}
+
+// C10 G2 (review 2), bending and neighbours, PA6 (31 MPa along the layers), x in a layer, up z:
+// (a) a vine b x b, 8 mm long, grown out of a held 3 mm block, a tip load F across (-z): first yield at the root
+//     31 b h^2 / (6 F L), the plastic hinge 1.5 x that; MARK: the check's first break <= 1.10 x the hinge.
+// (b) two parallel 0.9 mm vines 0.6 mm apart on one held block, one pulled (F along +x, 8 mm long), the other free
+//     (7 mm): MARK: the first break within 10 % of 31 x 0.81 / F.
+void g2() {
+  const double F = 0.1, L = 8.0;
+  for (const double b : {0.9, 1.35}) {
+    char name[40];
+    std::snprintf(name, sizeof name, "G2_CANTILEVER_%.2f", b);
+    const double c0 = 1.5 - 0.5 * b, c1 = 1.5 + 0.5 * b;
+    auto x = made(name, {{0, 0, 0, 3, 3, 3}, {2.95, c0, c0, 3 + L, c1, c1}}, {0, 0, -F});
+    set_pa6(x->ask);
+    x->ask.smooth_mm = g_smooth;
+    x->ask.also_connected_ball = g_connected;
+    const BreakResult r = organic_break_check(x->ask);
+    const double fy = 31.0 * b * b * b / (6.0 * F * L), hinge = 1.5 * fy;
+    std::printf("G2a %.2f mm (ball radius %.2f%s): %s; first break %.4f at (%.2f, %.2f, %.2f) %s; all points %.4f; connected %.4f / %.4f; "
+                "first yield %.4f, hinge %.4f; check / first yield %.3f; MARK (<= 1.10 x hinge = %.4f) %s\n",
+                b, g_smooth, g_connected ? ", connected" : "", r.verdict.c_str(), r.first_resolved.multiple, r.first_resolved.at.x,
+                r.first_resolved.at.y, r.first_resolved.at.z, r.first_resolved.cls.c_str(), r.first_all.multiple, r.connected_judged.multiple,
+                r.connected_all.multiple, fy, hinge, r.first_resolved.multiple / fy, 1.10 * hinge,
+                r.first_resolved.multiple <= 1.10 * hinge ? "MET" : "MISSED");
+  }
+  {
+    auto x = made("G2_PARALLEL", {{0, 0, 0, 3, 3, 3}, {2.95, 0.6, 1.05, 11, 1.5, 1.95}, {2.95, 2.1, 1.05, 10, 3.0, 1.95}}, {1.0, 0, 0});
+    set_pa6(x->ask);
+    x->ask.smooth_mm = g_smooth;
+    x->ask.also_connected_ball = g_connected;
+    const BreakResult r = organic_break_check(x->ask);
+    const double want = 31.0 * 0.81 / 1.0;
+    std::printf("G2b parallel (ball radius %.2f%s): %s; first break %.4f at (%.2f, %.2f, %.2f) %s; all points %.4f; connected %.4f / %.4f; "
+                "want %.4f; MARK (within 10 %%) %s\n",
+                g_smooth, g_connected ? ", connected" : "", r.verdict.c_str(), r.first_resolved.multiple, r.first_resolved.at.x, r.first_resolved.at.y,
+                r.first_resolved.at.z, r.first_resolved.cls.c_str(), r.first_all.multiple, r.connected_judged.multiple, r.connected_all.multiple, want,
+                std::fabs(r.first_resolved.multiple / want - 1.0) <= 0.10 ? "MET" : "MISSED");
+  }
+}
+
 // C9: the Auto Sweep limits the app's Organic page reads before a lay (Session::sweep_limits_for over the job's weave
 // regions, the line its bead, the gap 1.5 lines: LatticeOrganicLook.Check.gapLines), for laying a piece at the app's defaults.
 void limits(const std::string& job_path) {
@@ -815,14 +899,22 @@ void limits(const std::string& job_path) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  // C10 G2 (test-only): the candidates' tokens, read anywhere on the command line
+  for (int i = 1; i < argc; ++i) {
+    if (std::string(argv[i]).rfind("smooth:", 0) == 0) g_smooth = std::atof(argv[i] + 7);
+    if (std::string(argv[i]) == "connected") g_connected = true;
+  }
+  if (argc >= 2 && std::string(argv[1]) == "g2") { g2(); return 0; }   // C10: test-only, no default checks first
+  // the steady mode (argv[10], [11] optional, C5) runs alone (C10: the default checks are not run first)
+  if (argc >= 10 && std::string(argv[1]) == "steady") { steady(argv + 2); return 0; }
   if (argc >= 3 && std::string(argv[1]) == "limits") { limits(argv[2]); return 0; }   // C9
   gate();
   law();
   bar();
   load_path();
   review_fixes();
+  g1_necks();
   if (argc >= 4 && std::string(argv[1]) == "remake") { remake(argv[2], argv[3]); return 0; }
-  if (argc >= 10 && std::string(argv[1]) == "steady") { steady(argv + 2); return 0; }   // argv[10], [11] optional (C5)
   if (argc >= 3 && std::string(argv[1]) == "oversize") oversize(argv[2]);
   if (argc >= 5 && std::string(argv[1]) == "size") { size_of(argv[2], argv[3], std::atof(argv[4])); return failures == 0 ? 0 : 1; }
   if (argc >= 6 && std::string(argv[1]) == "postwidth") {

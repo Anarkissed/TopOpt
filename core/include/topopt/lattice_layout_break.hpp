@@ -41,11 +41,14 @@ constexpr double kBreakLoadPathShare = 0.05;
 //  - A voxel is resolved (THICK) when at least half of its filled samples are THICK.
 //  - LOCAL REGIONS: MEMBER voxels = thin voxels holding FAR material, plus thin voxels in the 26-neighbourhood of one
 //    (one voxel of margin); member regions = their face-connected components, measured by the energy share and the
-//    force through them. CONTACT, on the samples (so it does not hang on the grid's placement): BODIES = face-connected
-//    THICK samples; a contact sample is a filled, not-THICK sample with, along some axis, a THICK sample of one body at
-//    offset -1 and of a different body at +1 or +2 (or the mirror); contact voxels hold one and are not members;
-//    connector regions = their face-connected components, measured by the force through them. Every other thin voxel
-//    is a SLIVER: in no region and no measure.
+//    force through them. CONTACT, on the samples (so it does not hang on the grid's placement): C10 (G1), BODIES =
+//    26-connected components of CORE samples; every filled sample takes the body of the core it reaches first (breadth
+//    first through filled samples); an INTERFACE sample has a face neighbour of another body, so wherever two bodies meet
+//    through material (a joint, a neck of any length, read thick or thin) the meeting is marked; C8's rule is kept too
+//    (a filled, not-THICK sample with THICK samples of two bodies at -1 and +1 or +2 along an axis). Contact voxels hold
+//    one (resolved or not) and are not members; connector regions = their face-connected components, measured by the
+//    force through them. Every other thin voxel is a SLIVER: in no region and no measure. The not-resolved energy
+//    (C10, review 6b) is that of the member, contact and not-resolved post voxels.
 constexpr double kBreakFarMarginVoxels = 1.25;
 
 // A bar of the lay as the file holds it (model frame), and a post as the print check laid it.

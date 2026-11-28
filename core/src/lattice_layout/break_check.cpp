@@ -315,49 +315,87 @@ std::vector<char> judged_fine(const BreakAsk& ask, const Grid& g, const std::vec
   // neighbours on one axis. A voxel holding a contact sample is a CONTACT voxel.
   if (contact_out) {
     const auto thick = [&](std::size_t e) { return in[e] && std::sqrt(static_cast<double>(a[e])) * hs <= r + 1e-9; };
+    // C10 (G1, review 1): BODIES are the 26-connected components of CORE samples (a thick body's own core is one piece;
+    // two bodies joined only through material thinner than the core's ball are two). Every filled sample takes the body
+    // of the core it reaches first (breadth first through filled samples, face steps). An INTERFACE sample is a filled
+    // sample with a face neighbour of another body: wherever two bodies meet through material, however short or long
+    // the joint and whether the opening reads it thick or not, the meeting is marked. Its voxel is a CONTACT voxel.
     std::vector<int> body(N, -1);
     std::vector<std::size_t> st;
     int nb = 0;
     const long long sx = 1, sy = NX, sz = static_cast<long long>(NX) * NY;
     const long long step[3] = {sx, sy, sz};
     for (std::size_t e0 = 0; e0 < N; ++e0) {
-      if (body[e0] >= 0 || !thick(e0)) continue;
+      if (body[e0] >= 0 || !core[e0]) continue;
       body[e0] = nb;
       st.assign(1, e0);
       while (!st.empty()) {
         const std::size_t e = st.back();
         st.pop_back();
-        for (int ax = 0; ax < 3; ++ax)
-          for (int sg = -1; sg <= 1; sg += 2) {
-            const long long f = static_cast<long long>(e) + sg * step[ax];
-            if (f < 0 || f >= static_cast<long long>(N)) continue;
-            const std::size_t fu = static_cast<std::size_t>(f);
-            if (body[fu] >= 0 || !thick(fu)) continue;
-            body[fu] = nb;
-            st.push_back(fu);
-          }
+        const long long ii = static_cast<long long>(e % static_cast<std::size_t>(NX)), jj = static_cast<long long>((e / static_cast<std::size_t>(NX)) % static_cast<std::size_t>(NY)),
+                        kk = static_cast<long long>(e / (static_cast<std::size_t>(NX) * static_cast<std::size_t>(NY)));
+        for (int dk = -1; dk <= 1; ++dk)
+          for (int dj = -1; dj <= 1; ++dj)
+            for (int di = -1; di <= 1; ++di) {
+              if (!di && !dj && !dk) continue;
+              if (ii + di < 0 || jj + dj < 0 || kk + dk < 0 || ii + di >= NX || jj + dj >= NY || kk + dk >= NZ) continue;
+              const std::size_t fu = static_cast<std::size_t>(static_cast<long long>(e) + di * sx + dj * sy + dk * sz);
+              if (body[fu] >= 0 || !core[fu]) continue;
+              body[fu] = nb;
+              st.push_back(fu);
+            }
       }
       ++nb;
+    }
+    {   // every filled sample: the body of the core it reaches first (breadth first, face steps through filled samples)
+      std::vector<std::size_t> q, next;
+      for (std::size_t e = 0; e < N; ++e)
+        if (body[e] >= 0) q.push_back(e);
+      while (!q.empty()) {
+        next.clear();
+        for (const std::size_t e : q)
+          for (int ax = 0; ax < 3; ++ax)
+            for (int sg = -1; sg <= 1; sg += 2) {
+              const long long f = static_cast<long long>(e) + sg * step[ax];
+              if (f < 0 || f >= static_cast<long long>(N)) continue;
+              const std::size_t fu = static_cast<std::size_t>(f);
+              if (body[fu] >= 0 || !in[fu]) continue;
+              body[fu] = body[e];
+              next.push_back(fu);
+            }
+        q.swap(next);
+      }
     }
     for (int k = 1; k < NZ - 1; ++k)
       for (int j = 1; j < NY - 1; ++j)
         for (int i = 1; i < NX - 1; ++i) {
           const std::size_t e = idx(i, j, k);
-          if (!in[e] || body[e] >= 0) continue;   // filled and not THICK
+          if (!in[e]) continue;
           const std::size_t v = g.index((i - 1) / m, (j - 1) / m, (k - 1) / m);
-          if (!mat[v] || res[v]) continue;
+          if (!mat[v]) continue;
           const int c[3] = {i, j, k}, n3[3] = {NX, NY, NZ};
           bool contact = false;
-          for (int ax = 0; ax < 3 && !contact; ++ax) {
-            const auto lab = [&](int off) -> int {
-              const int t = c[ax] + off;
-              if (t < 0 || t >= n3[ax]) return -1;
-              return body[static_cast<std::size_t>(static_cast<long long>(e) + off * step[ax])];
-            };
-            const int lm1 = lab(-1), lp1 = lab(1), lm2 = lab(-2), lp2 = lab(2);
-            if (lm1 >= 0 && ((lp1 >= 0 && lp1 != lm1) || (lp2 >= 0 && lp2 != lm1))) contact = true;
-            if (lp1 >= 0 && ((lm1 >= 0 && lm1 != lp1) || (lm2 >= 0 && lm2 != lp1))) contact = true;
-          }
+          // the interface: a face neighbour of another body
+          for (int ax = 0; ax < 3 && !contact; ++ax)
+            for (int sg = -1; sg <= 1 && !contact; sg += 2) {
+              const int t = c[ax] + sg;
+              if (t < 0 || t >= n3[ax]) continue;
+              const int o = body[static_cast<std::size_t>(static_cast<long long>(e) + sg * step[ax])];
+              contact = body[e] >= 0 && o >= 0 && o != body[e];
+            }
+          // C8's rule, kept: a filled, not-THICK sample with THICK samples of two bodies at -1 and +1 or +2 along an axis
+          if (!contact && !thick(e) && !res[v])
+            for (int ax = 0; ax < 3 && !contact; ++ax) {
+              const auto lab = [&](int off) -> int {
+                const int t = c[ax] + off;
+                if (t < 0 || t >= n3[ax]) return -1;
+                const std::size_t f = static_cast<std::size_t>(static_cast<long long>(e) + off * step[ax]);
+                return thick(f) ? body[f] : -1;
+              };
+              const int lm1 = lab(-1), lp1 = lab(1), lm2 = lab(-2), lp2 = lab(2);
+              if (lm1 >= 0 && ((lp1 >= 0 && lp1 != lm1) || (lp2 >= 0 && lp2 != lm1))) contact = true;
+              if (lp1 >= 0 && ((lm1 >= 0 && lm1 != lp1) || (lm2 >= 0 && lm2 != lp1))) contact = true;
+            }
           if (contact) (*contact_out)[v] = 1;
         }
   }
@@ -1197,7 +1235,11 @@ BreakResult organic_break_check(const BreakAsk& ask) {
       for (int j = 0; j < g.ny; ++j)
         for (int i = 0; i < g.nx; ++i) {
           const std::size_t e = g.index(i, j, k);
-          if (!mat[e] || res[e]) continue;
+          if (!mat[e]) continue;
+          if (res[e]) {   // C10 (G1): a resolved voxel is in a region only where two bodies meet (a contact)
+            if (contact[e]) kind[e] = 2;
+            continue;
+          }
           bool mem = far[e] != 0;
           for (int dk = -1; dk <= 1 && !mem; ++dk)
             for (int dj = -1; dj <= 1 && !mem; ++dj)
@@ -1214,7 +1256,7 @@ BreakResult organic_break_check(const BreakAsk& ask) {
     // bodies' rind, stay out)
     unres = 0.0;
     for (std::size_t e = 0; e < mat.size(); ++e)
-      if (mat[e] && !res[e] && (kind[e] || (cls[e] >= 0 && static_cast<std::size_t>(cls[e]) < np))) unres += en[e];
+      if (mat[e] && (kind[e] || (!res[e] && cls[e] >= 0 && static_cast<std::size_t>(cls[e]) < np))) unres += en[e];
     std::vector<char> seen(mat.size(), 0);
     std::vector<std::size_t> stack, members;
     const int nb[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
