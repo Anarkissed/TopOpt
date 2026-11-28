@@ -177,6 +177,10 @@ LatticeCredit lattice_credit(const Layout& layout, const Domain& domain, const B
                              const std::vector<char>* solid = nullptr, int threads = 0);
 
 // C3: the break check's reading of one post (lattice_layout_break.hpp, class "post").
+// C10 (review 9): the posts step's room test. Is the level rectangle [x0, x1] x [y0, y1] inside the part at every height
+// in `zs`, read at its four corners and four edge midpoints (each a hair inside the rectangle)?
+bool post_rect_inside_part(const TriangleMesh& part, double x0, double x1, double y0, double y1, const std::vector<double>& zs);
+
 struct BreakPostReading {
   double all = 0.0;          // its weakest point's multiple (0: none found)
   bool all_resolved = false;  // that point is judged (3 voxels across or more)

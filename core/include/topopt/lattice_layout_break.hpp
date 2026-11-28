@@ -67,6 +67,9 @@ struct BreakAsk {
   const TriangleMesh* print = nullptr;   // the print file (model frame)
   const StepModel* part = nullptr;       // the part, for its faces (the same frame)
   std::vector<int> fixed_faces;          // held in every direction
+  // C10 (review 3): the job holds the part on "bearing" anchors (compression only, sliding free). The check holds a face
+  // in every direction and cannot model a bearing, so such a job is not checked ("bearing_anchors").
+  bool anchors_bearing = false;
   std::vector<BreakLoad> loads;
   std::vector<BreakBar> bars;            // the kept bars (classes only)
   std::vector<BreakPost> posts;
@@ -133,6 +136,8 @@ struct BreakClass {
   BreakPoint all, resolved;     // the smallest over all its points, and over its judged points
   double section_multiple = 0.0;   // posts: the mid-height force over the post's file section (0: not read)
   double section_mm2 = 0.0, section_force_n = 0.0;
+  // C10 (review 6a): the whole force across the post's mid-height section (along and across), N
+  double section_force_total_n = 0.0;
 };
 struct BreakResult {
   bool ok = false;              // false: no number (the solve did not settle, or the ask is unusable); `why` says

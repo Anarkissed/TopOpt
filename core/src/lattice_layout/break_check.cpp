@@ -448,7 +448,9 @@ FacePick faces_on(const BreakAsk& ask, const Grid& g, const std::vector<char>& m
     tris.push_back(T);
   }
   if (tris.empty()) return out;
-  const double h = g.h, reach = 0.75 * h;
+  // C10 (review 13): a face that falls a tenth of a voxel into a layer makes that layer material with its outer face
+  // up to 0.9 voxel out (the fill floor), so the reach is (1 - kFillFloor) voxel; a feature one whole voxel off stays out
+  const double h = g.h, reach = (1.0 - kFillFloor) * h;
   auto M = [&](int i, int j, int k) { return i >= 0 && j >= 0 && k >= 0 && i < g.nx && j < g.ny && k < g.nz && mat[g.index(i, j, k)]; };
   const int ax[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}};
   // exposed voxel faces near each triangle (each voxel face once)
@@ -524,6 +526,7 @@ std::array<int, 4> face_nodes(const VoxelGrid& vg, int i, int j, int k, int a) {
 }
 
 std::string num(double v) {
+  if (!std::isfinite(v)) return "null";   // C10 (review 8): JSON has no inf or nan
   char b[40];
   std::snprintf(b, sizeof b, "%.9g", v);
   return b;
@@ -729,6 +732,14 @@ BreakResult organic_break_check(const BreakAsk& ask) {
       !(ask.smooth_mm >= 0.0) || ask.min_voxels_across < 1 ||
       !(std::sqrt(ask.up.x * ask.up.x + ask.up.y * ask.up.y + ask.up.z * ask.up.z) > 0.0))
     return not_checked("error", "the check was asked with no print, no part, no material or no build direction");
+  // C10 (review 14): a pass line that is not a number above 0 would let everything pass
+  if (!std::isfinite(ask.pass_line) || !(ask.pass_line > 0.0))
+    return not_checked("error", "the job's safety margin (the pass line) is not a number above 0");
+  // C10 (review 3): bearing anchors (compression only, sliding free) are held in every direction here: not modelled
+  if (ask.anchors_bearing)
+    return not_checked("bearing_anchors",
+                       "the strength job holds the part on bearing anchors (pressing only, free to slide); the check holds a face "
+                       "fixed in every direction, so it cannot give this job's answer");
   if (ask.fixed_faces.empty()) return not_checked("no_load", "the strength job holds the part by no face the check can read");
   if (ask.loads.empty()) return not_checked("no_load", "the strength job has no force on a face the check can read");
   try {
@@ -775,6 +786,13 @@ BreakResult organic_break_check(const BreakAsk& ask) {
   R.size.material_voxels = 0;
   for (char c : mat) R.size.material_voxels += c != 0;
   R.size.bytes = static_cast<double>(R.size.material_voxels) * kBytesPerMaterialVoxel + static_cast<double>(R.size.box_voxels) * kBytesPerBoxVoxel;
+  // C10 (review 7): the guard again on the TRUE count (every voxel a tenth filled; the first count read voxel centres)
+  if (R.size.bytes > R.size.limit_bytes) {
+    char b[220];
+    std::snprintf(b, sizeof b, "the check would need about %.1f GB (counted on the voxels it solves) and may use %.1f GB (40 %% of this "
+                  "machine's memory, less what the job holds)", R.size.bytes / 1e9, R.size.limit_bytes / 1e9);
+    return not_checked("too_big", b);
+  }
   auto M = [&](int i, int j, int k) { return i >= 0 && j >= 0 && k >= 0 && i < g.nx && j < g.ny && k < g.nz && mat[g.index(i, j, k)]; };
   // 1. the grid for the solve: material only
   VoxelGrid vg;
@@ -1072,7 +1090,7 @@ BreakResult organic_break_check(const BreakAsk& ask) {
       const BreakPost& p = ask.posts[c];
       const double zm = 0.5 * (p.z_bottom + p.z_top);
       const int km = std::max(0, std::min(g.nz - 1, static_cast<int>(std::floor((zm - g.lo.z) / h))));
-      double f = 0.0;
+      double f = 0.0, area = 0.0, fv[3] = {0.0, 0.0, 0.0};
       for (int j = 0; j < g.ny; ++j)
         for (int i = 0; i < g.nx; ++i) {
           const Vec3 cc = g.centre(i, j, km);
@@ -1084,9 +1102,14 @@ BreakResult organic_break_check(const BreakAsk& ask) {
           const Vec3 n{U.x / ul, U.y / ul, U.z / ul};
           const double sn = s[0] * n.x * n.x + s[1] * n.y * n.y + s[2] * n.z * n.z + 2.0 * (s[3] * n.x * n.y + s[4] * n.y * n.z + s[5] * n.z * n.x);
           f += frac[g.index(i, j, km)] * sn * h * h;   // C4: the force the partial voxel carries
+          // C10 (review 6a): the traction on the level section, sigma . n, whole (along and across the post)
+          const double tv[3] = {s[0] * n.x + s[3] * n.y + s[5] * n.z, s[3] * n.x + s[1] * n.y + s[4] * n.z, s[5] * n.x + s[4] * n.y + s[2] * n.z};
+          for (int q = 0; q < 3; ++q) fv[q] += frac[g.index(i, j, km)] * tv[q] * h * h;
+          area += frac[g.index(i, j, km)] * h * h;   // C10 (review 12): the material actually there
         }
-      bc.section_mm2 = (pbox[c][1] - pbox[c][0]) * (pbox[c][3] - pbox[c][2]);
+      bc.section_mm2 = area;
       bc.section_force_n = f;
+      bc.section_force_total_n = std::sqrt(fv[0] * fv[0] + fv[1] * fv[1] + fv[2] * fv[2]);
       if (bc.section_mm2 > 0.0 && f != 0.0) {
         const double st = f / bc.section_mm2;
         bc.section_multiple = st < 0.0 ? ask.yield_mpa / -st : ask.yield_mpa * ask.z_knockdown / st;
@@ -1127,7 +1150,7 @@ BreakResult organic_break_check(const BreakAsk& ask) {
   R.post_paths.assign(np, BreakResult::PostPath{});
   for (std::size_t q = 0; q < np; ++q) {
     BreakResult::PostPath& pp = R.post_paths[q];
-    pp.share = asked_n > 0.0 ? std::fabs(R.classes[q].section_force_n) / asked_n : 0.0;
+    pp.share = asked_n > 0.0 ? R.classes[q].section_force_total_n / asked_n : 0.0;   // C10 (review 6a): along and across
     const BreakPost& p = ask.posts[q];
     const double w = p.width;
     for (int k = 0; k < g.nz; ++k)
@@ -1187,7 +1210,11 @@ BreakResult organic_break_check(const BreakAsk& ask) {
           kind[e] = mem ? 1 : contact[e] ? 2 : 0;
           if (!kind[e]) ++R.sliver_voxels;
         }
-    unres = 0.0;   // summed below over the MEMBER voxels only
+    // C10 (review 6b): the not-resolved energy is the MEMBER, CONTACT and not-resolved POST material (slivers, the thick
+    // bodies' rind, stay out)
+    unres = 0.0;
+    for (std::size_t e = 0; e < mat.size(); ++e)
+      if (mat[e] && !res[e] && (kind[e] || (cls[e] >= 0 && static_cast<std::size_t>(cls[e]) < np))) unres += en[e];
     std::vector<char> seen(mat.size(), 0);
     std::vector<std::size_t> stack, members;
     const int nb[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
@@ -1219,7 +1246,7 @@ BreakResult organic_break_check(const BreakAsk& ask) {
         }
       }
       const bool member = kd == 1;
-      if (member) { ++R.member_regions; unres += sum; } else ++R.connector_regions;
+      if (member) ++R.member_regions; else ++R.connector_regions;
       // (iii) the force through the region: every one-voxel slice of its own voxels along each axis; the largest net
       // force over the applied load
       {
@@ -1255,7 +1282,7 @@ BreakResult organic_break_check(const BreakAsk& ask) {
                                            static_cast<int>(at / (static_cast<std::size_t>(g.nx) * static_cast<std::size_t>(g.ny))));
       }
     }
-    R.unresolved_energy_share = total > 0.0 ? unres / total : 0.0;   // over the MEMBER voxels only
+    R.unresolved_energy_share = total > 0.0 ? unres / total : 0.0;   // members, contacts and not-resolved posts
   }
   for (std::size_t e = 0; e < mat.size(); ++e) R.unresolved_voxels += mat[e] && !res[e];
   const bool energy_block = R.unresolved_energy_share > kBreakLoadPathShare;
@@ -1296,6 +1323,7 @@ BreakResult organic_break_check(const BreakAsk& ask) {
     j += std::string(q ? ", " : "") + "{\"class\": \"" + bc.cls + "\"" + (bc.post >= 0 ? ", \"post\": " + std::to_string(bc.post) : std::string()) +
          ", \"all\": " + point_json(bc.all, F) + ", \"judged\": " + point_json(bc.resolved, F) +
          (bc.cls == "post" ? ", \"section_mm2\": " + num(bc.section_mm2) + ", \"section_force_n\": " + num(bc.section_force_n) +
+                                 ", \"section_force_total_n\": " + num(bc.section_force_total_n) +
                                  ", \"section_multiple\": " + num(bc.section_multiple)
                            : std::string()) +
          "}";

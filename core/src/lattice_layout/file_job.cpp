@@ -1890,6 +1890,7 @@ double file_volume_mm3(const std::string& path) {
 }
 
 std::string pnum(double v) {
+  if (!std::isfinite(v)) return "null";   // C10 (review 8): JSON has no inf or nan
   char b[40];
   std::snprintf(b, sizeof b, "%.6g", v);
   return b;
@@ -1932,6 +1933,22 @@ struct NearTris {
     }
     return w > 0;
   }
+  // C10: inside a closed surface of either orientation (the part as imported): any non-zero count
+  bool inside_either(double x, double y, double z) const {
+    int w = 0;
+    for (const auto& q : t) {
+      const Vec3 &a = q[0], &b = q[1], &c = q[2];
+      const double d = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
+      if (d == 0.0) continue;
+      const double l1 = ((b.x - x) * (c.y - y) - (c.x - x) * (b.y - y)) / d;
+      const double l2 = ((c.x - x) * (a.y - y) - (a.x - x) * (c.y - y)) / d;
+      const double l3 = 1.0 - l1 - l2;
+      if (l1 < 0.0 || l2 < 0.0 || l3 < 0.0) continue;
+      if (l1 * a.z + l2 * b.z + l3 * c.z <= z) continue;
+      w += d > 0.0 ? 1 : -1;
+    }
+    return w != 0;
+  }
   // How far the material at height z reaches from (x, y) along a level axis direction without a gap (0: none there).
   double reach(double x, double y, double z, double dx, double dy, double most) const {
     const double step = 0.02;
@@ -1943,6 +1960,20 @@ struct NearTris {
     return r;
   }
 };
+
+// C10 (review 9): the level rectangle [x0, x1] x [y0, y1] read at its four corners and four edge midpoints (each a
+// hair inside the rectangle, so a side lying exactly on the part's face counts as inside) at every height in `zs`.
+bool rect_inside(const NearTris& part, double x0, double x1, double y0, double y1, const std::vector<double>& zs) {
+  const double e = 1e-4;
+  const double xs[3] = {x0 + e, 0.5 * (x0 + x1), x1 - e}, ys[3] = {y0 + e, 0.5 * (y0 + y1), y1 - e};
+  for (const double z : zs)
+    for (int a = 0; a < 3; ++a)
+      for (int b = 0; b < 3; ++b) {
+        if (a == 1 && b == 1) continue;   // corners and edge midpoints
+        if (!part.inside_either(xs[a] + 1.3e-7, ys[b] + 0.7e-7, z + 1.1e-7)) return false;
+      }
+  return true;
+}
 
 void posts_step(FileResult& r, const FileJob& job0, const StepModel& model, const std::string& stl_path, void (*said)(const char*),
                 const StrengthCheck* strength) {
@@ -1972,26 +2003,31 @@ void posts_step(FileResult& r, const FileJob& job0, const StepModel& model, cons
   const double L = job.options.layers.layer_mm, PX = job.options.layers.pixel_mm;
   const double per_layer = std::min(L, std::max(1.0, static_cast<double>(std::lround(L / PX))) * PX);
   struct Edges { bool read = false; double head[4] = {0, 0, 0, 0}, foot[4] = {0, 0, 0, 0}; };
-  std::vector<Edges> edges(r.made.posts.size());
+  // C10 (review 11): kept by the post's PLACE (x, y, z_top, z_bottom), not its number, so a remake that lays the posts
+  // in another order reads each post's own
+  std::map<std::array<double, 4>, Edges> edges;
+  const auto place = [](const MeshSpec::Post& p) { return std::array<double, 4>{p.x, p.y, p.z_top, p.z_bottom}; };
   // read on the file as it is when the post is first named (its own box only: no post is flared before it is named)
   const auto read_edges = [&](const FileResult& now) {
     bool any = false;
-    for (std::size_t q = 0; q < now.made.posts.size() && q < edges.size(); ++q) any = any || (!edges[q].read && post_is_cause(now.break_posts[q], pass));
+    for (std::size_t q = 0; q < now.made.posts.size() && q < now.break_posts.size(); ++q)
+      any = any || (!edges[place(now.made.posts[q])].read && post_is_cause(now.break_posts[q], pass));
     if (!any) return;
     const TriangleMesh f = made_mesh(now.file);
     if (f.triangles.empty()) return;
     const double dir[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
-    for (std::size_t q = 0; q < now.made.posts.size() && q < edges.size(); ++q) {
-      if (edges[q].read || !post_is_cause(now.break_posts[q], pass)) continue;
+    for (std::size_t q = 0; q < now.made.posts.size() && q < now.break_posts.size(); ++q) {
+      Edges& ed = edges[place(now.made.posts[q])];
+      if (ed.read || !post_is_cause(now.break_posts[q], pass)) continue;
       const MeshSpec::Post& p = now.made.posts[q];
       const double R = 6.0;
       const NearTris near(f, p.x - R, p.x + R, p.y - R, p.y + R);
       for (int k = 0; k < 4; ++k) {
         // a hair off the axis and off the layer, so no reading sits exactly on a triangle's edge
-        edges[q].head[k] = near.reach(p.x + 1.3e-6, p.y + 0.7e-6, p.z_top + 1.1e-6, dir[k][0], dir[k][1], R);
-        edges[q].foot[k] = near.reach(p.x + 1.3e-6, p.y + 0.7e-6, p.z_bottom + 1.1e-6, dir[k][0], dir[k][1], R);
+        ed.head[k] = near.reach(p.x + 1.3e-6, p.y + 0.7e-6, p.z_top + 1.1e-6, dir[k][0], dir[k][1], R);
+        ed.foot[k] = near.reach(p.x + 1.3e-6, p.y + 0.7e-6, p.z_bottom + 1.1e-6, dir[k][0], dir[k][1], R);
       }
-      edges[q].read = true;
+      ed.read = true;
     }
   };
   std::vector<MeshSpec::PostWide> wide;
@@ -2005,7 +2041,7 @@ void posts_step(FileResult& r, const FileJob& job0, const StepModel& model, cons
     if (r.break_verdict != "fail" && r.break_verdict != "not_proven") break;
     std::string posts_json;
     bool changed = false;
-    if (r.made.posts.size() == edges.size()) read_edges(r);
+    read_edges(r);
     for (std::size_t q = 0; q < r.made.posts.size(); ++q) {
       const BreakPostReading& pr = r.break_posts[q];
       if (!post_is_cause(pr, pass)) continue;
@@ -2013,7 +2049,8 @@ void posts_step(FileResult& r, const FileJob& job0, const StepModel& model, cons
       bool skip = false;
       for (const std::string& c : cannot) skip = skip || c.rfind(std::to_string(q) + ":", 0) == 0;
       if (skip) continue;
-      double w0 = floor_w, ox0 = 0.0, oy0 = 0.0;
+      // C10 (review 9): the width the post is DRAWN at now (post_mm, or its posts-step entry), not the floor
+      double w0 = job.options.mesh.post_mm, ox0 = 0.0, oy0 = 0.0;
       for (const MeshSpec::PostWide& e : wide)
         if (same(p, e)) { w0 = e.width; ox0 = e.ox; oy0 = e.oy; }
       const double m = pr.all_resolved ? pr.all : (pr.section > 0.0 ? pr.section : pr.all);
@@ -2029,20 +2066,39 @@ void posts_step(FileResult& r, const FileJob& job0, const StepModel& model, cons
         py = std::min(py, reach_to_surface(model.mesh, o, 0, 1));
         ny = std::min(ny, reach_to_surface(model.mesh, o, 0, -1));
       }
-      const double h = 0.5 * w1;
+      // C10 (review 9): a width is taken only when its whole new section (four corners, four edge midpoints) lies inside
+      // the part at the foot, the middle and the top, on either route: first the law's width, then two lines; if two
+      // lines do not fit, the post keeps its bytes (no entry, no flare) and the block says why
+      const NearTris part_near(model.mesh, p.x - 8.0, p.x + 8.0, p.y - 8.0, p.y + 8.0);
+      const std::vector<double> zs{p.z_bottom + 0.3, 0.5 * (p.z_bottom + p.z_top), p.z_top - 0.3};
+      const auto placed = [&](double w, double& ox_, double& oy_) {
+        const double hh = 0.5 * w;
+        ox_ = px < hh ? -(hh - px) : nx < hh ? (hh - nx) : 0.0;
+        oy_ = py < hh ? -(hh - py) : ny < hh ? (hh - ny) : 0.0;
+        return rect_inside(part_near, p.x + ox_ - hh, p.x + ox_ + hh, p.y + oy_ - hh, p.y + oy_ + hh, zs);
+      };
       char why[200] = "";
-      if (px + nx < w1 || py + ny < w1)
-        std::snprintf(why, sizeof why, "the part is only %.2f x %.2f mm across at this post, under the %.2f mm it needs", px + nx, py + ny, w1);
-      // C9: a post the part is too narrow to widen keeps its width and place, and is still flared
-      const bool narrow = why[0] != 0;
-      const double wu = narrow ? w0 : w1, hu = 0.5 * wu;
-      const double ox = narrow ? ox0 : px < h ? -(h - px) : nx < h ? (h - nx) : 0.0;
-      const double oy = narrow ? oy0 : py < h ? -(h - py) : ny < h ? (h - ny) : 0.0;
+      double wu = w1, ox = 0.0, oy = 0.0;
+      bool fits = placed(w1, ox, oy);
+      if (!fits && floor_w < w1) {
+        std::snprintf(why, sizeof why, "the part has no room for the %.2f mm the law asks; drawn at two lines (%.2f mm)", w1, floor_w);
+        wu = floor_w;
+        fits = placed(floor_w, ox, oy);
+      }
+      if (!fits) {
+        std::snprintf(why, sizeof why, "the part has no room at this post for a %.2f mm section (two lines) inside its faces: the post is "
+                      "left as drawn", floor_w);
+        cannot.push_back(std::to_string(q) + ": " + why);
+        posts_json += std::string(posts_json.empty() ? "" : ", ") + "{\"post\": " + std::to_string(q) + ", \"at\": [" + pnum(p.x) + ", " +
+                      pnum(p.y) + ", " + pnum(p.z_bottom) + ", " + pnum(p.z_top) + "], \"width_before_mm\": " + pnum(w0) +
+                      ", \"widened\": false, \"moved\": false, \"flared\": false, \"why\": \"" + why + "\", \"changed\": false}";
+        continue;
+      }
+      const double hu = 0.5 * wu;
       // C9: the flare at each end
       const double cx = p.x + ox, cy = p.y + oy;
       const double H = std::min(3.0 * L, 0.5 * (p.z_top - p.z_bottom));
       const double by_overhang = per_layer * H / L;
-      const double dir[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
       const double axis_to_box[4] = {ox + hu, -ox + hu, oy + hu, -oy + hu};   // from the post's axis to the box's side
       std::array<double, 4> foot{}, head{};
       std::string flare_why;
@@ -2052,19 +2108,27 @@ void posts_step(FileResult& r, const FileJob& job0, const StepModel& model, cons
       };
       for (int e = 0; e < 2; ++e) {
         std::array<double, 4>& out = e == 0 ? foot : head;
-        const double* mat = e == 0 ? edges[q].foot : edges[q].head;
+        const Edges& ed = edges[place(p)];
+        const double* mat = e == 0 ? ed.foot : ed.head;
         const double z_end = e == 0 ? p.z_bottom : p.z_top, z_in = e == 0 ? p.z_bottom - 0.25 : p.z_top + 0.25;
         for (int k = 0; k < 4; ++k) {
           double v = std::min({hu, by_overhang, mat[k] - axis_to_box[k]});
           if (!(H > 0.0)) { v = 0.0; why_side(e == 0 ? "foot" : "head", k, "the post is too short to flare"); }
           else if (v < 0.01) { v = 0.0; why_side(e == 0 ? "foot" : "head", k, "no material past the post's side there to meet"); }
-          if (v > 0.0) {
-            const double need = axis_to_box[k] + v;
-            const double room = std::min(reach_to_surface(model.mesh, {p.x, p.y, z_end}, dir[k][0], dir[k][1]),
-                                         reach_to_surface(model.mesh, {p.x, p.y, z_in}, dir[k][0], dir[k][1]));
-            if (room < need) { v = 0.0; why_side(e == 0 ? "foot" : "head", k, "its wide end would leave the part (it stays vertical)"); }
-          }
           out[k] = v;
+        }
+        // C10 (review 9): the wide end's corners and edge midpoints inside the part (at its end and its run-in); a side
+        // whose points leave the part stays vertical, until the wide end fits
+        for (int tries = 0; tries < 5; ++tries) {
+          const double x0 = cx - hu - out[1], x1 = cx + hu + out[0], y0 = cy - hu - out[3], y1 = cy + hu + out[2];
+          if (rect_inside(part_near, x0, x1, y0, y1, {z_end, z_in})) break;
+          // the side reaching farthest goes vertical first
+          int k = 0;
+          for (int q2 = 1; q2 < 4; ++q2)
+            if (out[static_cast<std::size_t>(q2)] > out[static_cast<std::size_t>(k)]) k = q2;
+          if (!(out[static_cast<std::size_t>(k)] > 0.0)) break;
+          out[static_cast<std::size_t>(k)] = 0.0;
+          why_side(e == 0 ? "foot" : "head", k, "its wide end would leave the part (it stays vertical)");
         }
       }
       const bool flared = foot[0] + foot[1] + foot[2] + foot[3] + head[0] + head[1] + head[2] + head[3] > 0.0;
@@ -2074,8 +2138,8 @@ void posts_step(FileResult& r, const FileJob& job0, const StepModel& model, cons
         if (same(p, e)) had = &e;
       const bool differs = !had || had->width != next.width || had->ox != next.ox || had->oy != next.oy || had->flare_mm != next.flare_mm ||
                            had->foot != next.foot || had->head != next.head;
-      const bool widened = !narrow && w1 != w0, moved = !narrow && (ox != ox0 || oy != oy0);
-      if (!narrow && !widened && !moved)
+      const bool widened = wu != w0, moved = ox != ox0 || oy != oy0;
+      if (!why[0] && !widened && !moved)
         std::snprintf(why, sizeof why, "the law asks no wider (multiple %.3f) and the post is already whole inside the part", m);
       const auto arr = [](const std::array<double, 4>& a) {
         return "[" + pnum(a[0]) + ", " + pnum(a[1]) + ", " + pnum(a[2]) + ", " + pnum(a[3]) + "]";
@@ -2119,24 +2183,66 @@ void posts_step(FileResult& r, const FileJob& job0, const StepModel& model, cons
     // C9: the file as written (its 3MF on the tubes route), not the STL name it was asked under
     const std::string made_file = r.file.empty() ? stl_path : r.file;
     const double vol0 = file_volume_mm3(made_file);
-    const std::string keep = made_file + ".posts_step_keep";
+    // C10 (review 10): EVERY file of the output as it is (the file, its .parts.json, the check's files) is copied aside
+    // first; a copy that fails stops the step with the old output untouched; a remake that fails puts every one back
+    // (and takes away any file the remake added)
+    namespace fs = std::filesystem;
+    const fs::path out_dir = fs::path(made_file).parent_path();
+    const fs::path keep = out_dir / ".posts_step_keep";
     std::error_code ec;
-    std::filesystem::copy_file(made_file, keep, std::filesystem::copy_options::overwrite_existing, ec);
+    fs::remove_all(keep, ec);
+    ec.clear();
+    std::vector<std::string> had;
+    std::string backup_fault;
+    fs::create_directories(keep, ec);
+    if (ec) backup_fault = "the folder for the copy could not be made (" + ec.message() + ")";
+    for (fs::directory_iterator it(out_dir, ec), end; backup_fault.empty() && !ec && it != end; it.increment(ec)) {
+      if (!it->is_regular_file()) continue;
+      const std::string name = it->path().filename().string();
+      std::error_code c2;
+      fs::copy_file(it->path(), keep / name, fs::copy_options::overwrite_existing, c2);
+      if (c2) backup_fault = "the copy of " + name + " could not be made (" + c2.message() + ")";
+      had.push_back(name);
+    }
+    if (backup_fault.empty() && ec) backup_fault = "the output folder could not be read (" + ec.message() + ")";
+    if (!backup_fault.empty()) {
+      fs::remove_all(keep, ec);
+      rounds_json += std::string(rounds_json.empty() ? "" : ", ") + "{\"round\": " + std::to_string(round) + ", \"posts\": [" + posts_json +
+                     "], \"made_again\": false, \"stopped\": \"" + backup_fault + "; the file is as it was\"}";
+      break;
+    }
     job.options.mesh.post_wide = wide;
     FileResult r2 = make_lattice_file(model, job, stl_path, nullptr, said, strength);
     std::string after;
     if (!r2.ok) {
-      if (!std::filesystem::exists(made_file)) std::filesystem::copy_file(keep, made_file, ec);
-      std::filesystem::remove(keep, ec);
+      std::string restore_fault;
+      for (fs::directory_iterator it(out_dir, ec), end; !ec && it != end; it.increment(ec)) {
+        if (!it->is_regular_file()) continue;
+        const std::string name = it->path().filename().string();
+        if (std::find(had.begin(), had.end(), name) == had.end()) {   // a file the failed remake added
+          std::error_code c2;
+          fs::remove(it->path(), c2);
+        }
+      }
+      for (const std::string& name : had) {
+        std::error_code c2;
+        fs::copy_file(keep / name, out_dir / name, fs::copy_options::overwrite_existing, c2);
+        if (c2 && restore_fault.empty()) restore_fault = "the old " + name + " could not be put back (" + c2.message() + ")";
+      }
+      if (restore_fault.empty()) fs::remove_all(keep, ec);
       rounds_json += std::string(rounds_json.empty() ? "" : ", ") + "{\"round\": " + std::to_string(round) + ", \"posts\": [" + posts_json +
                      "], \"made_again\": false, \"refused\": \"" + r2.code + "\", \"why\": " + "\"" + [&] {
                        std::string w;
-                       for (char c : r2.why) w += (c == '"' || c == '\\') ? '\'' : c;
+                       for (char c : r2.why) w += (c == '"' || c == '\\') ? '\'' : (static_cast<unsigned char>(c) < 0x20 ? ' ' : c);
                        return w;
-                     }() + "\", \"kept\": \"the last file that passed the print check\"}";
+                     }() + "\", \"kept\": \"" + (restore_fault.empty() ? std::string("every file as it was before the remake") : restore_fault) + "\"}";
+      if (!restore_fault.empty()) {   // the old output could not be put back whole: an error, said plainly
+        refuse(r, kCannotWrite, "The lattice file could not be put back after a failed strengthening; it is kept beside it in .posts_step_keep.",
+               restore_fault);
+      }
       break;
     }
-    std::filesystem::remove(keep, ec);
+    fs::remove_all(keep, ec);
     const double vol1 = file_volume_mm3(r2.file.empty() ? made_file : r2.file);
     for (std::size_t q = 0; q < r2.made.posts.size() && q < r2.break_posts.size(); ++q) {
       bool touched = false;
@@ -2182,6 +2288,11 @@ void posts_step(FileResult& r, const FileJob& job0, const StepModel& model, cons
                       ", \"by_round\": [" + rounds_json + "], \"not_widened\": [" + c + "], \"still_short\": [" + short_json + "]}";
 }
 }  // namespace
+
+bool post_rect_inside_part(const TriangleMesh& part, double x0, double x1, double y0, double y1, const std::vector<double>& zs) {
+  const NearTris near(part, x0 - 1.0, x1 + 1.0, y0 - 1.0, y1 + 1.0);
+  return rect_inside(near, x0, x1, y0, y1, zs);
+}
 
 FileResult run_file_job(const std::string& job_path, const std::string& out_dir, int threads,
                         void (*said)(const char*), const StrengthCheck* strength) {

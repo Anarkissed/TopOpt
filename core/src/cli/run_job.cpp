@@ -14072,6 +14072,8 @@ ll::StrengthDone with_break_check(const ll::StrengthAsk& ask, StrengthSetup& S, 
   } catch (const std::exception& e) {
     return refuse("no_load", std::string("the strength job's faces could not be read: ") + e.what());
   }
+  // C10 (review 3): bearing anchors (compression only, sliding free) are not modelled by the check: not checked
+  b.anchors_bearing = job.loads.anchor_model == "bearing";
   b.print = ask.print;
   b.part = &S.model;
   if (ask.bars)
@@ -14134,6 +14136,7 @@ ll::StrengthDone with_break_check(const ll::StrengthAsk& ask, StrengthSetup& S, 
         for (const int f : L.faces) key += std::to_string(f) + " ";
         key += "| " + g17v(L.force) + "]";
       }
+      if (b.anchors_bearing) key += "\nanchors bearing";   // C10: only for such a job, so every other key is as before
       key += "\nmaterial " + g17(b.youngs_mpa) + " " + g17(b.poisson) + " " + g17(b.yield_mpa) + " " + g17(b.z_knockdown) + "\npass " +
              g17(b.pass_line) + "\nup " + g17v(b.up) + "\ngrid " + g17(b.voxel_mm) + " " + g17v(b.grid_shift) + " " + g17(b.smooth_mm) + " " +
              std::to_string(b.min_voxels_across) + " " + g17(b.near_post_mm) + " " + g17(b.tolerance) + " " + std::to_string(b.max_rounds) +

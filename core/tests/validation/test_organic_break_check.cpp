@@ -8,6 +8,7 @@
 #include <array>
 #include <functional>
 #include <map>
+#include <memory>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -686,6 +687,115 @@ void load_path() {
         "the load-path rule: a thin fin off the load path is not named (pass)");
 }
 
+// C10, the review's small fixes (review-c9.md), each on the smallest made shape that read wrong before.
+struct Made {
+  StepModel m;
+  StlMesh print;
+  BreakAsk ask;
+};
+// boxes as the part and the print; held at the -x face (or `hold` normal), `force` on the face with normal `at`
+std::unique_ptr<Made> made(const std::string& name, const std::vector<std::array<double, 6>>& boxes, const Vec3& force,
+                           const Vec3& hold = {-1, 0, 0}, const Vec3& at = {1, 0, 0}) {
+  const std::string w = std::string(TMP_DIR) + "/organic_break_check/" + name;
+  std::filesystem::remove_all(w);
+  std::filesystem::create_directories(w);
+  write_boxes(w + "/part.stl", boxes);
+  auto x = std::make_unique<Made>();
+  x->m = import_part_file_resolved(w + "/part.stl");
+  x->print = read_stl_file(w + "/part.stl");
+  const auto axis = [](const Vec3& n) { return std::fabs(n.x) > 0.5 ? 0 : std::fabs(n.y) > 0.5 ? 1 : 2; };
+  const auto hi = [](const Vec3& n) { return n.x + n.y + n.z > 0; };
+  x->ask.print = &x->print.mesh;
+  x->ask.part = &x->m;
+  x->ask.fixed_faces = {face_where(x->m, hold, axis(hold), hi(hold))};
+  x->ask.loads = {{{face_where(x->m, at, axis(at), hi(at))}, force}};
+  x->ask.youngs_mpa = 3500;
+  x->ask.poisson = 0.35;
+  x->ask.yield_mpa = 31;
+  x->ask.z_knockdown = 0.55;
+  return x;
+}
+void review_fixes() {
+  {   // 7: a thin bar whose voxel centres miss most of it: the guard on the true count
+    auto x = made("R7", {{0, 0.15, 0.15, 6, 0.65, 0.65}}, {0.1, 0, 0});
+    const BreakSize sz = organic_break_size(x->ask);
+    x->ask.memory_limit_bytes = 1e12;
+    const BreakResult big = organic_break_check(x->ask);
+    x->ask.memory_limit_bytes = 0.5 * (sz.bytes + big.size.bytes);
+    const BreakResult r = organic_break_check(x->ask);
+    std::printf("review 7: centre count %zu voxels (%.0f B), true count %zu (%.0f B); limit %.0f B: %s %s\n", sz.material_voxels, sz.bytes,
+                big.size.material_voxels, big.size.bytes, x->ask.memory_limit_bytes, r.verdict.c_str(), r.not_checked.c_str());
+    check(big.size.bytes > sz.bytes && r.verdict == "not_checked" && r.not_checked == "too_big",
+          "review 7: the size guard is read again on the true voxel count (over the limit: not checked)");
+  }
+  {   // 8: a grid past the solver's range: not checked, and the block is JSON (no inf)
+    auto x = made("R8", {{0, 0, 0, 2, 1, 1}}, {1, 0, 0});
+    x->ask.voxel_mm = 0.0005;   // 4000 x 2000 x 2000 voxels: past the solver's int node range
+    const BreakResult r = organic_break_check(x->ask);
+    std::printf("review 8: %s %s; block: %s\n", r.verdict.c_str(), r.not_checked.c_str(), r.json.c_str());
+    check(r.verdict == "not_checked" && r.json.find("inf") == std::string::npos && r.json.find("nan") == std::string::npos,
+          "review 8: no inf or nan in the block");
+  }
+  {   // 14: a pass line that is not a number above 0
+    auto x = made("R14", {{0, 0, 0, 2, 1, 1}}, {1, 0, 0});
+    x->ask.pass_line = std::nan("");
+    const BreakResult a = organic_break_check(x->ask);
+    x->ask.pass_line = 0.0;
+    const BreakResult b = organic_break_check(x->ask);
+    std::printf("review 14: NaN: %s (%s); 0: %s (%s)\n", a.verdict.c_str(), a.why.c_str(), b.verdict.c_str(), b.why.c_str());
+    check(a.verdict == "not_checked" && b.verdict == "not_checked", "review 14: a pass line not above 0 is not checked, never a pass");
+  }
+  {   // 3: bearing anchors are not modelled: not checked
+    auto x = made("R3", {{0, 0, 0, 2, 1, 1}}, {1, 0, 0});
+    x->ask.anchors_bearing = true;
+    const BreakResult r = organic_break_check(x->ask);
+    check(r.verdict == "not_checked" && r.not_checked == "bearing_anchors", "review 3: a job on bearing anchors is not checked");
+  }
+  {   // 13: the loaded face falls 0.15 voxel into a layer INSIDE the grid (a bar 4.03 long under a plate that runs on to
+      // x = 6, so the grid holds the layer 4.0 to 4.2): the face is still found
+    auto x = made("R13", {{0, 0, 0, 4.03, 2, 2}, {0, 0, 1.99, 6, 2, 3}}, {1, 0, 0});
+    for (int f = 0; f < x->m.face_count; ++f) {
+      const StepFaceInfo& fi = x->m.faces[static_cast<std::size_t>(f)];
+      if (fi.kind == StepSurfaceKind::Plane && fi.plane_normal.x > 0.99 && std::fabs(fi.plane_origin.x - 4.03) < 1e-6) x->ask.loads[0].faces = {f};
+    }
+    const BreakResult r = organic_break_check(x->ask);
+    std::printf("review 13: %s %s %s; first break %.3f (want about %.3f)\n", r.verdict.c_str(), r.not_checked.c_str(), r.why.c_str(),
+                r.first_resolved.multiple, 31.0 / (1.0 / 4.0));
+    check(r.ok && r.verdict == "pass", "review 13: a face a tenth of a voxel into a layer is found (no load_on_empty_space)");
+  }
+  {   // 12 and 6a: a post 0.9 mm square between two plates, the top plate pushed sideways: the post's section is the
+      // material there (0.81 mm2, not the 2 mm box it was declared as) and its share is the whole force through it
+    auto x = made("R12", {{0, 0, 0, 4, 4, 1}, {1.55, 1.55, 0.95, 2.45, 2.45, 3.05}, {0, 0, 3, 4, 4, 4}}, {0.5, 0, 0}, {0, 0, -1}, {0, 0, 1});
+    x->ask.posts = {{2.0, 2.0, 1.0, 3.0, 2.0}};
+    const BreakResult r = organic_break_check(x->ask);
+    double area = 0.0, axial = 0.0, total = 0.0;
+    for (const BreakClass& c : r.classes)
+      if (c.cls == "post") { area = c.section_mm2; axial = c.section_force_n; total = c.section_force_total_n; }
+    const double share = r.post_paths.empty() ? 0.0 : r.post_paths.front().share;
+    std::printf("review 12 / 6a: %s; post section %.4f mm2 (want 0.81), axial force %.4f N, whole force %.4f N, share %.4f (want 1)\n",
+                r.verdict.c_str(), area, axial, total, share);
+    check(r.ok && std::fabs(area - 0.81) < 0.12, "review 12: a post's section is the material actually there");
+    check(r.ok && share > 0.8, "review 6a: a post's share is the whole force through its section (along and across)");
+  }
+  {   // 6b: the JOINT's connectors carry energy: counted in the not-resolved energy
+    const BreakResult c = load_path_case("JOINT_ENERGY", {{0, 0, 0, 5, 3, 3}, {4.9, 2.6, 2.6, 10, 5.6, 5.6}}, 0.1, true);
+    check(c.ok && c.connector_regions > 0 && c.unresolved_energy_share > 0.0, "review 6b: contact material is in the not-resolved energy");
+  }
+  {   // 9: a slanted wall (a right prism over the triangle (0,0) (10,0) (0,10)): a 1.2 mm square at (4.5, 4.5) clears it
+      // along x and y from its axis, but its corner (5.1, 5.1) is outside
+    const std::string w = std::string(TMP_DIR) + "/organic_break_check/R9";
+    std::filesystem::create_directories(w);
+    const Vec3 A0{0, 0, 0}, B0{10, 0, 0}, C0{0, 10, 0}, A1{0, 0, 5}, B1{10, 0, 5}, C1{0, 10, 5};
+    g_prisms = {{{A0, C0, B0}, {A1, B1, C1}, {A0, B0, B1}, {A0, B1, A1}, {B0, C0, C1}, {B0, C1, B1}, {C0, A0, A1}, {C0, A1, C1}}};
+    write_boxes(w + "/part.stl", {});
+    g_prisms.clear();
+    const StlMesh pm = read_stl_file(w + "/part.stl");
+    const bool corner = post_rect_inside_part(pm.mesh, 3.9, 5.1, 3.9, 5.1, {2.5});
+    const bool ok_small = post_rect_inside_part(pm.mesh, 4.1, 4.9, 4.1, 4.9, {2.5});
+    check(!corner && ok_small, "review 9: a post's new section is read at its corners and edge midpoints (a slanted wall the axis clears)");
+  }
+}
+
 // C9: the Auto Sweep limits the app's Organic page reads before a lay (Session::sweep_limits_for over the job's weave
 // regions, the line its bead, the gap 1.5 lines: LatticeOrganicLook.Check.gapLines), for laying a piece at the app's defaults.
 void limits(const std::string& job_path) {
@@ -710,6 +820,7 @@ int main(int argc, char** argv) {
   law();
   bar();
   load_path();
+  review_fixes();
   if (argc >= 4 && std::string(argv[1]) == "remake") { remake(argv[2], argv[3]); return 0; }
   if (argc >= 10 && std::string(argv[1]) == "steady") { steady(argv + 2); return 0; }   // argv[10], [11] optional (C5)
   if (argc >= 3 && std::string(argv[1]) == "oversize") oversize(argv[2]);
