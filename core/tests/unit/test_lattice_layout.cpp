@@ -14,6 +14,7 @@
 
 #include "topopt/lattice_layout.hpp"
 #include "topopt/stepped_plan.hpp"
+#include "lattice_outcome_print.hpp"   // S-1 (notes30): a lay as one number
 
 using namespace topopt;
 using namespace topopt::lattice_layout;
@@ -1145,18 +1146,24 @@ static void test_struts() {
       else NEAR(l2.cells[i].strut, open * l2.cells[i].size, 1e-9);
   }
   {  // R11: a typed width is the width in every cell that can hold it; the report counts
-     // the cells that cannot.
+     // the cells that cannot. ★ notes29b (his notes on release 20, 2026-11-25: "limit both when 'Allow quilt' is turned
+     // off", at the point each type becomes a quilt): without Allow quilt a cell holds it up to one printed line short of
+     // the quilt (touch x cell - one line; the open look where that is wider), no longer the open look alone.
     StrutSpec sp;
     sp.width_mm = 1.2;
     sp.dial = 0.9;   // not read
     Layout l = base;
     StrutReport r = set_struts(l, sp);
-    int typed = 0;
+    int typed = 0, past_open = 0;
     for (const Cell& c : l.cells) {
-      if (open * c.size >= 1.2) { NEAR(c.strut, 1.2, 1e-12); ++typed; }
-      else NEAR(c.strut, std::max(bead, open * c.size), 1e-9);
+      const double limit = std::max({bead, quilt * c.size - bead, open * c.size});
+      if (limit >= 1.2) { NEAR(c.strut, 1.2, 1e-12); ++typed; }
+      else NEAR(c.strut, limit, 1e-9);
+      CHECK(c.strut < quilt * c.size);   // never touching
+      past_open += c.strut > open * c.size + 1e-9;
     }
-    CHECK(typed == 2 && r.at_ceiling == 4 && r.at_bead == 0);   // 12 and 8 mm hold it
+    CHECK(typed == 4 && r.at_ceiling == 2 && r.at_bead == 0);   // 12, 6, 6 and 8 mm hold it (12 and 8 by the open look)
+    CHECK(past_open == 3);   // the 6, 6 and 4 mm cells: past the open look, under the limit
     sp.allow_quilt = true;
     r = set_struts(l, sp);
     for (const Cell& c : l.cells) NEAR(c.strut, std::min(1.2, quilt * c.size), 1e-9);
@@ -1166,14 +1173,16 @@ static void test_struts() {
     for (const Cell& c : l.cells) NEAR(c.strut, bead, 1e-12);
     CHECK(r.at_bead == l.cells.size());
   }
-  {  // A type with no cell of its own is refused by name, never given another type's widths.
+  {  // A layout that never read its type's limits reads its OWN type's (2026-11-24: the tetragonal three have theirs),
+     // never another type's widths: bccz closes where bcc does, at 1/sqrt 2 of the cell, not at octet's quilt.
     Layout l = base;
     l.topology = LatticeTopology::Bccz;
-    l.open_look = l.touch = 0.0;   // as a layout that never read its type's limits
-    bool refused = false;
-    try { set_struts(l, StrutSpec{}); } catch (const std::invalid_argument&) { refused = true; }
-    CHECK(refused);
-    for (const Cell& c : l.cells) CHECK(c.strut == 0.0);
+    l.open_look = l.touch = 0.0;
+    StrutSpec sp;
+    sp.allow_quilt = true;
+    sp.dial = 1.0;
+    set_struts(l, sp);
+    for (const Cell& c : l.cells) NEAR(c.strut, std::max(bead, 0.70710678118654752 * c.size), 1e-9);
   }
 }
 
@@ -1229,13 +1238,18 @@ static void test_each_type_has_its_own_limits() {
   };
   CHECK(bars_of(LatticeTopology::SimpleCubic) != bars_of(LatticeTopology::Octet));
   CHECK(bars_of(LatticeTopology::Bcc) != bars_of(LatticeTopology::Octet));
-  // A type with no cell is refused by name where its limits are first asked for.
+  // The tetragonal three lay their own cells (2026-11-24), each its own bars; a type with no strut cell (a sheet) is
+  // refused by name where its struts are first asked for.
+  CHECK(bars_of(LatticeTopology::Reentrant) != bars_of(LatticeTopology::Bccz));
+  CHECK(bars_of(LatticeTopology::Fccz) != bars_of(LatticeTopology::Fcc));
   bool refused = false;
   try {
     CellSpec cs;
-    cs.topology = LatticeTopology::Reentrant;
-    lay_cells(d, cs);
-  } catch (const std::invalid_argument&) { refused = true; }
+    cs.topology = LatticeTopology::Gyroid;
+    Layout l = lay_cells(d, cs);
+    set_struts(l, StrutSpec{});
+    lay_bars(l, d);
+  } catch (const std::invalid_argument& e) { refused = std::string(e.what()).find("gyroid") != std::string::npos; }
   CHECK(refused);
 }
 
@@ -1684,7 +1698,9 @@ static void test_band_never_quilts_without_the_switch() {
       NEAR(smallest(l), 7.0, 1e-6);
       CHECK(most_closed(l) <= open + 1e-12);
     }
-  {  // A typed strut width (R11) obeys it too, in the band and out of it.
+  {  // A typed strut width (R11) obeys it too, in the band and out of it. ★ notes29b (his notes on release 20, 2026-11-25:
+     // "limit both when 'Allow quilt' is turned off", at the point each type becomes a quilt): a typed strut is an ask, and
+     // goes past the open look up to the limit, one printed line short of the quilt (touch x cell - one line), never to it.
     CellSpec cs;
     cs.algorithm = Algorithm::Stepped;
     cs.cell_max_mm = 14.0;
@@ -1694,10 +1710,21 @@ static void test_band_never_quilts_without_the_switch() {
     StrutSpec typed;
     typed.width_mm = 3.0;
     const StrutReport held = set_struts(l, typed);
-    CHECK(most_closed(l) <= open + 1e-12 && held.at_ceiling == l.cells.size());
+    const double quilt = kQuiltStrutPerCell, line = l.bead_mm;
+    std::size_t over = 0, short_of = 0, touching = 0;
+    for (const Cell& c : l.cells) {
+      const double limit = std::max(quilt * c.size - line, open * c.size);
+      over += c.strut > limit + 1e-9;
+      touching += c.strut >= quilt * c.size - 1e-9;
+      short_of += limit < 3.0 - 1e-9;
+    }
+    CHECK(over == 0 && touching == 0 && held.at_ceiling == short_of && short_of > 0);
+    CHECK(most_closed(l) > open + 1e-6);   // past the open look: it is not the limit
     typed.allow_quilt = true;
     set_struts(l, typed);
-    CHECK(most_closed(l) > open + 1e-6);
+    std::size_t over_on = 0;
+    for (const Cell& c : l.cells) over_on += c.strut > std::max(quilt * c.size - line, open * c.size) + 1e-9;
+    CHECK(over_on > 0);   // RED control: Allow quilt on goes past the limit, up to the quilt
   }
   NEAR(smallest(laid(false, 3.0)), 7.0, 1e-6);         // a typed 3 mm is held at the open look's
   NEAR(smallest(laid(false, 8.0)), 14.0, 1e-6);        // a typed coarser band is honoured
@@ -3289,26 +3316,23 @@ static void test_session() {
   const Outcome quilted = session.lay(band);
   NEAR(least(quilted), 10.0 / 3.0, 1e-6);
   CHECK(!quilted.read_again);             // the switch re-lays; it does not read the part again
-  // His per-part choice (2026-11-12), Allow quilt OFF: the cells are the ones Allow quilt lays (3.333 mm, so the
-  // band is latticed), but no strut is thicker for it. A cell too small for the open look carries the thinnest
-  // strut exactly (two lines, 0.9 mm: past the open look, under touching); every other cell keeps the open look.
+  // His per-part choice (2026-11-12) "Small cells in thin walls", Allow quilt OFF. ★ notes29 (his notes on release 20,
+  // 2026-11-25: "No matter what I did, the quilting kept on happening -- even with quilting off"): it laid the quilt's
+  // 3.333 mm cells over the whole band, each carrying the thinnest strut, past the open look. Now, with Allow quilt off,
+  // it is not read: the layout is the one laid without it, byte for byte, no cell under 4.742 mm and no strut past the
+  // open look. (The quilted layout above, Allow quilt on, is the RED control: it does lay cells under the floor.)
   band.struts.allow_quilt = false;
+  const Outcome plain = session.lay(band);
   band.small_cells_in_thin_walls = true;
   const Outcome small = session.lay(band);
   CHECK(!small.read_again);
-  CHECK(small.layout.cells.size() == quilted.layout.cells.size());
-  bool same_cubes = true, never_thicker = true, small_at_thinnest = true, none_touch = true;
-  int past_open_look = 0;
-  for (std::size_t i = 0; i < small.layout.cells.size(); ++i) {
-    const Cell &a = small.layout.cells[i], &b = quilted.layout.cells[i];
-    same_cubes = same_cubes && a.size == b.size && a.lo[0] == b.lo[0] && a.lo[1] == b.lo[1] && a.lo[2] == b.lo[2];
-    never_thicker = never_thicker && a.strut <= b.strut + 1e-12;
-    const double open_look = small.layout.open_look * a.size;
-    if (open_look < 0.9) { small_at_thinnest = small_at_thinnest && std::fabs(a.strut - 0.9) < 1e-12; ++past_open_look; }
-    else never_thicker = never_thicker && a.strut <= open_look + 1e-12;
-    none_touch = none_touch && a.strut < small.layout.touch * a.size;
-  }
-  CHECK(same_cubes && never_thicker && small_at_thinnest && none_touch && past_open_look > 0);
+  CHECK(small.layout.cells == plain.layout.cells);
+  bool past_open_look = false;
+  for (const Cell& a : small.layout.cells)
+    past_open_look = past_open_look || a.strut > small.layout.open_look * a.size + 1e-12 ||
+                     a.size < 0.9 / small.layout.open_look - 1e-9;
+  CHECK(!past_open_look);
+  CHECK(least(quilted) < 0.9 / quilted.layout.open_look - 1e-6);   // the control: Allow quilt on goes under it
   band.small_cells_in_thin_walls = false;   // and off again: 5 mm cells, as before
   NEAR(least(session.lay(band)), 5.0, 1e-6);
 }
@@ -4026,30 +4050,41 @@ static void test_cut_cells_follow_a_slope() {
   }
 }
 
-// K3 (his 11-23 notes: quilting "should ALWAYS be off by default unless it is literally impossible to lattice without
-// it"). The 20 x 20 x 12 block, two lines of 0.45 mm (a 0.9 mm strut: the open look's smallest cell is 4.74 mm, the
-// quilt's 2.55 mm): a region 3 mm deep under the top face (no cell that prints open fits it) and one 6 mm deep under the
-// bottom face. With the quilt off the thin region is laid again with the quilt's smallest cell, that region only, and
-// named; the thick one keeps exactly the cells it lays alone. With the quilt on there is nothing to fall back to.
+// K3 (his 11-23 notes) laid a region that held no open cell again with the quilt. ★ notes29 (his notes on release 20,
+// 2026-11-25: "No matter what I did, the quilting kept on happening -- even with quilting off", "limit both when 'Allow
+// quilt' is turned off"): withdrawn. The 20 x 20 x 12 block, two lines of 0.45 mm (a 0.9 mm strut: the open look's
+// smallest cell is 4.74 mm, the quilt's 2.55 mm): a region 3 mm deep under the top face (no cell that prints open fits
+// it) and one 6 mm deep under the bottom face. With the quilt off the thin region lays NO cell: it stays solid and says
+// why (the region too shallow); quilt_regions is empty; the thick one keeps exactly the cells it lays alone. With the
+// quilt on, the thin region is laid with the quilt's cells (the RED control: the same check fails there).
 static void test_quilt_only_where_nothing_else_lays() {
   const StepModel model = finish_block();
   Settings st;
   st.regions = {{1, Role::Lattice, {1}, 3.0, 0.0}, {2, Role::Lattice, {0}, 6.0, 0.0}};
   st.cells.cell_max_mm = 6;
-  const Outcome both = Session(model).lay(st);
   const double open_floor = 0.9 / (0.7592 / 4.0), quilt_floor = 0.9 / kQuiltStrutPerCell;
-  std::size_t thin = 0, thick = 0, thin_small = 0, thick_small = 0;
-  for (const Cell& c : both.layout.cells) {
-    const bool top = c.region == 1;
-    (top ? thin : thick) += 1;
-    if (c.size < open_floor - 1e-9) (top ? thin_small : thick_small) += 1;
-    CHECK(c.size >= quilt_floor - 1e-9);
-  }
-  std::printf("[K3] quilt off: regions laid with the quilt %zu (first %d); thin region %zu cells (%zu under the open look), "
-              "thick region %zu cells (%zu under it)\n", both.quilt_regions.size(), both.quilt_regions.empty() ? -1 : both.quilt_regions.front(),
-              thin, thin_small, thick, thick_small);
-  CHECK(both.quilt_regions == std::vector<int>{1} && thin > 0 && thin_small == thin && thick > 0 && thick_small == 0);
-  // The thick region alone: the same cells (the fallback touched the thin region only).
+  const auto count = [&](const Outcome& o, std::size_t* thin, std::size_t* thin_small, std::size_t* thick,
+                         std::size_t* thick_small, bool* past) {
+    *thin = *thin_small = *thick = *thick_small = 0;
+    *past = false;
+    for (const Cell& c : o.layout.cells) {
+      const bool top = c.region == 1;
+      (top ? *thin : *thick) += 1;
+      if (c.size < open_floor - 1e-9) (top ? *thin_small : *thick_small) += 1;
+      *past = *past || c.strut > o.layout.open_look * c.size + 1e-12;
+    }
+  };
+  const Outcome both = Session(model).lay(st);
+  std::size_t thin = 0, thin_small = 0, thick = 0, thick_small = 0;
+  bool past = false;
+  count(both, &thin, &thin_small, &thick, &thick_small, &past);
+  std::size_t shallow = 0;
+  for (std::size_t i = 0; i < both.layout.solid.size(); ++i)
+    if (both.layout.solid[i].region == 1 && both.layout.solid_why[i].why == NoCell::RegionShallow) ++shallow;
+  std::printf("[notes29] quilt off: thin region %zu cells (%zu solid places, too shallow), thick region %zu cells (%zu under "
+              "the open look's floor), quilt_regions %zu\n", thin, shallow, thick, thick_small, both.quilt_regions.size());
+  CHECK(both.quilt_regions.empty() && thin == 0 && shallow > 0 && thick > 0 && thick_small == 0 && !past);
+  // The thick region alone: the same cells.
   Settings alone = st;
   alone.regions = {st.regions[1]};
   const Outcome one = Session(model).lay(alone);
@@ -4058,24 +4093,21 @@ static void test_quilt_only_where_nothing_else_lays() {
     if (c.region == 2) a.push_back({c.lo[0], c.lo[1], c.lo[2], c.size, c.strut});
   for (const Cell& c : one.layout.cells) b.push_back({c.lo[0], c.lo[1], c.lo[2], c.size, c.strut});
   CHECK(a == b && one.quilt_regions.empty());
-  // Allow quilt on: no fallback (the quilt is on everywhere already).
+  // Small cells in thin walls does not bring the quilt back with Allow quilt off.
+  Settings small = st;
+  small.small_cells_in_thin_walls = true;
+  const Outcome s2 = Session(model).lay(small);
+  count(s2, &thin, &thin_small, &thick, &thick_small, &past);
+  CHECK(s2.quilt_regions.empty() && thin == 0 && thick_small == 0 && !past);
+  // RED CONTROL, Allow quilt on: the thin region is laid, with cells under the open look's floor (never under the
+  // quilt's), and no region is named (the quilt is the switch's, not a fallback).
   Settings on = st;
   on.struts.allow_quilt = true;
-  CHECK(Session(model).lay(on).quilt_regions.empty());
-  // Only where the cell is Auto (362, 2026-11-24, his D4: a typed cell is his; one that fits nowhere stays solid, the
-  // file job's no_cells, the app's "Cannot Lattice"). The thin region alone: Auto falls back to the quilt; a typed 6 mm
-  // cell lays nothing, and is not quilted.
-  Settings thin_only = st;
-  thin_only.regions = {st.regions[0]};
-  const Outcome auto_cell = Session(model).lay(thin_only);
-  Settings typed = thin_only;
-  typed.cells.cell_mm = 6;
-  const Outcome typed_cell = Session(model).lay(typed);
-  std::printf("[K3] the thin region alone: Auto cell %zu cells (quilted %zu), typed 6 mm cell %zu cells (quilted %zu)\n",
-              auto_cell.layout.cells.size(), auto_cell.quilt_regions.size(), typed_cell.layout.cells.size(),
-              typed_cell.quilt_regions.size());
-  CHECK(auto_cell.quilt_regions == std::vector<int>{1} && !auto_cell.layout.cells.empty());   // as before
-  CHECK(typed_cell.quilt_regions.empty() && typed_cell.layout.cells.empty());   // no fallback: nothing to lay (no_cells)
+  const Outcome quilted = Session(model).lay(on);
+  count(quilted, &thin, &thin_small, &thick, &thick_small, &past);
+  bool under_quilt = false;
+  for (const Cell& c : quilted.layout.cells) under_quilt = under_quilt || c.size < quilt_floor - 1e-9;
+  CHECK(quilted.quilt_regions.empty() && thin > 0 && thin_small == thin && !under_quilt);
 }
 
 static void test_cells_curved_region() {
@@ -5440,8 +5472,12 @@ static void test_by_stress() {
     s.width_heavy_mm = 0.6;
     const StrutReport r = set_struts(mixed, s);
     int held = 0;
+    // ★ notes29b: the widest allowed without Allow quilt is one printed line short of the quilt (the open look where that
+    // is wider), no longer the open look alone.
+    const double quilt = kQuiltStrutPerCell;
+    const auto top_of = [&](double size) { return std::max({bead, quilt * size - bead, open * size}); };
     for (const Cell& c : mixed.cells) {
-      const double top = std::max(bead, open * c.size);
+      const double top = top_of(c.size);
       if (top >= 1.1) { NEAR(c.strut, 1.1, 1e-12); ++held; }
       else NEAR(c.strut, top, 1e-9);
     }
@@ -5449,10 +5485,10 @@ static void test_by_stress() {
     // The ends exact: all cold, all at the reference.
     s.demand = field_of(60, 4, 16, [](int, int, int) { return 0.0; }, {-1, -1, -1});
     set_struts(mixed, s);
-    for (const Cell& c : mixed.cells) NEAR(c.strut, std::min(0.6, std::max(bead, open * c.size)), 1e-12);
+    for (const Cell& c : mixed.cells) NEAR(c.strut, std::min(0.6, top_of(c.size)), 1e-12);
     s.demand = field_of(60, 4, 16, [](int, int, int) { return 300.0; }, {-1, -1, -1});
     set_struts(mixed, s);
-    for (const Cell& c : mixed.cells) NEAR(c.strut, std::min(1.6, std::max(bead, open * c.size)), 1e-9);
+    for (const Cell& c : mixed.cells) NEAR(c.strut, std::min(1.6, top_of(c.size)), 1e-9);
   }
   {  // 8. A band cell is never thinner than its by-stress width, and never past the open look without Allow quilt.
     const double bead = 0.45, open = 0.7592 / 4.0;
@@ -5488,12 +5524,18 @@ static void test_by_stress() {
         Vec3 lo, hi;
         cell_box(b, b.cells[i], &lo, &hi);
         const double f = std::clamp(grad->highest_in(lo, hi) / 100.0, 0.0, 1.0);
-        const double top = std::max(bead, open * b.cells[i].size);
+        // ★ notes29b: out of the band, the widest allowed is one printed line short of the quilt (the open look where that
+        // is wider); in the band (below) an ask under the open look on its own cell still never passes the open look.
+        const double top = std::max({bead, kQuiltStrutPerCell * b.cells[i].size - bead, open * b.cells[i].size});
         const double by = std::clamp(mm ? 0.5 + f * 0.5 : (lr + f * (hr - lr)) * b.cells[i].size, bead, top);
         NEAR(b.cells[i].strut, by, 1e-9);
         if (a.cells[i].band >= 1.0) { CHECK(a.cells[i].strut == b.cells[i].strut); continue; }
         if (a.cells[i].strut < b.cells[i].strut - 1e-12) ++thinner;
-        if (a.cells[i].strut > std::max(bead, open * a.cells[i].size) + 1e-9) ++quilted;
+        // ★ notes29b: never past the limit (one printed line short of the quilt); dials under 1 never past the open look
+        // (the band's own thickening stops there); the ends in mm past the open look on a cell keep their width there.
+        const double past_at = mm ? std::max({bead, kQuiltStrutPerCell * a.cells[i].size - bead, open * a.cells[i].size})
+                                  : std::max(bead, open * a.cells[i].size);
+        if (a.cells[i].strut > past_at + 1e-9) ++quilted;
         if (a.cells[i].strut > b.cells[i].strut + 1e-12) ++raised;
       }
       CHECK(thinner == 0 && quilted == 0 && raised > 0);
@@ -7871,6 +7913,13 @@ static void test_places() {
     }
     // The same bytes twice (a fresh session).
     CHECK(same_places(o.places, lay_and_place(tunnel.model, st)));
+    // ★ notes30 Q1: the stop. Never set: the same bytes as none given; set: none, at once (never part of a list).
+    {
+      std::atomic<bool> stop{false};
+      CHECK(same_places(session.places(st, &stop), o.places));
+      stop = true;
+      CHECK(session.places(st, &stop).empty());
+    }
     // Finish Covered: every surface the lattice meets is solid; no places.
     Settings covered = st;
     covered.cover_mm = -1.0;
@@ -8482,7 +8531,144 @@ static void test_weave_repeats() {
   CHECK(repeats_left(a.bars) == 0);
 }
 
+// ── S-1 (notes30): THE PIECES COUNTED ONCE ────────────────────────────────────
+// The maintainer's yes 2026-11-26: join_cut_off_pieces and drop_adrift_bars each counted the pieces; when
+// the join joined no end the bars are as they were and the drop now takes the join's count. Over this suite's own parts
+// (the tunnel block of D23 under its top face, with Skin, with Let walls cut cells, the whole part, By stress on a
+// Stepped grade; a box zone, D21; the curved pocket's shell and the flat slab under it), every strut type, on 1, 3 and
+// every thread: the lay with the count used again is the lay that counts twice, byte for byte (outcome_print), the
+// same on any number of threads (D18), and the count WAS used again (Session::counted_once moved once per such lay).
+// RED controls: the print sees one bar a hair wider, one adrift flag, and one cell; and a session with the switch off
+// never takes the join's count.
+static void test_pieces_counted_once() {
+  using lattice_outcome_print::outcome_print;
+  const LatticeTopology types[] = {LatticeTopology::Octet,   LatticeTopology::SimpleCubic, LatticeTopology::Bcc,
+                                   LatticeTopology::Fcc,     LatticeTopology::Diamond,     LatticeTopology::Kelvin,
+                                   LatticeTopology::Rhombic, LatticeTopology::Bccz,        LatticeTopology::Fccz,
+                                   LatticeTopology::Reentrant};
+  const GridModel tunnel = grid_model({0, 20, 40, 60}, {0, 30, 60}, {0, 5, 12, 20},
+                                      [](int i, int j, int k) { return !(i == 1 && j == 0 && k == 1); });
+  const int top = tunnel.face(2, 1, 20);
+  CHECK(top >= 0);
+  const StepModel zones = zone_block(40, 40, 20);
+  const StepModel pocket = weave_block();
+  struct Fixture { const char* name; const StepModel* model; Settings st; };
+  std::vector<Fixture> fixtures;
+  Settings base;
+  base.min_strut_lines = kMinStrutLines;
+  base.cells.algorithm = Algorithm::DefaultGrade;
+  base.cells.cell_max_mm = 6;
+  base.cells.min_cells_across = 2;
+  base.regions = {{1, Role::Lattice, {top}, 18.0, 0.0}};
+  fixtures.push_back({"tunnel, top face 18 mm", &tunnel.model, base});
+  {
+    Settings st = base;
+    st.skin = true;
+    fixtures.push_back({"tunnel, Skin", &tunnel.model, st});
+  }
+  {
+    Settings st = base;
+    st.one_grid = true;
+    st.cells.cell_search = true;
+    st.cells.stretch_edges = true;
+    fixtures.push_back({"tunnel, walls cut cells", &tunnel.model, st});
+  }
+  {
+    Settings st = base;
+    st.regions.clear();
+    st.start = Start::AllLattice;
+    fixtures.push_back({"tunnel, whole part", &tunnel.model, st});
+  }
+  {
+    Settings st = base;
+    st.cells.algorithm = Algorithm::Stepped;
+    st.cells.cell_max_mm = 8;
+    st.cells.by_stress = true;
+    st.struts.mode = Density::ByStress;
+    st.stress.demand = field_of(60, 60, 20, [](int i, int j, int k) { return 2.0 + 0.3 * (i + j) + 0.5 * k; });
+    fixtures.push_back({"tunnel, by stress, Stepped", &tunnel.model, st});
+  }
+  {
+    Settings st = base;
+    Settings::RegionAsk zone;
+    zone.id = 3;
+    zone.role = Role::Lattice;
+    zone.zone = box_zone({20, 20, 10}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, 12, 10, 6);
+    st.regions = {zone};
+    st.cells.cell_max_mm = 4;
+    fixtures.push_back({"block, box zone", &zones, st});
+  }
+  {
+    Settings st = base;
+    st.regions = {{1, Role::Lattice, {1}, 4.0, 0.0}, {2, Role::Lattice, {0}, 3.0, 0.0}};
+    st.cells.cell_max_mm = 4;
+    st.cells.min_cells_across = 1;
+    fixtures.push_back({"pocket, curved shell + slab", &pocket, st});
+  }
+  std::size_t lays = 0, differ = 0, threads_differ = 0, once = 0, once_adrift = 0, joined = 0, once_wrong = 0, cancelled = 0;
+  const auto t0 = std::chrono::steady_clock::now();
+  for (const Fixture& f : fixtures) {
+    Session on(*f.model), off(*f.model);
+    off.count_pieces_once(false);
+    for (LatticeTopology t : types) {
+      Settings st = f.st;
+      st.cells.topology = t;
+      unsigned long long first = 0;
+      for (int threads : {1, 3, 0}) {
+        const std::size_t before = on.counted_once();
+        const Outcome a = on.lay(st, threads), b = off.lay(st, threads);
+        ++lays;
+        cancelled += a.cancelled || b.cancelled || !a.refused.empty() || !b.refused.empty();
+        const unsigned long long pa = outcome_print(a), pb = outcome_print(b);
+        if (pa != pb) {
+          ++differ;
+          std::printf("  FAIL %s, %s, %d threads: the lay with the count used again differs (%zu bars vs %zu)\n", f.name,
+                      lattice_topology_name(t), threads, a.bars.bars.size(), b.bars.bars.size());
+        }
+        if (threads == 1) first = pa;
+        else if (pa != first) ++threads_differ;
+        // The count was used again exactly when the join joined nothing.
+        const std::size_t used = on.counted_once() - before;
+        once_wrong += used != (a.cut_off_joined == 0 ? 1u : 0u);
+        once += used;
+        once_adrift += used && a.pieces.adrift > 0;
+        joined += a.cut_off_joined > 0;
+      }
+    }
+    once_wrong += off.counted_once() != 0;   // the switch off never takes the join's count
+  }
+  const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+  std::printf("[S-1] pieces counted once: %zu lays (7 parts x 10 types x 1/3/all threads) with and without; %zu differ, "
+              "%zu differ by threads; the join's count used again in %zu (%zu of them with pieces adrift, dropped by "
+              "it), an end joined (counted again) in %zu; %.0f ms\n",
+              lays, differ, threads_differ, once, once_adrift, joined, ms);
+  CHECK(lays == 7 * 10 * 3 && cancelled == 0);
+  CHECK(differ == 0 && threads_differ == 0);
+  CHECK(once_wrong == 0 && once > 0);
+  // RED controls: one bar a hair wider, one adrift flag and one cell are each seen by the print; the switch off is seen
+  // by counted_once (above: `off` never moved it, and `on` moved it).
+  {
+    Session s(tunnel.model);
+    const Outcome o = s.lay(base);
+    CHECK(!o.bars.bars.empty() && !o.layout.cells.empty());
+    if (!o.bars.bars.empty() && !o.layout.cells.empty()) {
+      Outcome wider = o;
+      wider.bars.bars[wider.bars.bars.size() / 2].width =
+          std::nextafter(wider.bars.bars[wider.bars.bars.size() / 2].width, 1e9);
+      Outcome flag = o;
+      flag.pieces.adrift += 1;
+      Outcome cell = o;
+      cell.layout.cells.back().strut = std::nextafter(cell.layout.cells.back().strut, 1e9);
+      CHECK(outcome_print(wider) != outcome_print(o));
+      CHECK(outcome_print(flag) != outcome_print(o));
+      CHECK(outcome_print(cell) != outcome_print(o));
+      CHECK(outcome_print(o) == outcome_print(s.lay(base)));   // and the same lay twice is the same print
+    }
+  }
+}
+
 int main() {
+  test_pieces_counted_once();
   test_places();
   test_size_step();
   test_face_pieces();

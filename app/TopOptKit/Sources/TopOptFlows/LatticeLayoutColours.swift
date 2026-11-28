@@ -35,6 +35,9 @@ public enum LatticeLayoutColours {
         public var cellWallMM: [Float] = []    // 1 per cell: its wall's width, mm (0 = no wall)
         /// ★ notes25 (D10): the smallest cell this lay could use (core's printability floor, min strut / open look), mm.
         public var floorCellMM = 0.0
+        /// ★ SHEETS: a sheet layout's fields and seams (core's Outcome::sheets, sheet_seams); empty for struts.
+        public var sheets: [LatticeSheetField] = []
+        public var sheetSeams: [LatticeSheetSeam] = []
         public var token = 0
         public init() {}
         public init(_ r: LatticeLayoutSession.Result, token: Int) {
@@ -42,6 +45,7 @@ public enum LatticeLayoutColours {
             frames = r.frames; cellInfo = r.cellInfo; cellRegion = r.cellRegion; cellWall = r.cellWall
             cellFrame = r.cellFrame; cellLo = r.cellLo; cellWallMM = r.cellWallMM
             floorCellMM = r.floorCellMM
+            sheets = r.sheets; sheetSeams = r.sheetSeams   // ★ SHEETS
             self.token = token
         }
         public var barCount: Int { bars.count / 7 }
@@ -139,6 +143,94 @@ public enum LatticeLayoutColours {
                 return n >= 0 && n < f.vonMises.count ? Double(f.vonMises[n]) : nil
             }
         }
+    }
+
+    // MARK: - ★ SHEETS: the wall-thickness key (the strut width key's twin, notes28 sheets SPEC 1.4)
+
+    /// A sheet's relative density (its solid share) at a TRUE wall in a cell: core's own law (lattice_density_from_strut, half
+    /// the wall as the "radius"), 0 where core has none.
+    public static func sheetDensity(_ kind: LatticeSheetField.Kind, wallMM: Double, cellMM: Double) -> Double {
+        guard wallMM > 0, cellMM > 0 else { return 0 }
+        return TopOptKit.latticeRelativeDensity(topology: kind.id, strutRadiusMM: wallMM / 2, cellMM: cellMM)
+    }
+
+    /// Per field, its walls' densities (one per wall texel, x fastest).
+    public static func sheetDensities(_ fields: [LatticeSheetField]) -> [[Double]] {
+        fields.map { f in f.wallMM.map { sheetDensity(f.kind, wallMM: Double($0), cellMM: f.cellMM) } }
+    }
+
+    /// The centre of wall texel `i` of a field (model mm).
+    public static func sheetTexelCentre(_ f: LatticeSheetField, _ i: Int) -> SIMD3<Float> {
+        let nx = Int(f.n.x), ny = Int(f.n.y)
+        let q = f.lo + f.cellMM * SIMD3(Double(i % nx), Double((i / nx) % ny), Double(i / (nx * ny)))
+        return SIMD3<Float>(f.origin + q.x * f.ax[0] + q.y * f.ax[1] + q.z * f.ax[2])
+    }
+
+    /// One colour per wall texel of each field (the sheet pass's colour textures): LIGHTNESS by the wall's density over the
+    /// layout's own span, the interior hue (a sheet has no boundary bars); with the stress view on, the stress ramp at the
+    /// texel's cell. `oneColour` (or the red control): empty (the pass's one colour).
+    public static func sheetColours(_ fields: [LatticeSheetField], stress: Stress? = nil, oneColour: Bool = false) -> [[SIMD4<Float>]] {
+        func rgb(_ c: RGBAColor) -> SIMD3<Float> { SIMD3(Float(c.r), Float(c.g), Float(c.b)) }
+        if controlOneColour || oneColour { return [] }
+        if let s = stress, s.peakMPa > 0 {
+            let interior = rgb(LatticeStructureColour.interior)
+            return fields.map { f in
+                (0..<f.wallMM.count).map { i in
+                    guard let mpa = s.at(sheetTexelCentre(f, i)) else { return SIMD4(interior, 1) }
+                    let c = LatticeStressTint.colour(fraction: mpa / s.peakMPa)
+                    return SIMD4(c.x, c.y, c.z, 1)
+                }
+            }
+        }
+        let rho = sheetDensities(fields)
+        let all = rho.flatMap { $0 }.filter { $0 > 0 }
+        let lo = all.min() ?? 0, hi = all.max() ?? 0, span = hi - lo
+        let interior = rgb(LatticeStructureColour.interior), pale = rgb(LatticeStructureColour.pale)
+        return rho.map { r in
+            r.map { v in
+                let frac = span > 1e-4 ? Float(Swift.min(Swift.max((v - lo) / span, 0), 1)) : 0
+                return SIMD4(simd_mix(pale, interior, SIMD3(repeating: Swift.min(Swift.max(0.25 + 0.75 * frac, 0), 1))), 1)
+            }
+        }
+    }
+
+    /// ★ SHEETS, K4 (SPEC 5, Results): the strength check's colours from sheet_cells.bin, one texel per laid cell on each
+    /// field's own cell grid (read nearest): a judged cell by how close it is to giving way at your load (its share, 1 /
+    /// margin, red at 1: the stress ramp), a cell in a blend band the "not credited" grey (no strength credit there, SPEC
+    /// 1.5), a cell not judged the interior colour. Cells are matched to their field by region and by their corner's place on
+    /// the field's grid (anchor + k × cell), so the file's frames need not be the layout's.
+    public static let notCreditedColour = SIMD4<Float>(0.60, 0.60, 0.64, 1)
+    public static func sheetMarginColours(_ fields: [LatticeSheetField], cells c: LatticeSheetCells)
+        -> (colours: [[SIMD4<Float>]], grids: [LatticeSheetDrawing.ColourGrid?]) {
+        func rgb(_ x: RGBAColor) -> SIMD3<Float> { SIMD3(Float(x.r), Float(x.g), Float(x.b)) }
+        let interior = SIMD4(rgb(LatticeStructureColour.interior), 1)
+        var colours: [[SIMD4<Float>]] = [], grids: [LatticeSheetDrawing.ColourGrid?] = []
+        for f in fields {
+            guard f.cellMM > 0 else { colours.append([]); grids.append(nil); continue }
+            var at: [(k: SIMD3<Int32>, i: Int)] = []
+            for i in 0..<c.count where c.region[i] == f.region && 3 * i + 2 < c.lo.count {
+                let q = (SIMD3(Double(c.lo[3 * i]), Double(c.lo[3 * i + 1]), Double(c.lo[3 * i + 2])) - f.anchor) / f.cellMM
+                at.append((SIMD3<Int32>(Int32(q.x.rounded()), Int32(q.y.rounded()), Int32(q.z.rounded())), i))
+            }
+            guard let first = at.first else { colours.append([]); grids.append(nil); continue }
+            var kmin = first.k, kmax = first.k
+            for a in at { kmin = simd_min(kmin, a.k); kmax = simd_max(kmax, a.k) }
+            let n = kmax &- kmin &+ 1
+            let count = Int(n.x) * Int(n.y) * Int(n.z)
+            guard count > 0, count <= 4_000_000 else { colours.append([]); grids.append(nil); continue }
+            var out = [SIMD4<Float>](repeating: interior, count: count)
+            for a in at {
+                let d = a.k &- kmin
+                let idx = (Int(d.z) * Int(n.y) + Int(d.y)) * Int(n.x) + Int(d.x)
+                let flags = a.i < c.flags.count ? c.flags[a.i] : 0
+                let m = a.i < c.margin.count ? c.margin[a.i] : .nan
+                if flags & LatticeSheetCells.blendBand != 0 { out[idx] = notCreditedColour }
+                else if m.isFinite, m > 0 { out[idx] = LatticeStressTint.colour(fraction: 1 / Double(m)) }
+            }
+            colours.append(out)
+            grids.append(.init(lo: f.anchor + f.cellMM * (SIMD3<Double>(kmin) + 0.5), n: n))
+        }
+        return (colours, grids)
     }
 
     /// One colour per bar (rgb, alpha 1), the old key's rules (see the header). `grade` = grade to shape is on.

@@ -32,6 +32,18 @@ public enum CoreThreeMF {
         return (scan.vertices, scan.indices)
     }
 
+    /// ★ notes29: the mesh with every triangle on its own three corners (what a binary STL reads as), in the same order — how
+    /// Results draws a cell lattice's print file (flat faces, sharp edges), as it drew its STL.
+    public static func unshared(_ m: (vertices: [Float], indices: [Int32])) -> (vertices: [Float], indices: [Int32]) {
+        var v = [Float]()
+        v.reserveCapacity(m.indices.count * 3)
+        for i in m.indices {
+            let k = Int(i) * 3
+            v.append(m.vertices[k]); v.append(m.vertices[k + 1]); v.append(m.vertices[k + 2])
+        }
+        return (v, (0..<Int32(m.indices.count)).map { $0 })
+    }
+
     // MARK: the zip
 
     struct Entry { var method: Int; var start: Int; var csize: Int; var size: Int }

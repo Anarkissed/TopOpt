@@ -286,7 +286,7 @@ final class TopologyInLatticeNotes1122Tests: XCTestCase {
             h.pump(1)
             // the lattice preview, its settings saved: the stress check runs (here, the stub)
             if h.frames.all["view-Lattice preview-on"] == nil { try h.tap("view-Lattice preview", "\(what): the lattice preview", settle: 1.5) }
-            if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleSetup", "\(what): the page's Save", settle: 1.5) }
+            if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleLattice", "\(what): the page's Save", settle: 1.5) }
             let end = Date().addingTimeInterval(60)
             while h.frames.all["view-Stress"] == nil && h.frames.all["view-Stress-on"] == nil, Date() < end { h.pump(0.5) }
             XCTAssertGreaterThan(calls.count, 0, "\(what): premise — the stress check ran")

@@ -688,6 +688,9 @@ public struct DSRunButton: View {
     let progress: Progress?
     let action: () -> Void
     let fix: (() -> Void)?
+    /// ★ notes30 (11-27): an (i) beside the button (where a blocked button's fix chip sits), for a line that needs its detail.
+    let info: String?
+    let infoTitle: String
 
     /// ★ His pick 11-21 (the preview-speed research): something the button waits on, said ON the button (never a line at the
     /// bottom): a ring that fills toward `expected` seconds (never quite closed before it ends; a spinner when nothing says
@@ -715,9 +718,10 @@ public struct DSRunButton: View {
     }
 
     public init(_ title: String, subtitle: String, state: State = .ready, key: String, progress: Progress? = nil,
+                info: String? = nil, infoTitle: String = "About this",
                 action: @escaping () -> Void, fix: (() -> Void)? = nil) {
         self.title = title; self.subtitle = subtitle; self.state = state; self.key = key; self.progress = progress
-        self.action = action; self.fix = fix
+        self.action = action; self.fix = fix; self.info = info; self.infoTitle = infoTitle
     }
 
     private var grey: Bool {
@@ -739,6 +743,7 @@ public struct DSRunButton: View {
             if case let .blocked(_, fixTitle) = state, let fix {
                 DSChip(.fix(fixTitle), key: key + "Fix", action: fix)
             }
+            if let info { InfoTip(key: key + "Info", text: info, label: infoTitle) }   // its own 44 pt target
             Button(action: action) {
                 Group {
                     if let progress {   // ★ his pick 11-21: the ring and the count-down, once a second (this view only)

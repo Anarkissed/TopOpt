@@ -120,10 +120,13 @@ final class FlexibleFaceChipTests: XCTestCase {
     /// FlexibleR7D2ReviewTests R3 and FlexibleR7D2ReviewHostedTests R3). What stays pinned here: his four rows, the caption,
     /// and `rows(card:)` — kept as R3's red control — still reads the drawer's own numbers. Was: the shipping (i)'s rows equal
     /// LatticeRegionDrawer.make for the face's card.
+    /// ★ RE-PINNED (notes30, his one (i); builder F1): the numbers are read where the (i)'s centred notification draws them
+    /// (FlexibleFaceStatsRows, FlexibleFaceStatsPopover.swift) — the on-model layer's card that read them went.
     func testTheInfoShowsOnlyHisFourRowsFromTheDrawersOwnNumbers() throws {
+        let rowsView = try String(contentsOf: FlexibleRound7SelectionsHookTests.sources.appendingPathComponent("FlexibleFaceStatsPopover.swift"), encoding: .utf8)
+        XCTAssertTrue(rowsView.contains("if let rows = main.faceStats(ref, group: group, project: model.project) {"), "★ the card reads the drawn lattice")
         let layer = try String(contentsOf: FlexibleRound7SelectionsHookTests.sources.appendingPathComponent("FlexibleOnModelLayer.swift"), encoding: .utf8)
-        XCTAssertTrue(layer.contains("let rows = main.faceStats(info.ref, group: info.group, project: project)"), "★ the card reads the drawn lattice")
-        XCTAssertFalse(layer.contains("FlexibleFaceStats.rows(card:"), "★ not #354's slab card")
+        XCTAssertFalse(layer.contains("FlexibleFaceStats.rows(card:") || rowsView.contains("FlexibleFaceStats.rows(card: card,"), "★ not #354's slab card")
         XCTAssertEqual(FlexibleFaceStats.labels, ["Cell", "Density", "Strut", "Cells across"], "★ his four (his correction)")
         let card = try XCTUnwrap(FlexibleFaceChipTests.sampleCard(), "a card")
         let rows = try XCTUnwrap(FlexibleFaceStats.rows(card: card, depthMM: 25, held: true))

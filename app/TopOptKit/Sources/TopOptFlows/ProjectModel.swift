@@ -1229,9 +1229,11 @@ public final class ProjectModel: ObservableObject {
         let bead = Swift.max(0.05, lineWidthMM)
         // The law's own ceiling: what a fully dense cell of this size produces.
         let solid = 2 * lat.strutRadiusMM(relativeDensity: 1, cellMM: cellMM)
-        // The quilt: neighbouring struts meet when the diameter reaches half the
-        // cell. Whichever comes first is the top of the dial.
-        let quilt = Swift.min(cellMM / 2, solid)
+        // ★ notes29 (his notes on release 20): the quilt is the TYPE'S OWN, where its neighbouring struts fuse (core's
+        // lattice_quilt_limits touch x the cell: octet 0.354, bcc 0.707, sc 1, ...), for every type the engine lays —
+        // never "half the cell", an octet-style rule every type was read by (BCC + Z's footer said "density 107 %").
+        // A type the engine does not lay keeps the old reading: half the cell, or the law's solid, whichever first.
+        let quilt = LatticeDensityDial.limits(topology: topology).map { $0.quilt * cellMM } ?? Swift.min(cellMM / 2, solid)
         // ★ AND THE BOTTOM IS WHAT THE LAW CAN ACTUALLY DRAW. A bead is the
         // PRINTABLE floor, but on a coarse cell core's curve cannot produce a
         // strut that thin at any density — at 13 mm its thinnest is 1.18 mm — so
@@ -1265,8 +1267,15 @@ public final class ProjectModel: ObservableObject {
     /// number he types is the strut he gets.
     /// nil when the type has no strut law (item a): nothing to store from a percent.
     public func latticeDensityForPercent(_ pct: Double, cellMM: Double) -> Double? {
-        guard let lat = LatticeType.named(lattice.topologyID),
-              let b = latticeDensityBandDiametersMM(cellMM: cellMM) else { return nil }
+        Self.latticeDensityForPercent(pct, cellMM: cellMM, topology: lattice.topologyID,
+                                      lineWidthMM: printParams.strutLineWidthMM)
+    }
+    /// ★ notes28: the same inverse for a named type and print line (a type change carries each density through it).
+    nonisolated public static func latticeDensityForPercent(_ pct: Double, cellMM: Double, topology: String,
+                                                            lineWidthMM: Double) -> Double? {
+        guard let lat = LatticeType.named(topology),
+              let b = latticeDensityBandDiametersMM(topology: topology, lineWidthMM: lineWidthMM, cellMM: cellMM)
+        else { return nil }
         guard cellMM > 0 else { return 0 }
         let t = Swift.max(0, Swift.min(1, (pct - 1) / 99))
         let d = b.lo + t * (b.hi - b.lo)
@@ -3029,7 +3038,7 @@ public final class ProjectModel: ObservableObject {
         // ★ RELEASE (2), E2: core runs nine types; a type whose app batch has not shipped (B7.n) is stale here too
         // (`LatticeTypeCatalog.appBatches`), asked first, so its path still asks core nothing.
         guard lattice.enabled,
-              LatticeTypeCatalog.appBatches.contains(lattice.topologyID),
+              LatticeTypeCatalog.oldRunShipped(lattice.topologyID),   // ★ notes28 (his 11-25): the old run keeps the octet only
               TopOptKit.latticeTypeReadiness(lattice.topologyID,
                                              generatable: TopOptKit.latticeGeneratableTopologies,
                                              certifiable: TopOptKit.latticeCertifiableTopologies) == .live

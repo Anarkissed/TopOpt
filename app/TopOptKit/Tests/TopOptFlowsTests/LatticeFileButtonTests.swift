@@ -306,7 +306,7 @@ final class LatticeFileButtonTests: XCTestCase {
         p.lattice.enabled = true   // as Save on the Lattice page leaves it
         p.latticeList.clearActive()
         h.pump(1)
-        if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleSetup", "the page's Save", settle: 1) }
+        if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleLattice", "the page's Save", settle: 1) }
         XCTAssertTrue(p.importedFile?.path.lowercased().hasSuffix(".step") == true, "premise: a STEP part")
         return (h, p, app)
     }

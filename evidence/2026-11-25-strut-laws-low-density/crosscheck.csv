@@ -1,0 +1,65 @@
+type,quantity,rho,measured,published,published_law,measured_over_published
+bcc,E100/Es,0.03194,0.000133403,0.00102016,GA rho^2,0.131
+bcc,E100/Es,0.04188,0.000243644,0.00175393,GA rho^2,0.139
+bcc,E100/Es,0.05172,0.000409083,0.00267496,GA rho^2,0.153
+bcc,E100/Es,0.06128,0.00058102,0.00375524,GA rho^2,0.155
+bcc,E100/Es,0.07703,0.000995301,0.00593362,GA rho^2,0.168
+bcc,E100/Es,0.09241,0.00151726,0.00853961,GA rho^2,0.178
+bcc,E100/Es,0.10750,0.00218408,0.0115562,GA rho^2,0.189
+bcc,E100/Es,0.13483,0.00386528,0.0181791,GA rho^2,0.213
+bcc,E100/Es,0.15259,0.0052247,0.0232837,GA rho^2,0.224
+bcc,E100/Es,0.19141,0.00928437,0.0366378,GA rho^2,0.253
+bcc,E100/Es,0.21228,0.0121824,0.0450628,GA rho^2,0.270
+bcc,E100_slope,,2.3807,2,,
+bcc,first_yield_uniaxial/sigma_ys (new row),0.03194,0.00010059,0.00171247,GA 0.3 rho^1.5,0.059
+bcc,first_yield_uniaxial/sigma_ys (new row),0.05000,0.000334391,0.0033541,GA 0.3 rho^1.5,0.100
+bcc,first_yield_uniaxial/sigma_ys (new row),0.07000,0.000577368,0.00555608,GA 0.3 rho^1.5,0.104
+bcc,first_yield_uniaxial/sigma_ys (new row),0.10000,0.00125221,0.00948683,GA 0.3 rho^1.5,0.132
+bcc,first_yield_uniaxial/sigma_ys (new row),0.15700,0.00350191,0.0186625,GA 0.3 rho^1.5,0.188
+bcc,first_yield_uniaxial/sigma_ys (11-09 row),0.21050,0.00757685,0.0289734,GA 0.3 rho^1.5,0.262
+bcc,first_yield_uniaxial/sigma_ys (11-09 row),0.31300,0.0177081,0.0525337,GA 0.3 rho^1.5,0.337
+bcc,first_yield_uniaxial/sigma_ys (11-09 row),0.45000,0.0414006,0.0905608,GA 0.3 rho^1.5,0.457
+bcc,first_yield_uniaxial/sigma_ys (11-09 row),0.59288,0.0673448,0.136953,GA 0.3 rho^1.5,0.492
+diamond,E100/Es,0.03874,0.000697832,0.00150079,GA rho^2,0.465
+diamond,E100/Es,0.04181,0.000837782,0.00174808,GA rho^2,0.479
+diamond,E100/Es,0.06119,0.00188084,0.00374422,GA rho^2,0.502
+diamond,E100/Es,0.07694,0.00301964,0.00591976,GA rho^2,0.510
+diamond,E100/Es,0.09231,0.00443406,0.00852114,GA rho^2,0.520
+diamond,E100/Es,0.10737,0.00621193,0.0115283,GA rho^2,0.539
+diamond,E100/Es,0.13464,0.00998277,0.0181279,GA rho^2,0.551
+diamond,E100/Es,0.15234,0.0130198,0.0232075,GA rho^2,0.561
+diamond,E100_slope,,2.1283,2,,
+diamond,first_yield_uniaxial/sigma_ys (new row),0.03874,0.000443445,0.0022875,GA 0.3 rho^1.5,0.194
+diamond,first_yield_uniaxial/sigma_ys (new row),0.05000,0.000955046,0.0033541,GA 0.3 rho^1.5,0.285
+diamond,first_yield_uniaxial/sigma_ys (new row),0.07000,0.00168047,0.00555608,GA 0.3 rho^1.5,0.302
+diamond,first_yield_uniaxial/sigma_ys (new row),0.10000,0.00336294,0.00948683,GA 0.3 rho^1.5,0.354
+diamond,first_yield_uniaxial/sigma_ys (new row),0.12500,0.0046884,0.0132583,GA 0.3 rho^1.5,0.354
+diamond,first_yield_uniaxial/sigma_ys (11-09 row),0.15712,0.0083877,0.0186839,GA 0.3 rho^1.5,0.449
+diamond,first_yield_uniaxial/sigma_ys (11-09 row),0.20000,0.0120389,0.0268328,GA 0.3 rho^1.5,0.449
+diamond,first_yield_uniaxial/sigma_ys (11-09 row),0.31300,0.0293,0.0525337,GA 0.3 rho^1.5,0.558
+diamond,first_yield_uniaxial/sigma_ys (11-09 row),0.45000,0.0534593,0.0905608,GA 0.3 rho^1.5,0.590
+diamond,first_yield_uniaxial/sigma_ys (11-09 row),0.59201,0.0709165,0.136652,GA 0.3 rho^1.5,0.519
+sc,E100/Es,0.01606,0.00579601,0.00535333,Ashby rho/3,1.083
+sc,E100/Es,0.01945,0.00709243,0.00648333,Ashby rho/3,1.094
+sc,E100/Es,0.02630,0.00969123,0.00876667,Ashby rho/3,1.105
+sc,E100/Es,0.02962,0.0110303,0.00987333,Ashby rho/3,1.117
+sc,E100/Es,0.03295,0.0123471,0.0109833,Ashby rho/3,1.124
+sc,E100/Es,0.03516,0.013221,0.01172,Ashby rho/3,1.128
+sc,E100/Es,0.03798,0.0143112,0.01266,Ashby rho/3,1.130
+sc,E100/Es,0.04541,0.0174007,0.0151367,Ashby rho/3,1.150
+sc,E100/Es,0.05045,0.019486,0.0168167,Ashby rho/3,1.159
+sc,E100/Es,0.05807,0.0225918,0.0193567,Ashby rho/3,1.167
+sc,E100/Es,0.06293,0.0247726,0.0209767,Ashby rho/3,1.181
+sc,E100_slope,,1.0623,1,,
+sc,first_yield_uniaxial/sigma_ys (new row),0.01606,4.21646e-05,0.004818,Ashby 0.3 rho,0.009
+sc,first_yield_uniaxial/sigma_ys (new row),0.02500,0.000115094,0.0075,Ashby 0.3 rho,0.015
+sc,first_yield_uniaxial/sigma_ys (new row),0.03500,0.00022557,0.0105,Ashby 0.3 rho,0.021
+sc,first_yield_uniaxial/sigma_ys (new row),0.05000,0.000477197,0.015,Ashby 0.3 rho,0.032
+sc,first_yield_uniaxial/sigma_ys (new row),0.06500,0.000911964,0.0195,Ashby 0.3 rho,0.047
+sc,first_yield_uniaxial/sigma_ys (11-09 row),0.08659,0.0016416,0.025977,Ashby 0.3 rho,0.063
+sc,first_yield_uniaxial/sigma_ys (11-09 row),0.10000,0.00224865,0.03,Ashby 0.3 rho,0.075
+sc,first_yield_uniaxial/sigma_ys (11-09 row),0.15700,0.00634088,0.0471,Ashby 0.3 rho,0.135
+sc,first_yield_uniaxial/sigma_ys (11-09 row),0.20000,0.00901242,0.06,Ashby 0.3 rho,0.150
+sc,first_yield_uniaxial/sigma_ys (11-09 row),0.31300,0.0218838,0.0939,Ashby 0.3 rho,0.233
+sc,first_yield_uniaxial/sigma_ys (11-09 row),0.45000,0.0383968,0.135,Ashby 0.3 rho,0.284
+sc,first_yield_uniaxial/sigma_ys (11-09 row),0.49638,0.0417283,0.148914,Ashby 0.3 rho,0.280

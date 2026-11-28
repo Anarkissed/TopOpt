@@ -128,6 +128,14 @@ struct LatticeLayoutSettings {
   // axis 1 xyz, axis 2 xyz, half xyz (core's Zone: a cylinder's axis is axis 2, its radius half x, its half length
   // half z). Empty: no zones.
   std::vector<double> region_zone;
+  // ── SHEETS (notes28 sheets SPEC 1.3, 1.5; the contract's bridge additions, lattice_layout.hpp "THE BRIDGE'S FORM") ──
+  // Read for a sheet type only. "Where regions meet": "blend" | "solid_wall" (core's Settings::sheet_seam; the app sends
+  // Blend in Aesthetic and Solid wall in Structural). Auto's wall by the cell (StrutSpec::auto_by_cell; the app's Auto).
+  std::string sheet_seam = "solid_wall";
+  bool auto_by_cell = false;
+  // ★ E: seams made the solid wall whatever sheet_seam asks (core's Settings::sheet_walls), two region ids per seam: the
+  // seams the last print file fell back on, so the preview draws the wall it printed. Empty: none.
+  std::vector<int32_t> sheet_walls;
 };
 
 struct LatticeLayoutResult {
@@ -138,8 +146,9 @@ struct LatticeLayoutResult {
   std::vector<uint8_t> bar_flags;            // 1 per bar: 1 a piece of a cut strut, 2 a skin bar,
                                              // 16 (bit 4) a BRIDGE: it lies flatter than 30 degrees, and the file writes it
                                              // as a square bar, as wide and as tall as its width, its underside level
-                                             // (core's bar_is_bridge, the writer's own test); every other bar is round
-  std::vector<int32_t> bar_region;           // 1 per bar: its region, 0 = the whole part
+                                             // (core's bar_is_bridge, the writer's own test); every other bar is round.
+                                             // ★ notes29: a framed session judges it in the print frame (up: the print's)
+  std::vector<int32_t> bar_region;          // 1 per bar: its region, 0 = the whole part
   std::vector<float> bar_cell;               // ★ Install 3: 1 per bar: the size of the cell it is a strut of, mm (core's Bar::cell)
   // The solid pieces the layout lists (D14: a cube tried and not fitted), each with its reason. Cubes sit on frames.
   std::vector<float> frames;                 // 12 per frame: origin xyz, then its three axes (unit) xyz each
@@ -180,6 +189,22 @@ struct LatticeLayoutResult {
   double stress_reference_mpa = 0.0, step_held_at = 0.0;
   int32_t thin_solid = 0;
   double ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0, ms_bridge = 0.0;
+  // ★ SHEETS (the contract's SheetsFlat, flatten_sheets(Outcome::sheets, Outcome::sheet_seams), under its own names
+  // prefixed "sheet_"): one entry per laid sheet field unless said; all empty for a strut type.
+  std::vector<int32_t> sheet_region, sheet_frame;
+  std::vector<uint8_t> sheet_kind;           // 0 gyroid, 1 schwarz_d
+  std::vector<float> sheet_axes;             // 12 per field: origin xyz, ax[0] xyz, ax[1] xyz, ax[2] xyz (part coordinates)
+  std::vector<float> sheet_anchor;           // 3 per field, frame mm
+  std::vector<float> sheet_cell_mm;
+  std::vector<int32_t> sheet_n;              // 3 per field
+  std::vector<float> sheet_lo;               // 3 per field, frame mm (the first centre)
+  std::vector<int32_t> sheet_wall_count;     // n0 * n1 * n2 per field
+  std::vector<float> sheet_wall_mm;          // every field's walls, one after another, x fastest (the 3D textures)
+  std::vector<float> sheet_wall_range;       // 2 per field: wall_min_mm, wall_max_mm
+  std::vector<int32_t> sheet_seam_ab;        // 2 per seam: the two field indices
+  std::vector<float> sheet_seam_band_mm, sheet_seam_raise_mm;
+  std::vector<uint8_t> sheet_seam_solid, sheet_seam_fell_back;
+  std::vector<std::string> sheet_seam_why;
 };
 
 // What is at each of a batch of points (the drawer's "is this lattice, rim or solid"; the blue glow's reasons): one
@@ -194,11 +219,22 @@ struct LatticeLayoutOpenInfo {
   int32_t faces = 0;                         // the model's face count
   int32_t open_edges = 0;                    // 0 for a part that can be measured
   double ms_open = 0.0;
+  bool framed = false;                       // ★ notes29: opened standing in a print frame (lattice_layout_open_framed)
 };
 
 // Opens the imported model at `path` — STEP, STL or 3MF, the faces the app sees (core's import_part_file_resolved: the
 // face sidecar applied) — and measures it once. `linear_deflection` <= 0: core's default (STEP only).
 LatticeLayoutOpenInfo lattice_layout_open(const std::string& path, double linear_deflection, BridgeError& err);
+// ★ notes29 (P8, his print orientation: after Keep, the Organic preview still grew along the model's +Z): the same part
+// opened STANDING THE WAY IT PRINTS, as the print file's job opens it for "print_frame": {"up": [up_x, up_y, up_z]} (the up
+// in the part's own coordinates; core's print_frame.hpp and open_in_print_frame). Every call of such a session takes and
+// gives the part's OWN coordinates, as an unframed one does: core lays in the print frame (its settings, stress and tensor
+// turned through the file job's door, every Organic ask growing along the print's up) and every place it gives back — the
+// bars, frames, runs, flat ends, growth pieces, chips' places — is turned back (turn_preview_to_model and its kin); the
+// points "where" and the maps ask about are turned in. The tensor written for the print file is the one set (the part's
+// own: the file job turns it itself). An up that is not a direction is refused (err).
+LatticeLayoutOpenInfo lattice_layout_open_framed(const std::string& path, double linear_deflection, double up_x,
+                                                 double up_y, double up_z, BridgeError& err);
 LatticeLayoutResult lattice_layout(int64_t session, const LatticeLayoutSettings& settings, BridgeError& err);
 // The points asked about: 3 per point, the part's own coordinates (a struct, so Swift fills it with push_back).
 struct LatticeLayoutPoints {
@@ -219,6 +255,26 @@ struct LatticeLayoutGrid {
   // The unheld voxels by core's reason (SolidAt::why, NoCell): Other, WallNarrow, TooFewAcross, Sliver, RegionShallow (his
   // ruling 11-14: solid where lattice was asked is never silent — the line says why and offers fixes).
   std::vector<int64_t> nocell;
+  // ★ notes30 X2 (cell advice): per reason, the most there is at any of its solid places (core's SolidWhy::have_mm: the widest
+  // wall, the deepest region), mm; 0 where none. With the lay's smallest cell it says whether any smaller cell could lay there.
+  std::vector<double> nocell_have_mm;
+  // ★ notes30 Q2: a newer lay stopped it (lattice_layout_cancel): nothing above is filled — never "nothing asked for".
+  bool cancelled = false;
+  // ★ SHEETS (notes28 sheets SPEC 1.5, 5; builder B: the contract's "the map's region and seam channels"). Filled for a
+  // sheet layout only (all three empty for every other type), one entry per voxel in `rg`'s order:
+  //   sheet_field    THE REGION CHANNEL: the index into the last lay's sheet fields (LatticeLayoutResult.sheet_region's
+  //                  order) of the field whose cell holds the voxel centre: the first cell in layout order whose lattice
+  //                  holds it (the strength check's and the file's rule; a solid wall's membrane is no cell's). An outside
+  //                  voxel next to open lattice takes the field of its first open neighbour (-x, +x, -y, +y, -z, +z), as
+  //                  `rg`'s open channel opens it. 255: none (solid, outside, an Organic weave's lattice).
+  //   sheet_seam     THE SEAM CHANNEL: the blend seam (index into sheet_seam_ab / 2) of the voxel's field nearest across
+  //                  (the smallest |sheet_seam_mm| of the field's seams asked as a blend, not solid walls); 255: none
+  //                  (no blend seam of its field, or no field, or a seam with no flat outline: core's +infinity).
+  //   sheet_seam_mm  THE SEAM DISTANCE: that seam's signed distance across at the voxel centre, mm, + toward the seam's
+  //                  b side (core's sheet_seam_mm, the s of the blend's smoothstep); 0 where sheet_seam is 255.
+  std::vector<uint8_t> sheet_field;
+  std::vector<uint8_t> sheet_seam;
+  std::vector<float> sheet_seam_mm;
 };
 LatticeLayoutGrid lattice_layout_grid(int64_t session, float origin_x, float origin_y, float origin_z, float voxel_mm,
                                       int32_t nx, int32_t ny, int32_t nz, BridgeError& err);
@@ -231,6 +287,13 @@ struct LatticeLayoutGridAhead {
   bool supported = false;
 };
 LatticeLayoutGridAhead lattice_layout_grid_ahead(int64_t session, const LatticeLayoutSettings& settings, float origin_x,
+                                                 float origin_y, float origin_z, float voxel_mm, int32_t nx, int32_t ny,
+                                                 int32_t nz, BridgeError& err);
+// ★ notes30 (the strut lattice's scaffold, his 11-26: "open up the walls first"): the ROUGH cut-open for these settings BEFORE
+// the lay, for every lattice type — lattice_layout_grid_ahead's map with every lattice region's "where" open (its cells are
+// not laid yet, so the exact map's edge, made at the landing, can shift slightly where a cell is not laid). Made on the domain
+// the lay then keeps (the same "where"), so the lay itself is unchanged. `supported` false only when no domain is made.
+LatticeLayoutGridAhead lattice_layout_grid_rough(int64_t session, const LatticeLayoutSettings& settings, float origin_x,
                                                  float origin_y, float origin_z, float voxel_mm, int32_t nx, int32_t ny,
                                                  int32_t nz, BridgeError& err);
 // THE STRESS RESULT the session grades by (Install 2): von Mises, MPa, x fastest then y then z, on a grid whose low corner
@@ -255,8 +318,18 @@ struct LatticeLayoutPlaces {
   std::vector<double> area_mm2;
   std::vector<uint8_t> solid_now;
   double ms = 0.0;
+  bool cancelled = false;   // ★ notes30 Q1: a cancel came after `ticket`: nothing above is filled
 };
-LatticeLayoutPlaces lattice_layout_places(int64_t session, const LatticeLayoutSettings& settings, BridgeError& err);
+// ★ notes30 Q1 (S-2, his yes 11-26: a setting changed right after a lattice landed waited ~3 s behind this search): the
+// search gives way at once. `ticket` is lattice_layout_places_ticket's, read when the search is ASKED: any
+// lattice_layout_cancel (a newer lay) or lattice_layout_places_cancel after it makes the search, running or waiting,
+// come back `cancelled` — core's find_places reads its own stop once per triangle. That stop is the search's alone: a
+// places cancel leaves nothing behind for a lay, a map or the next search. `give_way` false: the search before notes30
+// (no cancel stops it; the tests' RED CONTROL).
+LatticeLayoutPlaces lattice_layout_places(int64_t session, const LatticeLayoutSettings& settings, uint64_t ticket,
+                                          bool give_way, BridgeError& err);
+uint64_t lattice_layout_places_ticket(int64_t session);   // 0 when the session is not open
+void lattice_layout_places_cancel(int64_t session);       // safe from any thread
 // ★ ORGANIC, CUT 1 (his 11-18: "I'd like to get going to be able to VIEW things on the ipad ASAP"; "Preview PLUS settings
 // simultaneously"): the weave's preview on the iPad, from LatticeReview's engine (lattice_layout_organic.hpp, brief L2).
 // Every field of core's OrganicAsk, under its own name and default, so any of his controls can reach it.
@@ -406,7 +479,72 @@ struct LatticeLayoutGrowth {
 };
 LatticeLayoutGrowth lattice_layout_growth_read(int64_t session, int64_t from, int64_t most, BridgeError& err);
 
-// Every layout of `session` running now or waiting comes back cancelled. Safe from any thread.
+// ★ notes28 (his 11-24: all nine strut types on the new engine): what the engine knows of a strut type, asked without a
+// part. `lays`: the engine lays it — core has the type's canonical cell (lattice_has_strut_cell) and its two width limits
+// (lattice_width_bounds); else false, with core's own words in `why`. `open_look`, `touch`: those two limits, strut width
+// over cell size. The canonical cell exactly as the engine lays it (core's lattice_strut_cell; R12 "the app draws every
+// type from core"): `s` (node coordinates are integers in units of cell / s), its struts, 6 per strut (a xyz, b xyz), and
+// its nodes, 3 per node. A sheet type, or an id core does not know, never lays. Never throws (the one guard).
+// Core's two Structural verdicts for the type (lattice_layout.hpp, PER TYPE; builder D 2026-11-24), each "" or ONE plain
+// line: `structural_refusal` — Structural can never take it (the tetragonal three; the file job refuses such a job,
+// type_not_supported); `structural_note` — its measured strength law credits none of the struts the engine lays (today
+// bcc and sc; it clears by itself when the law is measured down to them).
+// ★ SHEETS (notes28 sheets SPEC 5, the contract's bridge additions): a sheet type (gyroid, schwarz_d) `lays` too, with
+// `family` "sheet" (lattice_family), its open look and touch (core's lattice_width_bounds), its Structural floor in cells
+// (sheet_structural_floor_cells: 10 / 9 until builder D's tables), its floor cell at two 0.45 mm lines
+// (sheet_floor_cell_mm), Auto's largest cell (auto_cell_cap_mm; +infinity when none) and no struts or nodes (s = 0).
+struct LatticeLayoutTypeFacts {
+  bool lays = false;
+  std::string why;
+  double open_look = 0.0, touch = 0.0;
+  int32_t s = 0;
+  std::vector<int32_t> struts;
+  std::vector<int32_t> nodes;
+  std::string structural_refusal;
+  std::string structural_note;
+  std::string family = "strut";
+  double structural_floor_cells = 0.0;
+  double floor_cell_mm = 0.0;
+  double auto_cell_cap_mm = 0.0;
+};
+LatticeLayoutTypeFacts lattice_layout_type_facts(const std::string& topology);
+
+// ★ SHEETS: the type's wall law as the GPU and the Swift field read it — core's lattice_sheet_wall_param_mm (the TRUE wall
+// → the field parameter, both linear in the cell), sampled at n + 1 evenly spaced walls over the cell from 0 to `max_share`
+// (wall / cell): value i is the parameter over the cell at wall / cell = max_share * i / n. Empty for a strut type or a bad
+// argument. Never throws.
+std::vector<double> lattice_layout_sheet_param_table(const std::string& topology, int32_t n, double max_share);
+// ★ SHEETS: core's own field at a batch of points (tests: the Swift copy and the shader against core): one field given flat
+// (its SheetsFlat entries), sheet_distance_at (or, `wall` true, sheet_wall_at) at each point (3 per point, part
+// coordinates). Empty with `err` set on a bad field.
+struct LatticeLayoutSheetProbe {
+  uint8_t kind = 0;
+  std::vector<float> axes;      // 12
+  std::vector<float> anchor;    // 3
+  float cell_mm = 0.0f;
+  std::vector<int32_t> n;       // 3
+  std::vector<float> lo;        // 3
+  std::vector<float> wall_mm;   // n0 * n1 * n2
+  std::vector<float> xyz;       // the points
+  bool wall = false;
+};
+std::vector<double> lattice_layout_sheet_probe(const LatticeLayoutSheetProbe& probe, BridgeError& err);
+
+// ★ SHEETS: sheet_cells.bin (lattice_layout_file.hpp, SPEC 1.6: the K4 colours and the Results card of a sheet, in place
+// of bars.bin), read by core's own reader (read_sheet_cells_file: its refusals). `ok` false with `why` when refused.
+struct LatticeSheetCells {
+  bool ok = false;
+  std::string why;
+  std::vector<float> frames;              // 12 per frame
+  std::vector<int32_t> region, frame;     // per cell
+  std::vector<float> lo;                  // 3 per cell, frame mm
+  std::vector<float> size_mm, wall_mm, cells_across, margin;   // per cell (margin NaN: not judged)
+  std::vector<uint32_t> flags;            // per cell: SheetCellRecord's bits
+};
+LatticeSheetCells lattice_sheet_cells_read(const std::string& path);
+
+// Every layout of `session` running now or waiting comes back cancelled (★ notes30 Q1: and its places search). Safe from
+// any thread.
 void lattice_layout_cancel(int64_t session);
 void lattice_layout_close(int64_t session);
 

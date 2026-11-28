@@ -48,7 +48,12 @@ final class LatticeLayoutStressPageTests: XCTestCase {
         let s = LatticeLayoutPreview.settings(p, referenceMPa: 12.5)
         XCTAssertTrue(s.byStress, "★ By stress")
         XCTAssertLessThan(s.dialLight, s.dialHeavy, "★ Grade to is the light end, Grade from the heavy end")
-        XCTAssertTrue((0.01...1).contains(s.dialLight) && (0.01...1).contains(s.dialHeavy), "★ on core's dial")
+        // ★ RE-PINNED (notes29b: with Allow quilt off core's dial runs past 1, up to one printed line short of the quilt)
+        let most = LatticeDensityDial.coreDial(percent: 100, cellMM: s.cellMaxMM, topology: s.topology, lineWidthMM: s.beadMM,
+                                               minStrutLines: s.minStrutLines, allowQuilt: false)
+        print("DIAL notes29b: Grade to \(s.dialLight), Grade from \(s.dialHeavy), the quilt-off limit \(most), Allow quilt \(s.allowQuilt)")
+        XCTAssertTrue((0.01...most).contains(s.dialLight) && (0.01...most).contains(s.dialHeavy),
+                      "★ on core's dial: \(s.dialLight) and \(s.dialHeavy) within 0.01 ... \(most) (Allow quilt \(s.allowQuilt))")
         XCTAssertEqual(s.response, 0.5, "★ his exponent")
         XCTAssertEqual(s.strutWidthMM, 0, "★ no typed Thickness under By stress")
         XCTAssertFalse(s.perRegion, "★ no row dials under By stress")

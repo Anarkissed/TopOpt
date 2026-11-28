@@ -1,0 +1,135 @@
+[places] tunnel: 1 place(s); a fresh lay 99.0 ms, its places 104.2 ms
+[places]   faces 3 6 8 10, 1160.00 mm2 at (30.10, 16.72, 5.00) normal (0.00, 0.00, 1.00), now lattice
+C24 1 none is today's: 0 failed
+C24 hot spot, Default Grade: largest step 4.03 without the limit (50 cells), 2.07 with 2 (64 cells)
+C24 2 Default Grade, stress: 0 failed
+C24 band, Default Grade: largest step 4.03 without the limit (922 cells), 2.07 with 2 (936 cells)
+C24 3 Default Grade, band: 0 failed
+C24 Stepped: points in a larger cell with a limit than without: 0
+C24 hot spot, Stepped: largest step 6.16 free (127 cells), 2.07 with 2 (341), 3.16 with 3 (204); points in a larger cell with 3 than with 2: 20921 (in a smaller: 84)
+C24 4 Stepped: 0 failed
+C24 5 held at 2: 0 failed
+C24 pocket part: largest step 4.03 without the limit, 2.07 with 2
+C24 pocket part, Default Grade: 18370 points held without the limit; with 2, 60 of them in no cell (0 a millimetre or more inside); cells 850 -> 932, solid 0 -> 0
+C24 pocket part: largest step 6.16 without the limit, 2.07 with 2
+C24 pocket part, Stepped: 18445 points held without the limit; with 2, 0 of them in no cell (0 a millimetre or more inside); cells 2554 -> 2882, solid 0 -> 0
+C24 6 nothing solid: 0 failed
+C24 one grid, Default Grade: 1143 cells without the limit, 1199 with 2
+C24 one grid, Stepped: 1347 cells without the limit, 2464 with 2
+C24 7 Let walls cut cells: 0 failed
+C24 8 a region's own: 0 failed
+C24 speed: no limit 124.09 ms (2832 cells, largest step 4); max_step 2 156.17 ms (2979 cells, 1.26x)
+C24 9 threads and speed: 0 failed
+face pieces, on the cut x = 20 (left not strict, right strict): 0 points to the left piece, 27 to the right
+face pieces, on the cut x = 20 (left strict, right not strict): 0 points to the left piece, 27 to the right
+face pieces, cut skin: 0 points past the cut taken by the skin, 0 on the kept side missed, 0 region answers wrong
+area own: a layout stated at part level 15.32 ms, every region stating everything 15.46 ms (best of 9)
+area finish: skin bars 104 in A, 40 in B, 16 A to B (48 of A's longer than B's reach)
+lay_bars as before: 5403, 2367, 1328 bars; 3b61a1c514810738 36346af0f7436e68 17631120b9e61b43
+weave cells: 98 cells (the slab alone 98), 0 solid cubes; 5580 points of the weave region: held by a cell 0, solid 0
+weave bars: 87 from 13 strands (0 stubs); ends: 17 surface (1 on the pocket's wall, 10 on the block's ends, 6 on its top), 1 solid, 8 loose, 0 wrong
+weave crossings: 38 joints, 87 bars -> 145; 274 pairs within their half widths, 72 not sharing an end
+weave crossings (rule S): 4 four-way points, 36 other; contacts 20, strand pairs 20, kept 20; links 18 (4.753 mm, longest 0.264); off the line 0 (largest 8.88e-16 mm), backwards 0
+weave, R1 (a loose tail, through a line, into solid): 3 bars after the cut, 2 after loose bars go; 93 of 145 bars kept in all
+weave joining: 4 ends joined; 2 loose ends had a bar within one spacing ahead, 2 of them landed in it; 1 pieces, 0 adrift
+weave crossing at a vertex: 2 joint(s), line A in 4 bars, 1 piece(s); 2 bars end at A's vertex (0 of ring B)
+weave crossing at a vertex (rule S): links 1 (0.264 mm), off the line 0
+weave session: 98 cells, 2494 bars (102 of the weave, 2392 of the slab), 2 pieces, 0 adrift; without strands 2392 bars
+weave repeats by hand: 2 merged, 5 bars left; kept width 1.20, ends 0 4 (into 3); bar 4 into 0
+weave repeats in the session: once 102 weave bars, ring twice 102 (merged 17, 11 at 1.1 mm), repeats left 0
+C22 ramp, Default Grade: 792 cells (96 sibling groups, none mergeable)
+C22 ramp, Stepped: 2343 cells
+C22 1-2 ramp: 0 failed
+C22 3 off: 0 failed
+C22 pocket part, Default Grade: 18445 points held with it off; with it on 135 of them in no cell (0 a millimetre or more inside); Grade to shape (band 8) leaves 75; cells 288 -> 452, solid 0 -> 0
+C22 pocket part, Stepped: 18445 points held with it off; with it on 0 of them in no cell (0 a millimetre or more inside); Grade to shape (band 8) leaves 0; cells 288 -> 484, solid 0 -> 0
+C22 4 nothing solid: 0 failed
+C22 5 with Grade to shape: 0 failed
+C22 6 one hot voxel: 0 failed
+C22 response 1: 792 cells, response 2: 666 (Default Grade)
+C22 response 1: 2343 cells, response 2: 1944 (Stepped)
+C22 7 response: 0 failed
+C22 8 threads: 0 failed
+C22 9 session: 0 failed
+C22 one grid, Default Grade: 1136 cells cold, 1864 with the ramp
+C22 one grid, Stepped: 1308 cells cold, 4958 with the ramp
+C22 12 Let walls cut cells: 0 failed
+C22 nearest, two sizes, Default Grade: t 0.25 36 cells, t 0.75 288, ramp 162 (15 cells wholly under x 40, all 8; 120 wholly over x 56, all 4)
+C22 nearest, two sizes, Stepped: t 0.25 36 cells, t 0.75 288, ramp 162 (15 cells wholly under x 40, all 8; 120 wholly over x 56, all 4)
+C22 nearest, base 12 (12, 8, 6, 4): S* 10 -> 16 cells, largest 12.00; 9.6 -> 6.00..6.00; 7 -> 6.00..6.00; 6.4 -> 6.00..6.00; 4.8 -> 4.00
+C22 13 nearest size: 0 failed
+C22 stress_reference on a 64^3 field: 6.72 ms (75.000 MPa)
+C22 speed: off 99.09 ms (2048 cells); on, a cold 64^3 field 111.54 ms (2048 cells, 1.13x); on, a slope over the last 28 mm 1019.41 ms (8320 cells)
+C22 11 speed: 0 failed
+by stress: set_struts on 2,000 cells with a 64^3 field: 0.659 ms (best of 5)
+P8 (f) a: 144 cells, 100 cut 0.4 mm thick made solid (52 in the row under the top); stubs 1176 -> 0
+P8 (f) f: 52 made solid, 1752 of their points held before, 888 in a cube of the other region, 0 opened again
+no main size: a 6 mm plate with a boss is 1584 cells (halves and Stepped); a slotted block keeps 48 cells of 8 mm and 128 smaller; half the columns whole: 913 cells
+only the smallest cut: a slotted block is 242 cells (halves) and 662 (Stepped); one size: 16 cut 12 mm cells
+solid why, wall narrow (algorithm 0): have 2.000, need 9.000
+solid why, wall narrow (algorithm 1): have 2.000, need 4.500
+solid why, wall narrow (algorithm 2): have 2.000, need 3.000
+solid why, too few across: have 6.000, need 8.000
+solid why, region shallow (algorithm 0): have 1.500, need 2.371
+solid why, region shallow (algorithm 1): have 1.500, need 2.371
+solid why, region shallow (algorithm 2): have 1.500, need 2.371
+solid why: 8 fixes tried, each lays cells where the reason was
+one grid: a 12 | 6 mm wall is 61 cells, 12 mm where whole (wall by wall: 65 cells of 12 and 6); a 2 mm wall holds 254 strut pieces (0 stubs left out); with a band 1580 cells; a 2 mm plate, all lattice, 25 cut cells
+[K3] quilt off: regions laid with the quilt 1 (first 1); thin region 49 cells (49 under the open look), thick region 16 cells (0 under it)
+[K3] the thin region alone: Auto cell 49 cells (quilted 1), typed 6 mm cell 0 cells (quilted 0)
+[K2] slope, Stepped, rim off, quilt off: 63 cells, 0 solid; along the slope 0 of 8835 places asked for are held by no cell
+[K2] slope, Stepped, rim off, quilt on: 63 cells, 0 solid; along the slope 0 of 8835 places asked for are held by no cell
+[K2] slope, Default Grade, rim off, quilt off: 63 cells, 0 solid; along the slope 0 of 8835 places asked for are held by no cell
+[K2] slope, Default Grade, rim off, quilt on: 63 cells, 0 solid; along the slope 0 of 8835 places asked for are held by no cell
+[K2] slope, Stepped, rim on, quilt off: 63 cells, 0 solid; along the slope 0 of 8835 places asked for are held by no cell
+[K2] slope, Stepped, rim on, quilt on: 63 cells, 0 solid; along the slope 0 of 8835 places asked for are held by no cell
+[K2] slope, Default Grade, rim on, quilt off: 63 cells, 0 solid; along the slope 0 of 8835 places asked for are held by no cell
+[K2] slope, Default Grade, rim on, quilt on: 63 cells, 0 solid; along the slope 0 of 8835 places asked for are held by no cell
+[K6] 13.0 mm block: the lowest node at z 0.50 (the row under it cut by the bed); 76 struts cut at the bed (76 shorter than wide), 0 unmarked; after the drop 76 ends on the bed, lowest strut z -0.000, 0 Surface ends off the bed, 0 cut ends 'in the air' at the bed; without the mark: 0 on the bed, lowest z 0.500
+[K6] 14.6 mm block: the lowest node at z 1.30 (the row under it cut by the bed); 76 struts cut at the bed (0 shorter than wide), 0 unmarked; after the drop 76 ends on the bed, lowest strut z -0.000, 0 Surface ends off the bed, 0 cut ends 'in the air' at the bed; without the mark: 0 on the bed, lowest z 1.300
+[K6] 16.0 mm block: the lowest node at z 2.00 (the row under it cut by the bed); 76 struts cut at the bed (0 shorter than wide), 0 unmarked; after the drop 76 ends on the bed, lowest strut z -0.000, 0 Surface ends off the bed, 0 cut ends 'in the air' at the bed; without the mark: 0 on the bed, lowest z 2.000
+[K7] 42 x 41 block: chose 9 mm (no sliver at a square face (the size Auto lays, 12 mm, leaves 5976)), 9420 mm^2 of square face read in 40.4 ms
+[K7]   tried 12 mm (finest 4, grades): 5976 slivers, 5976 mm^2, thinnest 0.125 of its cell
+[K7]   tried 9 mm (finest 4.5, grades): 0 slivers, 0 mm^2, thinnest 1 of its cell
+[K7]   tried 7.2 mm (finest 7.2, one size): 0 slivers, 0 mm^2, thinnest 1 of its cell
+[K7]   tried 6 mm (finest 6, one size): 0 slivers, 0 mm^2, thinnest 1 of its cell
+[K7]   tried 5.143 mm (finest 5.143, one size): 0 slivers, 0 mm^2, thinnest 1 of its cell
+[K7]   tried 4.5 mm (finest 4.5, one size): 0 slivers, 0 mm^2, thinnest 1 of its cell
+[K7]   tried 4 mm (finest 4, one size): 0 slivers, 0 mm^2, thinnest 1 of its cell
+[K7] 36 x 34 block: chose 12 mm (no sliver at a square face at the size Auto lays), 7488 mm^2 of square face read in 42.5 ms
+[K7]   tried 12 mm (finest 4, grades): 0 slivers, 0 mm^2, thinnest 1 of its cell
+[K7]   tried 9 mm (finest 4.5, grades): 0 slivers, 0 mm^2, thinnest 1 of its cell
+[K7]   tried 7.2 mm (finest 7.2, one size): 0 slivers, 0 mm^2, thinnest 1 of its cell
+[K7]   tried 6 mm (finest 6, one size): 0 slivers, 0 mm^2, thinnest 1 of its cell
+[K7]   tried 5.143 mm (finest 5.143, one size): 0 slivers, 0 mm^2, thinnest 1 of its cell
+[K7]   tried 4.5 mm (finest 4.5, one size): 0 slivers, 0 mm^2, thinnest 1 of its cell
+[K7]   tried 4 mm (finest 4, one size): 0 slivers, 0 mm^2, thinnest 1 of its cell
+[K8] 16 cells reach on to a square face (tallest 5.479999 mm), 16 slivers taken in, 4 left; report: 16 stretched, 16 taken in, 4 left (not searched (the stretch only))
+[K8] bar ends on the bed: as laid 154 cut, 0 nodes; stretched 14 cut, 276 nodes (lowest 0.02)
+[K5] Structural strip: 0 cells in the strip (largest 0.000 mm), 320 solid as thin, 0 cells in all
+[K5] Structural strip, whole part: 0 cells in the strip, 300 cells made solid by the minimum patch
+[K5] Structural wide wall (face): 600 cells, 40 of them at x 0..4 (largest 4.000 mm), 0 solid, 0 by the minimum patch
+[K5] Structural wide wall (whole part): 4350 cells, 450 of them at x 0..4 (largest 2.107 mm), 0 solid, 0 by the minimum patch
+[K5] Aesthetic (1 across) strip: 40 cells in the strip, 0 by the minimum patch
+[K5] Aesthetic (2 across) strip: 40 cells in the strip, 0 by the minimum patch
+slivers, pocket at x 20.0, slab 3.8: of 7752 lattice points, held by no cell: 6 without the rule, 6 with it (0 taken in from the other region); held twice: 0, 0; cells 192 -> 192
+slivers, pocket at x 20.0: round its wall, 940 lattice points: in a cell 900 without the rule, 900 with it
+slivers, pocket at x 20.7, slab 3.8: of 7749 lattice points, held by no cell: 30 without the rule, 0 with it (0 taken in from the other region); held twice: 0, 0; cells 144 -> 150
+slivers, pocket at x 20.7: round its wall, 940 lattice points: in a cell 870 without the rule, 940 with it
+slivers, pocket at x 21.4, slab 3.8: of 7752 lattice points, held by no cell: 84 without the rule, 0 with it (0 taken in from the other region); held twice: 0, 0; cells 144 -> 150
+slivers, pocket at x 21.4: round its wall, 940 lattice points: in a cell 805 without the rule, 940 with it
+slivers, pocket at x 22.1, slab 3.8: of 7752 lattice points, held by no cell: 354 without the rule, 138 with it (24 taken in from the other region); held twice: 0, 0; cells 153 -> 159
+slivers, pocket at x 22.1: round its wall, 940 lattice points: in a cell 680 without the rule, 915 with it
+slivers, pocket at x 22.8, slab 3.8: of 7749 lattice points, held by no cell: 198 without the rule, 192 with it (6 taken in from the other region); held twice: 0, 0; cells 132 -> 132
+slivers, pocket at x 22.8: round its wall, 940 lattice points: in a cell 940 without the rule, 940 with it
+slivers, pocket at x 21.4, slab 5.0: of 8427 lattice points, held by no cell: 1095 without the rule, 456 with it (555 taken in from the other region); held twice: 0, 0; cells 106 -> 112
+slivers, pocket at x 21.4: round its wall, 940 lattice points: in a cell 805 without the rule, 940 with it
+slivers, pocket at x 21.4, slab 6.0: of 8907 lattice points, held by no cell: 114 without the rule, 12 with it (18 taken in from the other region); held twice: 0, 0; cells 126 -> 132
+slivers, pocket at x 21.4: round its wall, 940 lattice points: in a cell 805 without the rule, 940 with it
+slivers, pocket at x 21.4, slab 7.0: of 9345 lattice points, held by no cell: 84 without the rule, 0 with it (0 taken in from the other region); held twice: 0, 0; cells 117 -> 123
+slivers, pocket at x 21.4: round its wall, 940 lattice points: in a cell 805 without the rule, 940 with it
+slivers, all eight: held by no cell 1965 -> 804; round the wall, of 7520: 6610 -> 7455 in a cell; cubes laid by the rule 36; strut length 39380 -> 39688 mm
+skin on the pocket's wall, five pockets: 409 bars along it and 189 round it (with no bow allowed: 394 along, 22 round)
+session one grid: off 0 cells, 5780 solid; on 49 cells, 0 solid
+cancel: 177 layouts given up part way, 63 finished first, of 240 (one whole layout 180.6 ms)
+116944 checks, 0 failed

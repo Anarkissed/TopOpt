@@ -72,6 +72,16 @@ public final class FlexibleSquishSolver {
     var onRefineProgress: (Int, Int, String, Int, Int) -> Void = { _, _, _, _, _ in }
     /// One per ended refine, on the main actor: (generation, hold epoch, sim id, outcome).
     var onRefine: (Int, Int, String, FlexibleFERefine.Outcome) -> Void = { _, _, _, _ in }
+    /// ★ notes29: on the main actor, when it changes — a sim (or a refine, yielded) waits for a LOCAL topology run on this
+    /// device (one in-process solve at a time): the page says "Waiting for the run…" in place of "Simulating the squish…".
+    var onHeld: (Bool) -> Void = { _ in }
+    /// ★ notes29: the last `onHeld` said.
+    private(set) var heldByRun = false
+    private func noteHeld(_ h: Bool) {
+        guard heldByRun != h else { return }
+        heldByRun = h
+        onHeld(h)
+    }
 
     private let queue = DispatchQueue(label: "app.topopt.flexible.fe", qos: .utility)
     private var request: FlexibleFERequest?
@@ -225,6 +235,7 @@ public final class FlexibleSquishSolver {
             // ★ the claim is taken HERE, on the main actor, in the step that commits the sim
             let late = controlLateClaim
             if busy() || !(late || Self.inFlight.tryEnterSim()) {
+                noteHeld(Self.inFlight.runHoldsCore)   // ★ notes29: a local run holds core — said
                 guard !retrying else { return }
                 retrying = true
                 Task { @MainActor [weak self] in
@@ -234,6 +245,7 @@ public final class FlexibleSquishSolver {
                 }
                 return
             }
+            noteHeld(false)
             order.removeFirst()
             guard let sim = r.sims.first(where: { $0.id == id }) else {
                 if !late, Self.inFlight.leaveSim() { Self.postIdle() }
@@ -274,6 +286,7 @@ public final class FlexibleSquishSolver {
             }
             let late = controlLateClaim
             if busy() || !(late || Self.inFlight.tryEnterSim(yieldable: true)) {
+                noteHeld(Self.inFlight.runHoldsCore)   // ★ notes29
                 guard !retrying else { return }
                 retrying = true
                 Task { @MainActor [weak self] in
@@ -283,6 +296,7 @@ public final class FlexibleSquishSolver {
                 }
                 return
             }
+            noteHeld(false)
             refineOrder.removeFirst()
             refining = id
             refiningGeneration = r.generation
@@ -309,7 +323,14 @@ public final class FlexibleSquishSolver {
                             cancelled: { !ignore && token.isCancelled },
                             between: {
                                 if delay > 0 { usleep(useconds_t(delay * 1e6)) }
-                                if !noYield { Self.inFlight.yieldSim() }
+                                guard !noYield else { return }
+                                // ★ notes29: yielded to a local run — the page says it waits, until the refine has core again
+                                var toRun = false
+                                Self.inFlight.yieldSim(held: { r in
+                                    toRun = r
+                                    if r { Task { @MainActor [weak self] in self?.noteHeld(true) } }
+                                })
+                                if toRun { Task { @MainActor [weak self] in self?.noteHeld(false) } }
                             },
                             progress: { step, total in
                                 Task { @MainActor [weak self] in self?.onRefineProgress(gen, epoch, id, step, total) }
@@ -359,6 +380,7 @@ public final class FlexibleSquishSolver {
     private func finishIfIdle() {
         guard isIdle else { return }
         if request != nil, order.isEmpty, failedIDs.isEmpty, refineOrder.isEmpty { request = nil; scene = nil }
+        noteHeld(false)   // ★ notes29: nothing waits
         onIdle()
     }
 }
@@ -375,12 +397,20 @@ public final class FlexibleSquishSolver {
 ///     its bridge call really ends). Remote runs never touch the local pool and never claim.
 /// Other solves do not exclude each other here (their own rules stand); core brief #18: a
 /// thread-safe pool.
+/// ★ notes29 (TOReview 11-25: the solver's switches are process-wide — GenEO's state a plain global, recycling and the thread
+/// count atomics — and the squish sim's posture turns them off around its solves while a topology run arms them): ONE
+/// in-process solve at a time between the Flexible side and an on-device topology run. Core's Flexible runner
+/// (`FlexibleCoreRun`) is on the Flexible side too (`flexibleRunClaim`): it waits while a local run holds core or waits for it,
+/// and a local run waits while it runs. Each waiting side says so in plain words (the run's card, the Flexible step).
 public final class FlexibleCoreGate: @unchecked Sendable {
     static let shared = FlexibleCoreGate()
     private let cond = NSCondition()
     private var sims = 0, peak = 0, others = 0, othersWaiting = 0
     /// ★ BATCH N: of `sims`, the refines (they yield between increments).
     private var yieldable = 0
+    /// ★ notes29: of `others` / `othersWaiting`, the LOCAL topology runs (RunModel's claim); and core's Flexible runner's
+    /// calls holding core (FlexibleCoreRun).
+    private var runs = 0, runsWaiting = 0, flexRuns = 0
 
     /// Sims holding core now.
     var value: Int { cond.lock(); defer { cond.unlock() }; return sims }
@@ -390,6 +420,14 @@ public final class FlexibleCoreGate: @unchecked Sendable {
     var othersInCore: Int { cond.lock(); defer { cond.unlock() }; return others }
     /// Other solves waiting for the sims to leave (they go before the next queued sim).
     var othersWaitingCount: Int { cond.lock(); defer { cond.unlock() }; return othersWaiting }
+    /// ★ notes29: a local topology run holds core or waits for it (what a Flexible solve then waits for: its words).
+    var runHoldsCore: Bool { cond.lock(); defer { cond.unlock() }; return runs > 0 || runsWaiting > 0 }
+    /// ★ notes29: local topology runs holding core now.
+    var runsInCore: Int { cond.lock(); defer { cond.unlock() }; return runs }
+    /// ★ notes29: core's Flexible runner holding core now.
+    var flexibleRunsInCore: Int { cond.lock(); defer { cond.unlock() }; return flexRuns }
+    /// ★ notes29: any Flexible solve (a squish sim or core's Flexible runner) holds core now.
+    var flexibleInCore: Bool { cond.lock(); defer { cond.unlock() }; return sims > 0 || flexRuns > 0 }
     /// The most sims ever in core at once.
     var maximum: Int { cond.lock(); defer { cond.unlock() }; return peak }
     func resetPeak() { cond.lock(); peak = sims; cond.unlock() }
@@ -407,14 +445,16 @@ public final class FlexibleCoreGate: @unchecked Sendable {
     /// ★ BATCH N: a refine between solves (★ verification: it was between increments), on its queue — when another solve WAITS for core it goes
     /// first: the sim leaves, waits until no other solve holds or waits for core and no sim is in it
     /// (never two in core), then claims it again. Returns the seconds it yielded (0: nobody waited).
+    /// ★ notes29: `held` — called (once, before it waits) with whether a local topology run is what it yields to (its words).
     @discardableResult
-    func yieldSim() -> Double {
+    func yieldSim(held: ((Bool) -> Void)? = nil) -> Double {
         cond.lock(); defer { cond.unlock() }
         guard othersWaiting > 0 else { return 0 }
         let t0 = Date()
         sims = max(0, sims - 1)
         yieldable = max(0, yieldable - 1)
         yields += 1
+        held?(runs > 0 || runsWaiting > 0)
         cond.broadcast()
         while others > 0 || othersWaiting > 0 || sims > 0 { cond.wait() }
         sims += 1
@@ -437,19 +477,40 @@ public final class FlexibleCoreGate: @unchecked Sendable {
     }
     /// Another solve claims core: waits while a sim holds it (a sim is bounded by its deadline and
     /// its work budget). Returns the seconds it waited.
+    /// ★ notes29: `run` — a LOCAL topology run's claim: it also waits while core's Flexible runner holds core (one in-process
+    /// solve at a time); `waiting` is called once, before it waits, when it must (the run's card says so).
     @discardableResult
-    func enterOther() -> Double {
+    func enterOther(run: Bool = false, waiting: (() -> Void)? = nil) -> Double {
         let t0 = Date()
         cond.lock(); defer { cond.unlock() }
         othersWaiting += 1
-        while sims > 0 { cond.wait() }
+        if run { runsWaiting += 1 }
+        let held = { self.sims > 0 || (run && self.flexRuns > 0) }
+        if held() { waiting?() }
+        while held() { cond.wait() }
         othersWaiting -= 1
         others += 1
+        if run { runsWaiting -= 1; runs += 1 }
         return Date().timeIntervalSince(t0)
     }
-    func leaveOther() {
+    func leaveOther(run: Bool = false) {
         cond.lock(); defer { cond.unlock() }
         others = max(0, others - 1)
+        if run { runs = max(0, runs - 1) }
+        cond.broadcast()
+    }
+
+    /// ★ notes29: core's Flexible runner claims core — only when no LOCAL topology run holds it or waits for it (the run goes
+    /// first, as it does before a queued sim). Never blocks.
+    func tryEnterFlexibleRun() -> Bool {
+        cond.lock(); defer { cond.unlock() }
+        guard runs == 0, runsWaiting == 0 else { return false }
+        flexRuns += 1
+        return true
+    }
+    func leaveFlexibleRun() {
+        cond.lock(); defer { cond.unlock() }
+        flexRuns = max(0, flexRuns - 1)
         cond.broadcast()
     }
     // tests: count a sim in core without the gate (a sim of another model, the red controls)
@@ -469,20 +530,60 @@ public final class FlexibleCoreGate: @unchecked Sendable {
     /// run's stall watchdog is re-armed after a wait, so the wait never eats its grace).
     public final class RunClaim: @unchecked Sendable {
         public let waitedS: Double
+        /// ★ notes29: it had to wait for a Flexible solve (its card said so).
+        public let waited: Bool
         private var held: Bool
         private let lock = NSLock()
-        init(waitedS: Double, held: Bool = true) { self.waitedS = waitedS; self.held = held }
+        init(waitedS: Double, held: Bool = true, waited: Bool = false) {
+            self.waitedS = waitedS; self.held = held; self.waited = waited
+        }
         public func leave() {
             lock.lock(); defer { lock.unlock() }
             guard held else { return }
             held = false
-            FlexibleCoreGate.shared.leaveOther()
+            FlexibleCoreGate.shared.leaveOther(run: true)
         }
     }
-    public static func claimForRun() -> RunClaim {
+    /// ★ notes29: `waiting` — called once, before the run waits, when a Flexible solve holds core (a squish sim or core's
+    /// Flexible runner): the run's card says it waits.
+    public static func claimForRun(waiting: (() -> Void)? = nil) -> RunClaim {
         if shared.controlOthersDoNotClaim { return RunClaim(waitedS: 0, held: false) }
-        return RunClaim(waitedS: shared.enterOther())
+        var waited = false
+        let s = shared.enterOther(run: true, waiting: { waited = true; waiting?() })
+        return RunClaim(waitedS: s, waited: waited)
     }
+
+    /// ★ notes29: core's Flexible runner's claim (FlexibleCoreRun), taken off the main thread before it calls core and released
+    /// when that call returns. While a LOCAL topology run holds core or waits for it, it polls (never blocking a thread) and
+    /// `waiting(true)` is said first, `waiting(false)` once it holds core.
+    public final class FlexibleRunClaim: @unchecked Sendable {
+        private var held: Bool
+        private let lock = NSLock()
+        init(held: Bool) { self.held = held }
+        public func leave() {
+            lock.lock(); defer { lock.unlock() }
+            guard held else { return }
+            held = false
+            FlexibleCoreGate.shared.leaveFlexibleRun()
+        }
+    }
+    static let flexibleRunPollS = 0.1
+    public static func flexibleRunClaim(waiting: @escaping @Sendable (Bool) async -> Void) async -> FlexibleRunClaim {
+        if shared.controlFlexibleRunDoesNotClaim { return FlexibleRunClaim(held: false) }
+        if shared.tryEnterFlexibleRun() { return FlexibleRunClaim(held: true) }
+        await waiting(true)
+        while !shared.tryEnterFlexibleRun() {
+            try? await Task.sleep(nanoseconds: UInt64(flexibleRunPollS * 1e9))
+        }
+        await waiting(false)
+        return FlexibleRunClaim(held: true)
+    }
+    /// RED CONTROL (tests only): core's Flexible runner takes no claim — release 20, where it ran beside a local run.
+    var controlFlexibleRunDoesNotClaim: Bool {
+        get { cond.lock(); defer { cond.unlock() }; return flexibleRunDoesNotClaim }
+        set { cond.lock(); flexibleRunDoesNotClaim = newValue; cond.unlock() }
+    }
+    private var flexibleRunDoesNotClaim = false
     /// RED CONTROL (tests only): the other solves take no claim — batch G, where only the PHASE /
     /// runningIDs gated the sims and a run waited at most 60 s.
     var controlOthersDoNotClaim: Bool {

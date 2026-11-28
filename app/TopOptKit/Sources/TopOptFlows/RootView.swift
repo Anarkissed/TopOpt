@@ -107,6 +107,7 @@ public struct RootView: View {
         // stays light and `Material` backings render dark, regardless of the device's
         // light/dark setting (otherwise labels + glass go unreadable in light mode).
         .preferredColorScheme(.dark)
+        .skipsAllAnimations()   // ★ notes29: Settings › Skip all animations, on the whole app
     }
 
     /// The cold-launch re-attach banner (handoff 119). Non-blocking, top-anchored,

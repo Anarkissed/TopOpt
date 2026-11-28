@@ -334,7 +334,7 @@ struct FlexiblePrintPlanPanel: View {
                     HStack(spacing: DS.Space.s) {
                         Text(FlexiblePrintPlanCopy.plate).dsStyle(DS.TypeScale.caption).fontWeight(.bold)
                             .foregroundStyle(DS.Color.textPrimary.color)
-                        InfoTip(key: "planPlate-\(s.key)", text: FlexiblePrintPlanCopy.plateInfo)
+                        InfoTip(key: "planPlate-\(s.key)", text: FlexiblePrintPlanCopy.plateInfo, title: "The plate")
                         Spacer(minLength: 0)
                         NumberField(key: "planPlate-\(s.key)", title: FlexiblePrintPlanCopy.plate,
                                     spec: FlexNumberSpec(value: plans.plan.plateMM[s.key] ?? FlexiblePrintPlanRules.defaultPlateMM, unit: "mm",
@@ -372,7 +372,7 @@ struct FlexiblePrintPlanPanel: View {
         if !adds.isEmpty {
             DSPanelSection(FlexiblePrintPlanCopy.addOns, count: adds.count, key: "plan-addons")
                 .overlay(alignment: .leading) {
-                    InfoTip(key: "planAddOns", text: FlexiblePrintPlanCopy.addOnsInfo).padding(.leading, 112).padding(.top, 8)
+                    InfoTip(key: "planAddOns", text: FlexiblePrintPlanCopy.addOnsInfo, title: "Add-ons").padding(.leading, 112).padding(.top, 8)
                 }
             ForEach(adds, id: \.key) { a in
                 let on = !plans.plan.addOnsOff.contains(a.key)
@@ -396,7 +396,7 @@ struct FlexiblePrintPlanPanel: View {
     private var skinRow: some View {
         HStack(spacing: DS.Space.s) {
             Text(FlexiblePrintPlanCopy.skin).dsStyle(DS.TypeScale.caption).fontWeight(.bold).foregroundStyle(DS.Color.textPrimary.color)
-            InfoTip(key: "planSkin", text: FlexiblePrintPlanCopy.skinInfo)
+            InfoTip(key: "planSkin", text: FlexiblePrintPlanCopy.skinInfo, title: "Skin")
             Spacer(minLength: 0)
             FlexChips(options: [("tpu", "TPU"), ("rigid", "Rigid")], selection: plans.skinRigid ? "rigid" : "tpu",
                       id: "flexible-plan-skin", equalWidths: false) { v in main.editPlans { $0.skinRigid = v == "rigid" } }

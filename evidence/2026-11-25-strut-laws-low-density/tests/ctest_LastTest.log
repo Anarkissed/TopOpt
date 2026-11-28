@@ -1,0 +1,2005 @@
+Start testing: Nov 25 02:44 EST
+----------------------------------------------------------
+5/210 Testing: stepped_plan
+5/210 Test: stepped_plan
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build/test_stepped_plan"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build
+"stepped_plan" start time: Nov 25 02:44 EST
+Output:
+----------------------------------------------------------
+  menu 12 mm base             base 12 bead 0.45 -> [12 9.6 9 8 7.2 6 4.8 4 3 2.4]
+  menu 10.31 mm base          base 10.31 bead 0.45 -> [10.31 7.732 6.873 5.155 3.437 2.578]
+  DIAG cross-check: core offers 16 size(s), the preview kept 16
+  menu aesthetic  [12 9.6 9 8 7.2 6 4.8 4 3 2.4]
+  menu structural [12 10 9.6 9 8 7.2 6 4.8 4 3 2.4 2]  (floor 1.80 mm)
+  plan: ok  hist [9.00=1 3.00=3]
+  refusal: stepped cell 0 in region 1 is 10 mm, which is not on that region's menu (base 12 mm at a 0.45 mm bead admits 10 size(s), largest 12, finest 2.4)
+  refusal: stepped cell 1 in region 1 (3 mm at 106, -5, 0) OVERLAPS cell 0 in region 1 (9 mm at 100, -5, 0) by 3 x 3 x 3 mm
+  doubled menu: 12 6 3  (any-step has 10 sizes)
+  doubled plan: ok
+  rho: 8 cell(s), 0 mispaired after the sort
+  beam: bead 0.45, voxel 1.72 -> 1.2100 mm (brief says 1.21)
+  ceiling: diameter preimage 0.378846 | forward law 0.378846 | that forward value builds strut/cell 0.200000
+  parity: 4 cell(s) checked, worst rho drift 0.000e+00 (bead 0.450)
+  parity control: right 0.2879 vs wrong-table 0.2825 mm (delta 0.0054)
+  groups: 12.00 x1 9.00 x1 3.00 x4
+  packed slot: 38 cells -> valid [9.00=1 3.00=37]
+  packed slot coverage: 13824 once, 0 uncovered, 0 doubled
+  seam UN-subdivided: 4 nodes, 4 floating end(s), 0 welded
+  seam subdivided:    22 nodes, 3 floating end(s), 1 welded, 1 T-junction end(s)
+PASS: 391 checks, 0 failures
+<end of output>
+Test time =   0.19 sec
+----------------------------------------------------------
+Test Passed.
+"stepped_plan" end time: Nov 25 02:44 EST
+"stepped_plan" time elapsed: 00:00:00
+----------------------------------------------------------
+
+15/210 Testing: grading
+15/210 Test: grading
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build/test_grading"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build
+"grading" start time: Nov 25 02:44 EST
+Output:
+----------------------------------------------------------
+grading: 56646 checks, 0 failures
+  cap: structural intent, cap 0.378846 -> highest emitted rho 0.378846 over 64000 latticed voxel(s); uncapped reaches 0.900270
+[grading] §13 fixture: wall 9600 voxels, 5018 below the floor, 73600 printed (6.82 % of the part)
+<end of output>
+Test time = 213.96 sec
+----------------------------------------------------------
+Test Passed.
+"grading" end time: Nov 25 02:48 EST
+"grading" time elapsed: 00:03:33
+----------------------------------------------------------
+
+17/210 Testing: strut_diameter_per_type
+17/210 Test: strut_diameter_per_type
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build/test_strut_diameter_per_type"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build
+"strut_diameter_per_type" start time: Nov 25 02:48 EST
+Output:
+----------------------------------------------------------
+  octet parity: 180 pairs, bit-identical
+  octet density parity: 42 pairs, bit-identical
+[rounding] the bare quotient built a strut under the bead in 162 cases
+strut diameter per type: all 192 checks passed
+<end of output>
+Test time =  14.74 sec
+----------------------------------------------------------
+Test Passed.
+"strut_diameter_per_type" end time: Nov 25 02:48 EST
+"strut_diameter_per_type" time elapsed: 00:00:14
+----------------------------------------------------------
+
+18/210 Testing: lattice_types
+18/210 Test: lattice_types
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build/test_lattice_types"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build
+"lattice_types" start time: Nov 25 02:48 EST
+Output:
+----------------------------------------------------------
+[F6] 
+
+PASS: 257 checks, 0 failures
+<end of output>
+Test time =   2.51 sec
+----------------------------------------------------------
+Test Passed.
+"lattice_types" end time: Nov 25 02:48 EST
+"lattice_types" time elapsed: 00:00:02
+----------------------------------------------------------
+
+21/210 Testing: lattice_width_bounds
+21/210 Test: lattice_width_bounds
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build/test_lattice_width_bounds"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build
+"lattice_width_bounds" start time: Nov 25 02:48 EST
+Output:
+----------------------------------------------------------
+octet    face view 0.353553  3D 0.500000  touch 0.353553  open look 0.189800
+sc       face view 1.000000  3D 1.000000  touch 1.000000  open look 0.189800
+bcc      face view 0.707107  3D 0.707107  touch 0.707107  open look 0.189800
+fcc      face view 0.707107  3D 0.577350  touch 0.577350  open look 0.189800
+diamond  face view 0.353553  3D 0.433013  touch 0.353553  open look 0.189800
+kelvin   face view 0.353553  3D 0.353553  touch 0.353553  open look 0.189800
+rhombic  face view 0.353553  3D 0.408248  touch 0.353553  open look 0.189800
+bccz     face view 0.707107  3D 0.707107  touch 0.707107  open look 0.189800
+fccz     face view 0.707107  3D 0.500000  touch 0.500000  open look 0.189800
+reentrant face view 0.447214  3D 0.333333  touch 0.333333  open look 0.189800
+gyroid    open look 0.206585 (true wall at rho 0.60069)  touch 0.433013
+schwarz_d open look 0.166458 (true wall at rho 0.60012)  touch 0.350700
+gyroid: clearance 0.216527 at a channel node, 0.229659 at an edge midpoint
+schwarz_d: clearance 0.175703 at a channel edge midpoint
+PASS: 43 checks, 0 failures
+<end of output>
+Test time =   0.30 sec
+----------------------------------------------------------
+Test Passed.
+"lattice_width_bounds" end time: Nov 25 02:48 EST
+"lattice_width_bounds" time elapsed: 00:00:00
+----------------------------------------------------------
+
+109/210 Testing: lattice_certification
+109/210 Test: lattice_certification
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build/test_lattice_certification"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build
+"lattice_certification" start time: Nov 25 02:48 EST
+Output:
+----------------------------------------------------------
+== 1. cubic element / stress reduce to isotropic ==
+  [PASS] hex8_stiffness_cubic(iso tensor) == hex8_stiffness bit-for-bit
+  [PASS] hex8_stress_cubic(iso tensor) == hex8_stress bit-for-bit
+  [PASS] non-positive-definite cubic tensor is rejected
+== 2. octet lattice library ==
+  [PASS] octet C11 at rho=0.30 in measured band
+  [PASS] rho=0.30 is within the resolved range (not clamped)
+  [PASS] octet is anisotropic (Zener > 1.05 — a scalar would misrepresent)
+  [PASS] tensor scales linearly in Es
+  [PASS] C11 increases with relative density
+  [PASS] a rho below the resolved range is clamped and flagged
+  [PASS] resolved range reported
+== 2a. nine-topology tensor library (2026-07-29-tensor-library-nine) ==
+  [PASS] B2: octet anchor row is byte-identical
+  [PASS] the six new cubic topologies are certifiable
+  [PASS] the three tetragonal topologies are NOT certifiable
+  [PASS] the two sheet topologies are certifiable
+  [PASS] certifiable-names accessor lists exactly the 9 cubic topologies
+  [PASS] diamond tensor positive-definite shape
+  [PASS] diamond is anisotropic (Zener != 1)
+  [PASS] diamond C11 increases with rho
+  [FAIL] diamond band reported
+  [PASS] fcc keeps the legs-only row at its anchor
+  [PASS] and octet, the full cell, is its own tensor at that density (shear differs > 5 %)
+  [PASS] B3: tetragonal topology throws LatticeTopologyNotCertifiable
+  [PASS] B3: tetragonal topology throws LatticeTopologyNotCertifiable
+  [PASS] B3: tetragonal topology throws LatticeTopologyNotCertifiable
+== 2b. octet_relative_density: printed geometry -> library rho ==
+  [PASS] octet_relative_density(5,0.75) lands INSIDE the certifiable band
+  [PASS] octet_relative_density is cell-size invariant (depends only on r/L)
+  [PASS] octet_relative_density increases with strut radius
+  [PASS] a thin strut (r/L=0.03) maps BELOW the band (the E5 refusal case)
+  [PASS] a fat strut (r/L=0.34) maps ABOVE the band (the E5 refusal case)
+  [PASS] a non-positive strut radius is rejected
+== 2c. E5: certification REFUSES an out-of-band density ==
+  [PASS] an in-band rho (0.30) certifies without refusal
+  [PASS] a rho BELOW the band is REFUSED (LatticeDensityOutOfBand)
+  [PASS] the refusal carries the band read from core
+  [PASS] a rho ABOVE the band is REFUSED
+== 3. lattice solver reduces to graded fea_solve_cg ==
+  [PASS] fea_solve_cg_lattice(all-zero mask) == graded fea_solve_cg bit-for-bit
+  [PASS] an all-octet block is far softer than the solid block
+== 4 & 5. composite certification + gate constant ==
+  [PASS] no posture => lattice fields default (byte-identical path)
+  [PASS] posture => lattice_certified
+  [PASS] all latticed printed voxels counted
+  [PASS] relative-density range recorded
+  [PASS] strut-level strength flagged UNCERTIFIED (Phase 2 de-homogenization)
+  [PASS] effective (macro) lattice stress recorded
+  [PASS] composite mass < solid mass (lattice region weighs its relative density)
+  [PASS] composite solve differs from the solid-everywhere solve (tensor is in the solve)
+  [PASS] composite accepts at margin_stop just BELOW its worst-case margin
+  [PASS] composite REJECTS at margin_stop just ABOVE (gate unsoftened, exact)
+  [PASS] the reported margin is the same constant regardless of the gate
+FAILURES (1 failures)
+<end of output>
+Test time =   0.90 sec
+----------------------------------------------------------
+Test Failed.
+"lattice_certification" end time: Nov 25 02:48 EST
+"lattice_certification" time elapsed: 00:00:00
+----------------------------------------------------------
+
+110/210 Testing: strut_strength
+110/210 Test: strut_strength
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build/test_strut_strength"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build
+"strut_strength" start time: Nov 25 02:48 EST
+Output:
+----------------------------------------------------------
+45 checks, 0 failures
+  7c kelvin: Not certified: no solid part carries the load, so the lattice's own strength decides, and its thinnest latticed member is 0.5 cells across, below the 8 the strut-strength law is valid for.
+<end of output>
+Test time =   0.25 sec
+----------------------------------------------------------
+Test Passed.
+"strut_strength" end time: Nov 25 02:48 EST
+"strut_strength" time elapsed: 00:00:00
+----------------------------------------------------------
+
+142/210 Testing: lattice_strength
+142/210 Test: lattice_strength
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build/test_lattice_strength"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build
+"lattice_strength" start time: Nov 25 02:48 EST
+Output:
+----------------------------------------------------------
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+[mg] smoother check (S7): 3 levels, lambda_max(D^-1 A) per smoothed level: 3.150 3.229 ; omega=0.60 => safe <= 3.333 : safe
+[loadcase] load-group 0: faces=1 |F|=4e+04N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9600 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9600 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=1.07e+03N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9600 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9600 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=2e+06N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9600 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=6e+03N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=2.5e+03N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=6e+03N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+faces: top 1 bottom 0 side 5 (of 6)
+[light] ok 1 code ok why  
+[light] strength block:
+
+  "strength": {
+    "accepted": true,
+    "struts_pass": true,
+    "verdict": "pass",
+    "margin_worst_case": 148.6018154,
+    "margin_in_plane": 148.6018154,
+    "margin_interlayer": 499.8908183,
+    "safety_margin": 1.5,
+    "not_certified": false,
+    "not_certified_reason": "",
+    "mass_grams": 7.371165936,
+    "max_effective_von_mises_mpa": 0.0009306265978,
+    "max_interlayer_tension_mpa": 0.06051321387,
+    "cells_credited": 4,
+    "cells_no_credit": 12,
+    "voxel_mm": 0.75,
+    "build_direction": {"x": 0, "y": 0, "z": 1},
+    "resolve_reproduces": true, "resolve_margin_solid": 233.9986339, "resolve_margin_again": 233.9986339,
+    "strut": {"law": "the full octet's own law (legs and braces, the cell the generator lays), measured 2026-11-17 the PR 259 way: kfit *_cert envelope (bulk/free-surface/cut populations), evidence/2026-11-17-octet-full-strut-law/octet/kfit.csv; strut_vm <= Kd(rho)*vm(Sigma) + Kv(rho)*|p(Sigma)|, interlayer analogue Kild/Kilv; the 0.04959 row is bulk only (a lower bound)", "uncertified": false, "gated": false, "margin_in_plane": 1269.610575, "margin_interlayer": 1092.472081, "margin_worst_case": 1092.472081, "out_of_regime": true, "regime_note": "the thinnest latticed member spans fewer cells than the measured homogenization floor, so the macro stress field these strut numbers amplify is itself out of the tensor's validated regime: treat them as indicative, not certified"},
+    "fields": "fields.bin",
+    "settings": {
+      "safety_margin": 1.5,
+      "material": "PLA",
+      "resolution": 40,
+      "build_direction": [0, 0, 1],
+      "infill_percent": 100,
+      "wall_loops": 0,
+      "wall_line_width_mm": 0.45,
+      "anchor_model": "glued",
+      "lattice_scenarios": "all",
+      "gravity_mm_s2": null,
+      "topology": "octet",
+      "cell_size_mm": [8, 8],
+      "strut_width_mm": [1.174844444, 1.174844444],
+      "yield_strength_mpa": 55,
+      "youngs_modulus_mpa": 3500,
+      "poisson": 0.33,
+      "material_density_g_cm3": 1.24,
+      "z_knockdown": {"ABS": 0.55, "ASA": 0.6, "HIPS": 0.55, "PA12": 0.75, "PA12_CF": 0.4, "PC": 0.6, "PETG": 0.7, "PETG_CF": 0.5, "PLA": 0.55, "PP": 0.65, "Resin_Standard": 1, "Resin_Tough": 1},
+      "safety_margin_floor": 1.5,
+      "infill_exponent": 1.5,
+      "infill_floor": 0.001,
+      "width_aware_knockdown": true,
+      "thickness_cap_voxels": 32,
+      "load_path_connectivity": 26,
+      "printed_threshold": 0.5,
+      "void_floor": 1e-09,
+      "cg_tolerance": 1e-08,
+      "cg_max_iterations": 0,
+      "contact_rounds": 6,
+      "sliding_share_max": 0.05,
+      "bearing_stiffness": 200000,
+      "bearing_tangent_fraction": 0.0001,
+      "scenario_weak_spring": 1e-06,
+      "scenario_weak_spring_min_scale": 0.03,
+      "scenario_unheld_share": 0.05,
+      "part_box_tol_mm": 0.1,
+      "part_box_tol_fraction": 0.005,
+      "no_credit_cut_cells": true,
+      "no_credit_lost_bar": true,
+      "no_credit_out_of_band": true,
+      "left_out_bar_z_tol": 0.45,
+      "left_out_bar_reach": 0.35,
+      "homogenisation_error_band": 2.4,
+      "strut_gate_only_without_solid": true,
+      "struts_in_verdict": true,
+      "strut_law_clamps_density": true,
+      "min_feature_warning_threshold": 1,
+      "rho_min": 0.04959,
+      "rho_max": 0.90027,
+      "lattice_stiffness_table": "measured",
+      "density_from_strut_table": "measured",
+      "cells_per_member_min": 5,
+      "strut_law_table": "measured",
+      "strut_law_span": [0.04959, 0.90027],
+      "margin_reproduction_band": 1e-06,
+      "scenario_min_load_share": 0.1,
+      "voxel_mm": 0.75,
+      "library_modulus_scaling": 1,
+      "interlayer_cross_factor": 0,
+      "gravity_unit": 1e-09
+    },
+    "run_info": {
+      "cli_version": "0.1.0",
+      "fingerprint": "unknown",
+      "build_time": "",
+      "mode": "lattice_part",
+      "ladder_direction": "reduce",
+      "lattice_budget_convention": "none",
+      "achieved_solid_fraction": null,
+      "material": "PLA",
+      "source_format": "stl",
+      "resolution": 40,
+      "load_source": "loadcase",
+      "solver": "MultigridCG_Matfree",
+      "cg_multigrid": null,
+      "mg_levels": null,
+      "mg_mode": null,
+      "galerkin_block_cache": true,
+      "mixed_precision": false,
+      "mg_algebraic_level1": false,
+      "mg_algebraic_aggregates": 0,
+      "mg_algebraic_coarse_dim": 0,
+      "mg_algebraic_levels": 0,
+      "mg_algebraic_added_mb": 0,
+      "mg_algebraic_level1_refused": false,
+      "mg_algebraic_refuse_reason": null,
+      "matfree_threads": 6,
+      "krylov_recycling": true,
+      "krylov_recycle_dim": 16,
+      "krylov_recycle_wrap_multigrid": false,
+      "geneo_twolevel": true,
+      "geneo_trigger_iters": 500,
+      "geneo_rebuild_factor": 2,
+      "geneo_basis_builds": 0,
+      "geneo_coarse_refreshes": 0,
+      "geneo_armed_solves": 0,
+      "geneo_basis_dim": 0,
+      "geneo_basis_mb": 0,
+      "geneo_declined_solves": 0,
+      "geneo_refresh_cost_per_column": 2,
+      "geneo_deflated_iter_cost": 2,
+      "geneo_decisions_dropped": 0,
+      "geneo_decisions": [],
+      "warm_start_inherit": true,
+      "warm_start_coarse": false,
+      "warm_start_coarse_iterations": 0,
+      "warm_start_coarse_ms": 0,
+      "warm_start_coarse_matvecs": 0,
+      "warm_start_coarse_dof_touches": 0,
+      "warm_start_coarse_grid_dofs": 0,
+      "solved_grid_dofs": 0,
+      "projection": false,
+      "conditional_mma_projection_mnd_threshold": 0.07,
+      "conditional_projection_fired": [],
+      "conditional_projection_rung_mnd": [],
+      "infeasible_compliance_ratio": 100,
+      "infeasible_cg_blowup": 4,
+      "infeasible_flat_tol": 0.001,
+      "infeasible_window": 5,
+      "rung_infeasible": [],
+      "rung_non_convergent": [],
+      "rung_non_convergent_iteration": [],
+      "rung_non_convergent_residual": [],
+      "preflight_ran": false,
+      "preflight_decidable": false,
+      "preflight_connected": false,
+      "preflight_ms": 0,
+      "preflight_load_voxels": 0,
+      "preflight_anchor_voxels": 0,
+      "preflight_unreached_load_voxels": 0,
+      "preflight_allowed_voxels": 0,
+      "preflight_forbidden_voxels": 0,
+      "preflight_narrowest_separator_voxels": -1,
+      "preflight_narrowest_separator_mm2": -1,
+      "preflight_geodesic_levels": -1,
+      "infeasible_immediate_ratio": 0,
+      "infeasible_immediate_wall_ratio": 50,
+      "iteration_time_ratio": 100,
+      "iteration_time_floor_ms": 300000,
+      "rung_diverged": [],
+      "rung_diverged_iteration": [],
+      "rung_diverged_c_ratio": [],
+      "rung_diverged_cg_ratio": [],
+      "rung_diverged_wall_ratio": [],
+      "rung_time_budget": [],
+      "rung_time_budget_iteration": [],
+      "rung_time_budget_ms": [],
+      "rung_time_budget_elapsed_ms": [],
+      "rung_time_budget_baseline_ms": [],
+      "rung_time_budget_phase_ms": [],
+      "rung_time_budget_phase": [],
+      "active_domain_band": 0,
+      "active_domain_band_resolved": [],
+      "active_domain_latched": [],
+      "active_domain_latch_iteration": [],
+      "active_domain_escape_count": [],
+      "active_domain_latch_reason": [],
+      "active_domain_fraction_mean": [],
+      "semdot": false,
+      "semdot_grid_points": 0,
+      "plsm": false,
+      "plsm_basis": "",
+      "plsm_knots_vox": [0, 0, 0],
+      "plsm_support": 0,
+      "plsm_eta_voxels": 0,
+      "plsm_max_iterations": 0,
+      "plsm_seed": "",
+      "plsm_refit_every": 0,
+      "plsm_cg_tolerance_loose": 0,
+      "plsm_warm_start": false,
+      "plsm_coefficients": 0,
+      "plsm_frozen_floor_occupancy": 0,
+      "plsm_ersatz": "",
+      "plsm_sens_weight": "",
+      "plsm_frac_samples": 0,
+      "plsm_frac_eps_mult": 0,
+      "plsm_frac_mollified": false,
+      "plsm_frac_sens_exact": false,
+      "plsm_frac_eps_l1": false,
+      "plsm_frac_cut_cells": 0,
+      "plsm_frac_sample_wall_s": 0,
+      "plsm_frac_sens_wall_s": 0,
+      "plsm_margin_probe_every": 0,
+      "plsm_margin_plateau_probes": 0,
+      "plsm_margin_plateau_tol": 0,
+      "plsm_stop_reason": "",
+      "plsm_margin_peak_iteration": 0,
+      "plsm_margin_peak": 0,
+      "plsm_margin_probe_wall_s": 0,
+      "plsm_void_components": 0,
+      "plsm_void_chi": 0,
+      "plsm_void_enclosed_solid": 0,
+      "plsm_void_sealed_pockets": 0,
+      "plsm_void_tunnels": 0,
+      "plsm_void_sealed_voxels": 0,
+      "plsm_void_sealed_volume_mm3": 0,
+      "semdot_rung_level_set": [],
+      "semdot_rung_fractional_voxels": [],
+      "semdot_rung_design_voxels": [],
+      "draft_quality": true,
+      "draft_loose_tol": 0.001,
+      "draft_escalation_c_gap": 1e+30,
+      "draft_rung_tail_k": [],
+      "draft_rung_c_gap": [],
+      "draft_rung_escalated": [],
+      "draft_escalations": [],
+      "draft_use_design_trigger": false,
+      "draft_escalation_design_flip": 0,
+      "draft_rung_probe_flip": [],
+      "draft_rung_probe_cg": [],
+      "min_feature_mm": 2.5,
+      "margin_stop": 1.5,
+      "infill_percent": 100,
+      "width_aware_knockdown": true,
+      "wall_loops": 0,
+      "wall_line_width_mm": 0.45,
+      "wall_line_width_outer_mm": 0.45,
+      "wall_thickness_mm": 0,
+      "has_design_box": false,
+      "ladder": [0.68, 0.52, 0.38, 0.26],
+      "ladder_mode": "reduction",
+      "created_wall_ms": 1795592907751,
+      "iteration_csv": true,
+      "density_snapshots": false,
+      "snapshot_every": 10,
+      "snapshot_cap": 40
+    },
+    "ms": 1987.6
+  },
+[heavy] ok 1 code ok why  
+[open_load] ok 1 code ok why  
+[open_load] 6.364 N of 20 N on lattice with no credit
+[thin_light] ok 1 code ok why  
+[thin] solid margin 593.1, strut margin 10.81 at 20 N
+[solid_only] ok 1 code ok why  
+[none] ok 1 code ok why  
+[credit] cells 16: 2 credited, 14 no credit (cut 12, lost a bar 2, band 0); voxels 43264 latticed, 8192 credited
+[bccz] ok 1  
+[no_path] ok 1  
+[defaults] ok 1 code ok why  
+[settings] ok 1 code ok why  
+[settings] layer margin 499.891 -> 454.449 (ratio 0.9091, expected 0.9091)
+[unknown_setting] ok 0 code strength_settings_refused why The strength setting "infill_exponant" is not one the check knows, so no file was made. 
+[out_of_range] ok 0 code strength_settings_refused why The strength setting "infill_exponent" is 7; it must be from 1 to 3, so no file was made. 
+[z_out_of_range] ok 0 code strength_settings_refused why The strength setting "z_knockdown" for PLA must be a number above 0 up to 1, so no file was made. 
+[bad_choice] ok 0 code strength_settings_refused why The strength setting "load_path_connectivity" is 8; it must be 6, 18 or 26, so no file was made. 
+[organic] ok 1 code ok why  
+[organic] verdict pass judged 322 under_safety 0 smallest 186.4
+[organic] strut_margins.bin: 657 bars, 370 judged; file bars 657
+[organic] bars.bin: 18412 bytes, magic TOBARS1, count 657 (strut_margins 657), reserved 0, 657 inside the block, 657 with a width
+[organic_scalar] ok 1 code ok why  
+[organic_wa] ok 1 code ok why  
+[organic width-aware] effective 25.6582 (scalar 16.4731), passes at 4 % (scalar 5 %)
+[organic_heavy] ok 1 code ok why  
+[organic heavy] "verdict": "fail",
+    "fail_reason": "solid_margin",
+    "solid_margin": {"worst_case": 0.00184174473, "in_plane": 0.00
+[adrift a] "verdict": "pass",
+  | "adrift_parts": [{"centre": [30.5, 15, 4], "bars": 2, "length_mm": 10, "loaded_nodes": 3, "load_n": 0}], "strut_mm": 1113.341539, "solved": true, "dofs": 2337, "solver": "Accelerate LDLT", "factor_gb": 0.0006093047559, "
+[adrift b] "verdict": "fail",
+    "fail_reason": "no_load_path",
+    "s; load on adrift 2.866 N of 20 N, loaded nodes undriven 328
+[strengthen] ok 1 code limit rounds 1 passing 0 The rounds of strengthening allowed were all done. 
+{
+  "ok": true,
+  "code": "limit",
+  "why": "The rounds of strengthening allowed were all done.",
+  "detail": "",
+  "mode": "rebuild",
+  "passing": false,
+  "rounds_fixed": 1,
+  "rounds_limit": 1,
+  "reference_mpa": 2.6457513110645907,
+  "strengthened": "r1/strengthened.json",
+  "rounds": [
+    {"round": 0, "bars_geometry": "cfd8030b1c4350f3", "struts_at_upper_width": 336, "laid_with": "job", "verdict": "fail", "fail_reason": "solid_margin", "bars": 1013, "floors_widened": 0, "floor_links_widened": 0, "gap_broken": 0,
+     "struts": {"judged": 336, "under_safety": 11, "under_one": 1, "smallest_margin": 0.9383497326, "buckling_failures": 0, "stubs": 636, "unjudged_mm": 0, "load_unheld_n": 0},
+     "lattice_mm3": 2664.84375, "seconds": {"lay": 0, "material": 0.2, "voxel_solve": 1, "frame": 0}, "memory_mb": {"after_lay": 225, "after_voxel_solve": 228, "after_frame": 228, "peak": 241}, "check": "r0/strength.json",
+     "wrote": {"strengthened": "r1/strengthened.json", "struts_watched": 20, "voxels_boosted": 4621, "boost_largest": 4, "floors": 60}},
+    {"round": 1, "bars_geometry": "0fff26f35ace7efb", "struts_at_upper_width": 323, "laid_with": "r1/strengthened.json", "verdict": "fail", "fail_reason": "solid_margin", "bars": 1041, "floors_widened": 0, "floor_links_widened": 0, "gap_broken": 0,
+     "struts": {"judged": 323, "under_safety": 11, "under_one": 0, "smallest_margin": 1.10
+[nothing] ok 1 code nothing_to_vary rounds 0 passing 0 Nothing in this job follows the stress (one spacing and one strut width), so strengthening cannot change the lattice. 
+[additive_default] ok 1 code done rounds 0 passing 1  
+[additive_default] rounds_limit 6
+[additive] ok 1 code done rounds 3 passing 0  
+{
+  "ok": true,
+  "code": "done",
+  "why": "",
+  "detail": "",
+  "mode": "additive",
+  "old_bars_kept": true,
+  "passing": false,
+  "rounds_fixed": 3,
+  "rounds_limit": 3,
+  "reference_mpa": 2.6457513110645907,
+  "strengthened": "r3/strengthened.json",
+  "thickened_distinct": 12,
+  "braced": 0,
+  "widest_mm": 2.639774649,
+  "past_thickest": 12,
+  "groups": [{"id": 0, "regions": [1], "thickest_setting_mm": 1.8, "past_thickest": 12, "thickened_distinct": 12, "widest_mm": 2.639774649}],
+  "rounds": [
+    {"round": 0, "verdict": "fail", "fail_reason": "solid_margin", "bars": 1013, "hash": "ed7b9a433ca35e74", "old_bars_kept": true, "gap_broken": 0,
+     "struts": {"judged": 336, "under_safety": 11, "under_one": 1, "smallest_margin": 0.9383497326, "buckling_failures": 0, "stubs": 636, "under_safety_at_cap": 0, "unjudged_mm": 0, "load_unheld_n": 0},
+     "lattice_mm3": 2664.84375, "seconds": {"lay": 0, "print_check": 0.2, "material": 0.1, "voxel_solve": 0.5, "frame": 0}, "memory_mb": {"after_voxel_solve": 237, "after_frame": 237, "peak": 241}, "check": "r0/strength.json", "classes": {"untouched": {"judged": 336, "under": 11}, "cut": {"judged": 0, "under": 0}, "brace": {"judged": 0, "under": 0}, "vine": {"judged": 0, "under": 0}, "under_only_because_of_new_pieces": 0},
+     "added": {"strengthened": "r1/strengthened.json", "struts_watched": 20, "struts_widened": 15, "bars_widened": 11, "links_widened": 0, "struts_braced": 0, "buckling_struts_asked": 0, "brace_points": 0, "braces": 0, "struts_at_cap": 0, "cap_mm": 3.6, "old_bars_split": 0, "old_bars_kept": true, "print_left_out": 0, "print_left_out_at": [], "print_left_out_widened": 0, "print_left_out_widened_at": [], "print_moved": 0, "print_moved_at": [], "print_added": 0, "print_added_at": [], "print_clean": true, "widenings_taken_back": 0, "limit": {"limit_mm": 1.8, "within_limit": 0, "past_limit": {"struts": 11, "widest_mm": 2.215628501, "at": [[27.500, 26.500, 6.000], [27.500, 26.500, 9.075], [20.500, 14.500, 7.675], [14.500, 14.500, 7.500], [25.000, 2.500, 10.500], [25.500, 27.500, 10.500], [25.250, 6.500, 10.500], [25.250, 10.500, 10.500], [25.250, 14.500, 10.500], [25.250, 18.500, 10.500], [25.250, 22.500, 10.500]]}}, "guard_outside_cut": 0, "guard_in_solid_cut": 36, "guard_in_solid_removed": 0, "hash": "655651a0004e6929", "seconds": 0.3}},
+    {"round": 1, "verdict": "fail", "fail_reason": "solid_margin", "
+[additive] summary: thickened 12, braced 0, widest 2.64 mm, past thickest 12; groups "groups": [{"id": 0, "regions": [1], "thickest_setting_mm": 1.8, "past_thickest": 12, "thickened_distinct": 12, "widest_
+[additive] bars.bin r0: 1013 bars, word 2 = 0; r1: 1013 bars, word 2 = 1, 11 marked (11 thickened, 0 braces)
+[replay] ok 1 code ok bars 1013 (round 1: 1013) 
+[mismatch] ok 0 code strengthened_mismatch round 1: a widening's bar is not in the lattice
+[vines] ok 0 code strengthened_has_vines: The strengthening sent with the lattice job holds new vines, which strengtheni[loadcase] load-group 0: faces=1 |F|=6e+03N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=6e+03N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=6e+03N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=6e+03N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=200N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9600 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=1e+03N voxels_tagged=120 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=720 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=251N voxels_tagged=120 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=720 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=100N voxels_tagged=120 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=720 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=1e+03N voxels_tagged=120 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=720 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=251N voxels_tagged=120 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=720 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=251N voxels_tagged=120 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=720 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=852N voxels_tagged=120 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=720 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=1e+03N voxels_tagged=120 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=720 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=63.5N voxels_tagged=120 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=720 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=63.5N voxels_tagged=120 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=720 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=1e+03N voxels_tagged=120 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=720 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=109N voxels_tagged=120 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=720 (structural pad, NOT a face protection)
+ng no longer lays, so nothing was made. Strengthen the lattice again.
+[paths_gone] ok 0 code strength_settings_refused rounds 0 passing 0 The strength setting "strengthen_paths" is not one the check knows, so no file was made. 
+[paths gone] ok 0 code strength_settings_refused: The strength setting "strengthen_paths" is not one the check knows, so no file was made.
+[additive_one] ok 1 code limit rounds 1 passing 0 The rounds of strengthening allowed were all done. 
+[order] ok 1 code limit rounds 6 passing 0 The rounds of strengthening allowed were all done. 
+[order] round 0: under safety 59 (untouched 59, cut 0, brace 0), lattice 812.8 mm3, widest watched 1.200; within the limit 0, past it 59 (widest 1.730)
+[order] round 1: under safety 37 (untouched 37, cut 0, brace 0), lattice 931.9 mm3, widest watched 1.730; within the limit 0, past it 37 (widest 2.070)
+[order] round 2: under safety 9 (untouched 9, cut 0, brace 0), lattice 993.6 mm3, widest watched 2.070; within the limit 0, past it 9 (widest 1.923)
+[order] round 3: under safety 12 (untouched 12, cut 0, brace 0), lattice 1006.8 mm3, widest watched 2.070; within the limit 0, past it 12 (widest 2.245)
+[order] round 4: under safety 6 (untouched 6, cut 0, brace 0), lattice 1018.9 mm3, widest watched 2.245; within the limit 0, past it 6 (widest 2.392)
+[order] round 5: under safety 5 (untouched 5, cut 0, brace 0), lattice 1032.7 mm3, widest watched 2.392; within the limit 0, past it 5 (widest 2.166)
+[order] round 6: under safety 3 (untouched 2, cut 1, brace 0), lattice 1037.2 mm3, widest watched 2.392
+[order] limit after 6 rounds; round 0's widest widening 1.730 (limit 1.2); round 1: widest watched 1.730, past the limit 37; later rounds' widest watched 2.392
+[order] round 0: under 59, past the limit at once 59; round 1: under 37
+[order replay] ok 1 bars 460 (round 1: 460)
+[groups] ok 1 code limit rounds 2 The rounds of strengthening allowed were all done. 
+[groups] watched struts: area 1 70 (over its 1.2 18), area 2 13 (over its 1.8 5, between 1.2 and 1.8 8); struts named past a limit 25
+[groups replay] ok 1 code ok bars 492 (round 1: 492) 
+[groups rebuild] ok 0 code rebuild_one_group The rebuild mode of strengthening lays one Organic group, and this job has several; use the additive mode.
+[solid_loaded] ok 1 code ok why  
+[solid loaded] ok 1, strength ran 1, verdict pass; frame: solved yes, driven nodes 154, load 200 N, on frame nodes 0 N (the rest reaches the lattice through the cover); struts judged 371, smallest margin 19.76
+[notch_probe] ok 1 code ok why  
+[notch_probe] "solid_margin": {"worst_case": 0.8517400796, "in_plane": 0.8517400796, "interlayer": 1.459448779, "effective": 0.3011355931, "von_mises_mpa": 64.57369016, "interlayer_tension_mpa": 20.72700353, "voxels": 4128, "passes_at_infill_percent": null, "voxel_load_path": true, "field": {"file": "fields.bin", "block": 2, "requested_volume_fraction": -1, "spot_ids": {"block": 3, "requested_volume_fraction": -2}}, "spots_total": 6, "spots": [
+      {"id": 1, "issue": "inside_the_solid", "worst_at": [20.5, 2.5, 5.5], "centroid": [19.9441989, 4.983977901, 4.635911602], "box": {"lo": [10, 0, 0], "hi": [30, 10, 8]}, "voxels": 905, "mm3": 905, "raw_margin": 0.8517400796, "effective_margin": 0.3011355931, "governs": "in_plane", "passes_at_infill_percent": null, "passes_with_walls_credited": false,
+       "to_held_mm": 19, "to_load_mm": 18.11077028, "to_lattice_mm": 5, "lattice_region": 1, "kind": "inside_the_solid", "advice": "Make this part of the model thicker, or print it denser."},
+      {"id": 2, "issue": "beside_the_load", "worst_at": [37.5, 8.5, 0.5], "centroid": [36.64285714, 8.928571429, 0.7142857143], "box": {"lo": [33, 8, 0], "hi": [40, 10, 2]}, "voxels": 14, "mm3": 14, "raw_margin": 2.903877277, "effective_margin": 1.026675657, "governs": "in_plane", "passes_at_infill_percent": 65, "passes_with_walls_credited": false,
+       "to_held_mm": 36, "to_load_mm": 1, "to_lattice_mm": 2, "lattice_region": 1, "kind": "beside_the_load", "advice": "Keep more solid where the load presses here."
+[notch_one] ok 1 code ok why  
+[notch_one] "solid_margin": {"worst_case": 3.394112543, "in_plane": 3.394112543, "interlayer": 5.815780571, "effective": 1.199999998, "von_mises_mpa": 16.20453043, "interlayer_tension_mpa": 5.201365429, "voxels": 4128, "passes_at_infill_percent": 59, "voxel_load_path": true, "field": {"file": "fields.bin", "block": 2, "requested_volume_fraction": -1, "spot_ids": {"block": 3, "requested_volume_fraction": -2}}, "spots_total": 1, "spots": [
+      {"id": 1, "issue": "inside_the_solid", "worst_at": [20.5, 2.5, 5.5], "centroid": [20, 5, 5.5], "box": {"lo": [18, 0, 5], "hi": [22, 10, 6]}, "voxels": 40, "mm3": 40, "raw_margin": 3.394112543, "effective_margin": 1.199999998, "governs": "in_plane", "passes_at_infill_percent": 59, "passes_with_walls_credited": false,
+       "to_held_mm": 19, "to_load_mm": 18.11077028, "to_lattice_mm": 5, "lattice_region": 1, "kind": "inside_the_solid", "advice": "Make this part of the model thicker, or print it denser."}
+    ], "text": "The solid part does not certify at 50 % infill. It would certify at 59 % infill. The other way is to strengthen the marked area."},
+[notch_one] worst at x 20.5
+[notch_one] fields.bin block 2: marker -1, 4800 values, least 1.2
+[notch_one] fields.bin block 3: marker -2, 4800 values, voxels by id: 1: 40
+[notch_light] ok 1 code ok why  
+[notch_light] "solid_margin": {"worst_case": 8.485281376, "in_plane": 8.485281376, "interlayer": 14.53945146, "effective": 3, "von_mises_mpa": 6.48181216, "interlayer_tension_mpa": 2.080546167, "voxels": 4128, "passes_at_infill_percent": 32, "voxel_load_path": true, "field": {"file": "fields.bin", "block": 2, "requested_volume_fraction": -1, "spot_ids": {"block": 3, "requested_volume_fraction": -2}}},
+[notch_light] fields.bin block 3: marker -2, 4800 values, voxels by id:
+[notch2_probe] ok 1 code ok why  
+[notch2_probe] "solid_margin": {"worst_case": 0.8509943432, "in_plane": 0.8509943432, "interlayer": 1.382250903, "effective": 0.3008719354, "von_mises_mpa": 64.63027685, "interlayer_tension_mpa": 21.88459412, "voxels": 3888, "passes_at_infill_percent": null, "voxel_load_path": true, "field": {"file": "fields.bin", "block": 2, "requested_volume_fraction": -1, "spot_ids": {"block": 3, "requested_volume_fraction": -2}}, "spots_total": 5, "spots": [
+      {"id": 1, "issue": "inside_the_solid", "worst_at": [28.5, 7.5, 5.5], "centroid": [20.45567376, 4.994680851, 4.576832151], "box": {"lo": [3, 0, 0], "hi": [40, 10, 9]}, "voxels": 1692, "mm3": 1692, "raw_margin": 0.8509943432, "effective_margin": 0.3008719354, "governs": "in_plane", "passes_at_infill_percent": null, "passes_with_walls_credited": false,
+       "to_held_mm": 27, "to_load_mm": 10.19803903, "to_lattice_mm": 5.099019514, "lattice_region": 1, "kind": "inside_the_solid", "advice": "Make this part of the model thicker, or print it denser."},
+      {"id": 2, "issue": "beside_the_load", "worst_at": [38.5, 0.5, 11.5], "centroid": [39, 0.5, 11.5], "box": {"lo": [38, 0, 11], "hi": [40, 1, 12]}, "voxels": 2, "mm3": 2, "raw_margin": 3.652211409, "effective_margin": 1.291251727, "governs": "in_plane", "passes_at_infill_percent": 56, "passes_with_walls_credited": false,
+       "to_held_mm": 37, "to_load_mm": 0, "to_lattice_mm": 11.22497216, "lattice_region": 1, "kind": "beside_the_load", "advice": "Keep more solid where the load presses here."},
+
+[notch_two] ok 1 code ok why  
+[notch_two] "solid_margin": {"worst_case": 3.394112548, "in_plane": 3.394112548, "interlayer": 5.512980401, "effective": 1.199999999, "von_mises_mpa": 16.20453041, "interlayer_tension_mpa": 5.487050162, "voxels": 3888, "passes_at_infill_percent": 59, "voxel_load_path": true, "field": {"file": "fields.bin", "block": 2, "requested_volume_fraction": -1, "spot_ids": {"block": 3, "requested_volume_fraction": -2}}, "spots_total": 2, "spots": [
+      {"id": 1, "issue": "inside_the_solid", "worst_at": [28.5, 7.5, 5.5], "centroid": [28, 5, 5.5], "box": {"lo": [26, 0, 5], "hi": [30, 10, 6]}, "voxels": 40, "mm3": 40, "raw_margin": 3.394112548, "effective_margin": 1.199999999, "governs": "in_plane", "passes_at_infill_percent": 59, "passes_with_walls_credited": false,
+       "to_held_mm": 27, "to_load_mm": 10.19803903, "to_lattice_mm": 5.099019514, "lattice_region": 1, "kind": "inside_the_solid", "advice": "Make this part of the model thicker, or print it denser."},
+      {"id": 2, "issue": "inside_the_solid", "worst_at": [11.5, 7.5, 5.5], "centroid": [12, 5, 5.5], "box": {"lo": [10, 0, 5], "hi": [14, 10, 6]}, "voxels": 40, "mm3": 40, "raw_margin": 3.399233282, "effective_margin": 1.201810452, "governs": "in_plane", "passes_at_infill_percent": 58, "passes_with_walls_credited": false,
+       "to_held_mm": 10, "to_load_mm": 27.07397274, "to_lattice_mm": 5.099019514, "lattice_region": 1, "kind": "inside_the_solid", "advice": "Make this part of the model thicker, or print it denser."}
+    ], "text": "The
+[notch_two] fields.bin block 3: marker -2, 4800 values, voxels by id: 1: 40 2: 40
+[notch_two_one] ok 1 code ok why  
+[notch_two_one] "solid_margin": {"worst_case": 3.394112548, "in_plane": 3.394112548, "interlayer": 5.512980401, "effective": 1.199999999, "von_mises_mpa": 16.20453041, "interlayer_tension_mpa": 5.487050162, "voxels": 3888, "passes_at_infill_percent": 59, "voxel_load_path": true, "field": {"file": "fields.bin", "block": 2, "requested_volume_fraction": -1, "spot_ids": {"block": 3, "requested_volume_fraction": -2}}, "spots_total": 2, "spots": [
+      {"id": 1, "issue": "inside_the_solid", "worst_at": [28.5, 7.5, 5.5], "centroid": [28, 5, 5.5], "box": {"lo": [26, 0, 5], "hi": [30, 10, 6]}, "voxels": 40, "mm3": 40, "raw_margin": 3.394112548, "effective_margin": 1.199999999, "governs": "in_plane", "passes_at_infill_percent": 59, "passes_with_walls_credited": false,
+       "to_held_mm": 27, "to_load_mm": 10.19803903, "to_lattice_mm": 5.099019514, "lattice_region": 1, "kind": "inside_the_solid", "advice": "Make this part of the model thicker, or print it denser."}
+    ], "text": "The solid part does not certify at 50 % infill. It would certify at 59 % infill. The other way is to strengthen the 1 worst of 2 marked areas."},
+[notch_heavy] ok 1 code ok why  
+[notch_heavy] "solid_margin": {"worst_case": 0.9999999995, "in_plane": 0.9999999995, "interlayer": 1.713490786, "effective": 0.3535533904, "von_mises_mpa": 55.00000003, "interlayer_tension_mpa": 17.65401965, "voxels": 4128, "passes_at_infill_percent": null, "voxel_load_path": true, "field": {"file": "fields.bin", "block": 2, "requested_volume_fraction": -1, "spot_ids": {"block": 3, "requested_volume_fraction": -2}}, "spots_total": 5, "spots": [
+      {"id": 1, "issue": "inside_the_solid", "worst_at": [20.5, 2.5, 5.5], "centroid": [19.96569343, 4.984671533, 4.643065693], "box": {"lo": [12, 0, 0], "hi": [28, 10, 8]}, "voxels": 685, "mm3": 685, "raw_margin": 0.9999999995, "effective_margin": 0.3535533904, "governs": "in_plane", "passes_at_infill_percent": null, "passes_with_walls_credited": false,
+       "to_held_mm": 19, "to_load_mm": 18.11077028, "to_lattice_mm": 5, "lattice_region": 1, "kind": "inside_the_solid", "advice": "Make this part of the model thicker, or print it denser."},
+      {"id": 2, "issue": "beside_the_load", "worst_at": [37.5, 8.5, 0.5], "centroid": [37.5, 8.833333333, 0.5], "box": {"lo": [36, 8, 0], "hi": [39, 10, 1]}, "voxels": 3, "mm3": 3, "raw_margin": 3.409346754, "effective_margin": 1.205386104, "governs": "in_plane", "passes_at_infill_percent": 58, "passes_with_walls_credited": false,
+       "to_held_mm": 36, "to_load_mm": 1, "to_lattice_mm": 2, "lattice_region": 1, "kind": "beside_the_load", "advice": "Keep more solid where the load presses here."},
+      {"id": 3
+[notch_wprobe] ok 1 code ok why  
+[notch_wprobe] "solid_margin": {"worst_case": 0.8517400796, "in_plane": 0.8517400796, "interlayer": 1.459448779, "effective": 0.07618194869, "von_mises_mpa": 64.57369016, "interlayer_tension_mpa": 20.72700353, "voxels": 4128, "passes_at_infill_percent": null, "voxel_load_path": true, "field": {"file": "fields.bin", "block": 2, "requested_volume_fraction": -1, "spot_ids": {"block": 3, "requested_volume_fraction": -2}}, "spots_total": 1, "spots": [
+      {"id": 1, "issue": "inside_the_solid", "worst_at": [20.5, 2.5, 5.5], "centroid": [20.63866317, 4.997771953, 6.141153342], "box": {"lo": [1, 0, 0], "hi": [40, 10, 12]}, "voxels": 3815, "mm3": 3815, "raw_margin": 0.8517400796, "effective_margin": 0.07618194869, "governs": "in_plane", "passes_at_infill_percent": null, "passes_with_walls_credited": false,
+       "to_held_mm": 19, "to_load_mm": 18.11077028, "to_lattice_mm": 5, "lattice_region": 1, "kind": "inside_the_solid", "advice": "Make this part of the model thicker, or print it denser."}
+    ], "text": "The solid part does not certify, even printed solid. Strengthen the marked area."},
+[notch_walls] ok 1 code ok why  
+[notch_walls] "solid_margin": {"worst_case": 13.41640792, "in_plane": 13.41640792, "interlayer": 22.98889135, "effective": 1.200000004, "von_mises_mpa": 4.099457943, "interlayer_tension_mpa": 1.315852928, "voxels": 4128, "passes_at_infill_percent": 24, "voxel_load_path": true, "field": {"file": "fields.bin", "block": 2, "requested_volume_fraction": -1, "spot_ids": {"block": 3, "requested_volume_fraction": -2}}, "spots_total": 1, "spots": [
+      {"id": 1, "issue": "inside_the_solid", "worst_at": [20.5, 2.5, 5.5], "centroid": [20, 5, 5.5], "box": {"lo": [18, 0, 5], "hi": [22, 10, 6]}, "voxels": 40, "mm3": 40, "raw_margin": 13.41640792, "effective_margin": 1.200000004, "governs": "in_plane", "passes_at_infill_percent": 24, "passes_with_walls_credited": true,
+       "to_held_mm": 19, "to_load_mm": 18.11077028, "to_lattice_mm": 5, "lattice_region": 1, "kind": "inside_the_solid", "advice": "Make this part of the model thicker, or print it denser."}
+    ], "text": "The solid part does not certify at 20 % infill. It would certify at 24 % infill. The other way is to strengthen the marked area. Counting the printed walls as solid, it certifies."},
+[notch_walls_default] ok 1 code ok why  
+[notch_walls_default] "solid_margin": {"worst_case": 13.41640792, "in_plane": 13.41640792, "interlayer": 22.98889135, "effective": 2.056188951, "von_mises_mpa": 4.099457943, "interlayer_tension_mpa": 1.315852928, "voxels": 4128, "passes_at_infill_percent": 17, "voxel_load_path": true, "field": {"file": "fields.bin", "block": 2, "requested_volume_fraction": -1, "spot_ids": {"block": 3, "requested_volume_fraction": -2}}},
+[walls default] effective 2.05619, off 1.2
+[notch_won_probe] ok 1 code ok why  
+[notch_won_probe] "solid_margin": {"worst_case": 0.8517400796, "in_plane": 0.8517400796, "interlayer": 1.459448779, "effective": 0.1305370672, "von_mises_mpa": 64.57369016, "interlayer_tension_mpa": 20.72700353, "voxels": 4128, "passes_at_infill_percent": null, "voxel_load_path": true, "field": {"file": "fields.bin", "block": 2, "requested_volume_fraction": -1, "spot_ids": {"block": 3, "requested_volume_fraction": -2}}, "spots_total": 1, "spots": [
+      {"id": 1, "issue": "inside_the_solid", "worst_at": [22.5, 4.5, 6.5], "centroid": [19.5597079, 5.000429553, 5.181701031], "box": {"lo": [1, 0, 0], "hi": [40, 10, 12]}, "voxels": 2328, "mm3": 2328, "raw_margin": 0.8517400796, "effective_margin": 0.1305370672, "governs": "interlayer", "passes_at_infill_percent": null, "passes_with_walls_credited": false,
+       "to_held_mm": 21, "to_load_mm": 16.4924225, "to_lattice_mm": 6, "lattice_region": 1, "kind": "inside_the_solid", "advice": "Make this part of the model thicker, or print it denser."}
+    ], "text": "The solid part does not certify, even printed solid. Strengthen the marked area."},
+[notch_walls_on] ok 1 code ok why  
+[notch_walls_on] "solid_margin": {"worst_case": 7.829868715, "in_plane": 7.829868715, "interlayer": 13.4164079, "effective": 1.200000003, "von_mises_mpa": 7.024383422, "interlayer_tension_mpa": 2.254701872, "voxels": 4128, "passes_at_infill_percent": 24, "voxel_load_path": true, "field": {"file": "fields.bin", "block": 2, "requested_volume_fraction": -1, "spot_ids": {"block": 3, "requested_volume_fraction": -2}}, "spots_total": 2, "spots": [
+      {"id": 1, "issue": "inside_the_solid", "worst_at": [22.5, 4.5, 6.5], "centroid": [22.07142857, 5, 6.071428571], "box": {"lo": [21, 1, 5], "hi": [2[loadcase] load-group 0: faces=1 |F|=222N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=222N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=100N voxels_tagged=200 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=1710 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=5.77e+03N voxels_tagged=200 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=1710 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=5.77e+03N voxels_tagged=200 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=1710 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=100N voxels_tagged=143 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=936 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=64N voxels_tagged=143 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=936 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=64N voxels_tagged=143 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=936 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=640 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=6360 (structural pad, NOT a face protection)
+3, 9, 7]}, "voxels": 14, "mm3": 14, "raw_margin": 8.153432438, "effective_margin": 1.200000003, "governs": "interlayer", "passes_at_infill_percent": 24, "passes_with_walls_credited": false,
+       "to_held_mm": 21, "to_load_mm": 16.4924225, "to_lattice_mm": 6, "lattice_region": 1, "kind": "inside_the_solid", "advice": "Make this part of the model thicker, or print it denser."},
+      {"id": 2, "issue": "inside_the_solid", "worst_at": [17.5, 4.5, 6.5], "centroid": [17.92857143, 5, 6.071428571], "box": {"lo": [17, 1, 5], "hi": [19, 9, 7]}, "voxels": 14, "mm3": 14, "raw_margin": 8.154153971, "effective_margin": 1.20228275, "governs": "interlayer", "passes_at_infill_percent": 24, "passes_with_walls_credited": false,
+       "to_held_mm": 16, "to_load_mm": 21.37755833, "to_lattice_mm": 6.08276253, "lattice_region": 1, "kind": "inside_the_solid", "advice": "Make this part of the model thicker, or print it denser.
+[cube_walls_default] ok 1 code ok why  
+[cube_walls_off] ok 1 code ok why  
+[cube walls] 221.5 N: default "verdict": "pass",
+    "margin_worst_cas / off "verdict": "fail",
+    "fail_reason": "solid_margin",
+    "m
+[pocket_probe] ok 1 code ok why  
+[pocket] probe: smallest strut margin 46.1717 at 100 N; sags lifted 8, legs 7, left out at 2 places, posts 1, mid-air starts found per pass 1
+[pocket] mid-air starts and one-ended overhangs found on the first pass: 1
+[pocket strengthen] ok 1 code limit rounds 1 The rounds of strengthening allowed were all done. 
+[pocket_replay] ok 1 code ok why  
+[pocket] strengthen's last check: judged 168, smallest 0.7999819279, under 15; the file's: judged 168, smallest 0.7999819279, under 15
+[pocket] strut_margins.bin: 1088 bars each (1088), 0 differ; under the margin 77 and 77
+[arm_probe] ok 1 code ok why  
+[arm] probe: smallest strut margin 0.384089 at 100 N; the print check left struts out at 12 places
+[arm strengthen] ok 1 code limit rounds 2 The rounds of strengthening allowed were all done. 
+   "print_left_out": 0, "print_left_out_at": [], "print_left_out_widened": 0, "print_left_out_widened_at": [], "print_moved": 0, "print_moved_at": [], "print_added": 0, "print_added_at": [], "print_clean": true, "widenings_taken_back": 0, "limit": {"limit_mm": 1.8, "within_limit": 6, "past_limit": {"struts": 0, "widest_mm": 0, "at": []}}, "guard_outside_cut": 0, "guard_in_solid_cut": 2, "guard_in_solid_removed": 0
+   "print_left_out": 0, "print_left_out_at": [], "print_left_out_widened": 0, "print_left_out_widened_at": [], "print_moved": 0, "print_moved_at": [], "print_added": 0, "print_added_at": [], "print_clean": true, "widenings_taken_back": 8, "limit": {"limit_mm": 1.8, "within_limit": 0, "past_limit": {"struts": 6, "widest_mm": 2.571786037, "at": [[22.617, 6.650, 13.884], [27.381, 9.650, 14.656], [26.036, 3.471, 13.639], [25.601, 4.619, 15.928], [25.794, 3.639, 14.995], [28.698, 9.551, 14.397]]}}, "guard_outside_cut": 0, "guard_in_solid_cut": 2, "guard_in_solid_removed": 0
+[arm_replay] ok 1 code ok why  
+[arm] replay: ok 1 code ok, bars 536 (the last round's 536)
+[arm] rounds print clean: yes; widenings taken back 8
+[tab] ok 1 code ok why  
+[tab] ok 1 code ok; part overhangs 3, posts 1 (0 outside the block, under the tab), clean 1, found per pass 1
+[tab_cells] ok 1 code ok why  
+[tab cells] ok 1 code ok; own overhangs 1, posts 0 (0 outside the block), posts refused outside 0, clean 1, tries 1
+[ceiling] ok 1 code ok why  
+[ceiling] ok 1 code ok; own overhangs 13 (13 of them judged by the far point before K1), posts 0, clean 1, tries 1, found per pass 0
+[octet law] lightest credited cell: default struts 0.2266, one-line 0.65 mm struts 0.0778
+[low_density] ok 1 code ok why  
+[unreadable] ok 0 code strength_job_unreadable why The strength check's job sent with the lattice job could not be read, so no file was made. job.json parse error at offset 1: unexpected end of input
+[mode] ok 0 code strength_job_unreadable why The strength check's job sent with the lattice job could not be read, so no file was made. job.json: "mode": "lattice_variant" requires a "variant" block naming the finished design to lattice (its run's design.bin + which rung). To lattice the IMPORTED PART with no optimization, use "mode": "lattice_part", which needs no variant.
+[other_part] ok 0 code strength_job_unreadable why The strength check's job sent with the lattice job could not be read, so no file was made. the strength job's part is not the lattice file's part (their boxes differ by 10 mm)
+lattice_strength: 44329 checks, 0 failed
+<end of output>
+Test time = 144.47 sec
+----------------------------------------------------------
+Test Passed.
+"lattice_strength" end time: Nov 25 02:50 EST
+"lattice_strength" time elapsed: 00:02:24
+----------------------------------------------------------
+
+143/210 Testing: lattice_types_matrix
+143/210 Test: lattice_types_matrix
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build/test_lattice_types_matrix"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build
+"lattice_types_matrix" start time: Nov 25 02:50 EST
+Output:
+----------------------------------------------------------
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9240 (structural pad, NOT a face protection)
+[mg] smoother check (S7): 3 levels, lambda_max(D^-1 A) per smoothed level: 3.031 3.241 ; omega=0.60 => safe <= 3.333 : safe
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9240 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9240 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9240 (structural pad, NOT a face protection)
+cube: 6 faces, top 4 bottom 5 side 0
+plate: 4 faces, top 0 bottom 2 side -1
+bracket: 10 faces, top 7 bottom 5 side 2
+
+== octet ==
+  width bounds: open look 0.1898, touch 0.3536; floor cell at two lines 4.74 mm (quilt 2.55 mm)
+  band 0.0496..0.9003; density at the open look 0.3487; the band's floor at strut/cell 0.0640 (within the open look)
+  [octet-aes-auto-face-cube] cells 4 (floor 4.74 mm, largest 6.00), bars 144, cut ends 64 (0 open), skin bars 48
+  octet      lays      aes-auto-face-cube         ok
+  octet      two_lines aes-auto-face-cube         ok
+  [octet-aes-auto-face-cube] before the drop: cut ends 64 (0 open), skin bars 48; strut ends 192 (0 loose)
+  octet      skin      aes-auto-face-cube         ok
+  octet      joins     aes-auto-face-cube         ok
+  octet      loose     aes-auto-face-cube         ok
+  [octet-aes-auto-face-cube] file: ok 1 ok  (cells 4, bars 144, left out 0, builds 1, 303 ms)
+  octet      print     aes-auto-face-cube         ok
+  [octet-aes-typed-whole-cube] cells 8 (floor 4.74 mm, largest 5.00), bars 240, cut ends 0 (0 open), skin bars 0
+  octet      lays      aes-typed-whole-cube       ok
+  octet      two_lines aes-typed-whole-cube       ok
+  [octet-aes-typed-whole-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 480 (0 loose)
+  octet      skin      aes-typed-whole-cube       ok
+  octet      joins     aes-typed-whole-cube       ok
+  octet      loose     aes-typed-whole-cube       ok
+  octet      geometry  aes-typed-whole-cube       ok
+  [octet-aes-typed-whole-cube] file: ok 1 ok  (cells 8, bars 240, left out 0, builds 1, 522 ms)
+  octet      print     aes-typed-whole-cube       ok
+  [octet-aes-auto-whole-plate] cells 176 (floor 4.74 mm, largest 4.74), bars 2216, cut ends 0 (0 open), skin bars 0
+  octet      lays      aes-auto-whole-plate       ok
+  octet      two_lines aes-auto-whole-plate       ok
+  [octet-aes-auto-whole-plate] before the drop: cut ends 192 (192 open), skin bars 0; strut ends 4832 (0 loose)
+  octet      joins     aes-auto-whole-plate       ok
+  octet      loose     aes-auto-whole-plate       ok
+  [octet-aes-auto-whole-plate] file: ok 1 ok  (cells 176, bars 2216, left out 0, builds 1, 3514 ms)
+  octet      print     aes-auto-whole-plate       ok
+  [octet-aes-typed-face-plate] cells 152 (floor 4.74 mm, largest 5.00), bars 2676, cut ends 660 (0 open), skin bars 568
+  octet      lays      aes-typed-face-plate       ok
+  octet      two_lines aes-typed-face-plate       ok
+  [octet-aes-typed-face-plate] before the drop: cut ends 660 (0 open), skin bars 568; strut ends 4216 (0 loose)
+  octet      skin      aes-typed-face-plate       ok
+  octet      joins     aes-typed-face-plate       ok
+  octet      loose     aes-typed-face-plate       ok
+  [octet-aes-typed-face-plate] file: ok 1 ok  (cells 152, bars 2676, left out 32, builds 2, 10279 ms)
+  octet      print     aes-typed-face-plate       ok
+  [octet-aes-auto-3mf-bracket] cells 63 (floor 4.74 mm, largest 6.00), bars 1878, cut ends 268 (0 open), skin bars 202
+  octet      lays      aes-auto-3mf-bracket       ok
+  octet      two_lines aes-auto-3mf-bracket       ok
+  [octet-aes-auto-3mf-bracket] before the drop: cut ends 284 (16 open), skin bars 202; strut ends 3384 (0 loose)
+  octet      skin      aes-auto-3mf-bracket       ok
+  octet      joins     aes-auto-3mf-bracket       ok
+  octet      loose     aes-auto-3mf-bracket       ok
+  [octet-aes-auto-3mf-bracket] file: ok 1 ok  (cells 63, bars 1878, left out 4, builds 3, 10267 ms)
+  octet      print     aes-auto-3mf-bracket       ok
+  octet      painted   aes-auto-3mf-bracket       ok
+  [octet-aes-grade-face-plate] cells 136 (floor 2.55 mm, largest 5.09), bars 2484, cut ends 568 (0 open), skin bars 476
+  octet      lays      aes-grade-face-plate       ok
+  octet      two_lines aes-grade-face-plate       ok
+  [octet-aes-grade-face-plate] before the drop: cut ends 568 (0 open), skin bars 476; strut ends 4016 (0 loose)
+  octet      skin      aes-grade-face-plate       ok
+  octet      joins     aes-grade-face-plate       ok
+  octet      loose     aes-grade-face-plate       ok
+  [octet-aes-grade-face-plate] file: ok 1 ok  (cells 136, bars 2484, left out 8, builds 2, 7575 ms)
+  octet      print     aes-grade-face-plate       ok
+  [octet-aes-stepped-face-bracket] cells 483 (floor 2.55 mm, largest 6.00), bars 11052, cut ends 36 (0 open), skin bars 24
+  octet      lays      aes-stepped-face-bracket   ok
+  octet      two_lines aes-stepped-face-bracket   ok
+  [octet-aes-stepped-face-bracket] before the drop: cut ends 64 (28 open), skin bars 24; strut ends 22112 (0 loose)
+  octet      skin      aes-stepped-face-bracket   ok
+  octet      joins     aes-stepped-face-bracket   ok
+  octet      loose     aes-stepped-face-bracket   ok
+  [octet-aes-stepped-face-bracket] file: ok 1 ok  (cells 483, bars 11052, left out 0, builds 1, 10099 ms)
+  octet      print     aes-stepped-face-bracket   ok
+  [octet-str-auto-face-cube] cells 4 (floor 4.74 mm, largest 6.00), bars 144, cut ends 64 (0 open), skin bars 48
+  octet      lays      str-auto-face-cube         ok
+  octet      two_lines str-auto-face-cube         ok
+  [octet-str-auto-face-cube] before the drop: cut ends 64 (0 open), skin bars 48; strut ends 192 (0 loose)
+  octet      skin      str-auto-face-cube         ok
+  octet      joins     str-auto-face-cube         ok
+  octet      loose     str-auto-face-cube         ok
+  [octet-str-auto-face-cube] file: ok 1 ok  (cells 4, bars 144, left out 0, builds 1, 4396 ms)
+  octet      print     str-auto-face-cube         ok
+  octet      strength  str-auto-face-cube         ok
+  [octet-str-auto-face-cube] margin 25.228
+  [octet-str-typed-whole-cube] cells 8 (floor 4.74 mm, largest 5.00), bars 240, cut ends 0 (0 open), skin bars 0
+  octet      lays      str-typed-whole-cube       ok
+  octet      two_lines str-typed-whole-cube       ok
+  [octet-str-typed-whole-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 480 (0 loose)
+  octet      skin      str-typed-whole-cube       ok
+  octet      joins     str-typed-whole-cube       ok
+  octet      loose     str-typed-whole-cube       ok
+  [octet-str-typed-whole-cube] file: ok 1 ok  (cells 8, bars 240, left out 0, builds 1, 5335 ms)
+  octet      print     str-typed-whole-cube       ok
+  octet      strength  str-typed-whole-cube       ok
+  octet      credit    str-typed-whole-cube       ok
+  [octet-str-typed-whole-cube] margin nan
+  octet      cap       auto-whole-coupon16        ok
+  [octet-coupon] ok  (cells 140, bars 2840, bed 1464 mm2, builds 4) -> /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build/lattice_types_matrix/coupon-octet/octet_coupon_lattice.stl
+  octet      coupon    8mm                        ok
+
+== bcc ==
+  width bounds: open look 0.1898, touch 0.7071; floor cell at two lines 4.74 mm (quilt 1.27 mm)
+  band 0.0319..0.5929; density at the open look 0.1630; the band's floor at strut/cell 0.0794 (within the open look)
+  [bcc-aes-auto-face-cube] cells 4 (floor 4.74 mm, largest 6.00), bars 68, cut ends 24 (0 open), skin bars 36
+  bcc        lays      aes-auto-face-cube         ok
+  bcc        two_lines aes-auto-face-cube         ok
+  [bcc-aes-auto-face-cube] before the drop: cut ends 24 (0 open), skin bars 36; strut ends 64 (0 loose)
+  bcc        skin      aes-auto-face-cube         ok
+  bcc        joins     aes-auto-face-cube         ok
+  bcc        loose     aes-auto-face-cube         ok
+  [bcc-aes-auto-face-cube] file: ok 1 ok  (cells 4, bars 68, left out 4, builds 6, 371 ms)
+  bcc        print     aes-auto-face-cube         ok
+  [bcc-aes-typed-whole-cube] cells 8 (floor 4.74 mm, largest 5.00), bars 56, cut ends 0 (0 open), skin bars 0
+  bcc        lays      aes-typed-whole-cube       ok
+  bcc        two_lines aes-typed-whole-cube       ok
+  [bcc-aes-typed-whole-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 128 (0 loose)
+  bcc        skin      aes-typed-whole-cube       ok
+  bcc        joins     aes-typed-whole-cube       ok
+  bcc        loose     aes-typed-whole-cube       ok
+  bcc        geometry  aes-typed-whole-cube       ok
+  [bcc-aes-typed-whole-cube] file: ok 1 ok  (cells 8, bars 56, left out 0, builds 1, 96 ms)
+  bcc        print     aes-typed-whole-cube       ok
+  [bcc-aes-auto-whole-plate] cells 176 (floor 4.74 mm, largest 4.74), bars 720, cut ends 0 (0 open), skin bars 0
+  bcc        lays      aes-auto-whole-plate       ok
+  bcc        two_lines aes-auto-whole-plate       ok
+  [bcc-aes-auto-whole-plate] before the drop: cut ends 368 (368 open), skin bars 0; strut ends 2184 (0 loose)
+  bcc        joins     aes-auto-whole-plate       ok
+  bcc        loose     aes-auto-whole-plate       ok
+  [bcc-aes-auto-whole-plate] file: ok 1 ok  (cells 176, bars 720, left out 0, builds 1, 1083 ms)
+  bcc        print     aes-auto-whole-plate       ok
+  [bcc-aes-typed-face-plate] cells 152 (floor 4.74 mm, largest 5.00), bars 1224, cut ends 300 (0 open), skin bars 520
+  bcc        lays      aes-typed-face-plate       ok
+  bcc        two_lines aes-typed-face-plate       ok
+  [bcc-aes-typed-face-plate] before the drop: cut ends 300 (0 open), skin bars 520; strut ends 1408 (0 loose)
+  bcc        skin      aes-typed-face-plate       ok
+  bcc        joins     aes-typed-face-plate       ok
+  bcc        loose     aes-typed-face-plate       ok
+  [bcc-aes-typed-face-plate] file: ok 1 ok  (cells 152, bars 1224, left out 0, builds 1, 2940 ms)
+  bcc        print     aes-typed-face-plate       ok
+  [bcc-aes-auto-3mf-bracket] cells 63 (floor 4.74 mm, largest 6.00), bars 654, cut ends 112 (0 open), skin bars 150
+  bcc        lays      aes-auto-3mf-bracket       ok
+  bcc        two_lines aes-auto-3mf-bracket       ok
+  [bcc-aes-auto-3mf-bracket] before the drop: cut ends 112 (0 open), skin bars 150; strut ends 1008 (0 loose)
+  bcc        skin      aes-auto-3mf-bracket       ok
+  bcc        joins     aes-auto-3mf-bracket       ok
+  bcc        loose     aes-auto-3mf-bracket       ok
+  [bcc-aes-auto-3mf-bracket] file: ok 1 ok  (cells 63, bars 654, left out 24, builds 3, 4334 ms)
+  bcc        print     aes-auto-3mf-bracket       ok
+  bcc        painted   aes-auto-3mf-bracket       ok
+  [bcc-aes-grade-face-plate] cells 136 (floor 1.27 mm, largest 5.09), bars 1124, cut ends 268 (0 open), skin bars 460
+  bcc        lays      aes-grade-face-plate       ok
+  bcc        two_lines aes-grade-face-plate       ok
+  [bcc-aes-grade-face-plate] before the drop: cut ends 268 (0 open), skin bars 460; strut ends 1328 (0 loose)
+  bcc        skin      aes-grade-face-plate       ok
+  bcc        joins     aes-grade-face-plate       ok
+  bcc        loose     aes-grade-face-plate       ok
+  [bcc-aes-grade-face-plate] file: ok 1 ok  (cells 136, bars 1124, left out 8, builds 2, 2914 ms)
+  bcc        print     aes-grade-face-plate       ok
+  [bcc-aes-stepped-face-bracket] cells 1503 (floor 1.27 mm, largest 6.00), bars 8480, cut ends 0 (0 open), skin bars 0
+  bcc        lays      aes-stepped-face-bracket   ok
+  bcc        two_lines aes-stepped-face-bracket   ok
+  [bcc-aes-stepped-face-bracket] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 17008 (0 loose)
+  bcc        skin      aes-stepped-face-bracket   ok
+  bcc        joins     aes-stepped-face-bracket   ok
+  bcc        loose     aes-stepped-face-bracket   ok
+  [bcc-aes-stepped-face-bracket] file: ok 1 ok  (cells 1503, bars 8480, left out 0, builds 1, 13417 ms)
+  bcc        print     aes-stepped-face-bracket   ok
+  [bcc-str-auto-face-cube] cells 4 (floor 4.74 mm, largest 6.00), bars 68, cut ends 24 (0 open), skin bars 36
+  bcc        lays      str-auto-face-cube         ok
+  bcc        two_lines str-auto-face-cube         ok
+  [bcc-str-auto-face-cube] before the drop: cut ends 24 (0 open), skin bars 36; strut ends 64 (0 loose)
+  bcc        skin      str-auto-face-cube         ok
+  bcc        joins     str-auto-face-cube         ok
+  bcc        loose     str-auto-face-cube         ok
+  [bcc-str-auto-face-cube] file: ok 1 ok  (cells 4, bars 68, left out 4, builds 6, 6133 ms)
+  bcc        print     str-auto-face-cube         ok
+  bcc        strength  str-auto-face-cube         ok
+  [bcc-str-auto-face-cube] margin 25.228
+  [bcc-str-typed-whole-cube] cells 8 (floor 4.74 mm, largest 5.00), bars 56, cut ends 0 (0 open), skin bars 0
+  bcc        lays      str-typed-whole-cube       ok
+  bcc        two_lines str-typed-whole-cube       ok
+  [bcc-str-typed-whole-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 128 (0 loose)
+  bcc        skin      str-typed-whole-cube       ok
+  bcc        joins     str-typed-whole-cube       ok
+  bcc        loose     str-typed-whole-cube       ok
+  [bcc-str-typed-whole-cube] file: ok 1 ok  (cells 8, bars 56, left out 0, builds 1, 6704 ms)
+  bcc        print     str-typed-whole-cube       ok
+  bcc        strength  str-typed-whole-cube       ok
+  bcc        credit    str-typed-whole-cube       ok
+  [bcc-str-typed-whole-cube] margin nan
+  bcc        cap       auto-whole-coupon16        ok
+  [bcc-coupon] ok  (cells 140, bars 1272, bed 1464 mm2, builds 4) -> /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build/lattice_types_matrix/coupon-bcc/bcc_coupon_lattice.stl
+  bcc        coupon    8mm                        ok
+
+== kelvin ==
+  width bounds: open look 0.1898, touch 0.3536; floor cell at two lines 4.74 mm (quilt 2.55 mm)
+  band 0.0938..0.5052; density at the open look 0.1889; the band's floor at strut/cell 0.1281 (within the open look)
+  [kelvin-aes-auto-face-cube] cells 4 (floor 4.74 mm, largest 6.00), bars 68, cut ends 0 (0 open), skin bars 0
+  kelvin     lays      aes-auto-face-cube         ok
+  kelvin     two_lines aes-auto-face-cube         ok
+  [kelvin-aes-auto-face-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 136 (0 loose)
+  kelvin     skin      aes-auto-face-cube         ok
+  kelvin     joins     aes-auto-face-cube         ok
+  kelvin     loose     aes-auto-face-cube         ok
+  [kelvin-aes-auto-face-cube] file: ok 1 ok  (cells 4, bars 68, left out 0, builds 1, 100 ms)
+  kelvin     print     aes-auto-face-cube         ok
+  [kelvin-aes-typed-whole-cube] cells 8 (floor 4.74 mm, largest 5.00), bars 240, cut ends 0 (0 open), skin bars 0
+  kelvin     lays      aes-typed-whole-cube       ok
+  kelvin     two_lines aes-typed-whole-cube       ok
+  [kelvin-aes-typed-whole-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 480 (0 loose)
+  kelvin     skin      aes-typed-whole-cube       ok
+  kelvin     joins     aes-typed-whole-cube       ok
+  kelvin     loose     aes-typed-whole-cube       ok
+  kelvin     geometry  aes-typed-whole-cube       ok
+  [kelvin-aes-typed-whole-cube] file: ok 1 ok  (cells 8, bars 240, left out 0, builds 1, 424 ms)
+  kelvin     print     aes-typed-whole-cube       ok
+  [kelvin-aes-auto-whole-plate] cells 176 (floor 4.74 mm, largest 4.74), bars 2008, cut ends 0 (0 open), skin bars 0
+  kelvin     lays      aes-auto-whole-plate       ok
+  kelvin     two_lines aes-auto-whole-plate       ok
+  [kelvin-aes-auto-whole-plate] before the drop: cut ends 56 (56 open), skin bars 0; strut ends 4152 (0 loose)
+  kelvin     joins     aes-auto-whole-plate       ok
+  kelvin     loose     aes-auto-whole-plate       ok
+  [kelvin-aes-auto-whole-plate] file: ok 1 ok  (cells 176, bars 2008, left out 0, builds 1, 3008 ms)
+  kelvin     print     aes-auto-whole-plate       ok
+  [kelvin-aes-typed-face-plate] cells 152 (floor 4.74 mm, largest 5.00), bars 1932, cut ends 256 (0 open), skin bars 220
+  kelvin     lays      aes-typed-face-plate       ok
+  kelvin     two_lines aes-typed-face-plate       ok
+  [kelvin-aes-typed-face-plate] before the drop: cut ends 264 (8 open), skin bars 220; strut ends 3472 (0 loose)
+  kelvin     skin      aes-typed-face-plate       ok
+  kelvin     joins     aes-typed-face-plate       ok
+  kelvin     loose     aes-typed-face-plate       ok
+  [kelvin-aes-typed-face-plate] file: ok 1 ok  (cells 152, bars 1932, left out 8, builds 2, 5643 ms)
+  kelvin     print     aes-typed-face-plate       ok
+  [kelvin-aes-auto-3mf-bracket] cells 63 (floor 4.74 mm, largest 6.00), bars 1548, cut ends 16 (0 open), skin bars 8
+  kelvin     lays      aes-auto-3mf-bracket       ok
+  kelvin     two_lines aes-auto-3mf-bracket       ok
+  [kelvin-aes-auto-3mf-bracket] before the drop: cut ends 20 (4 [loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9240 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9240 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9240 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9240 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9240 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9240 (structural pad, NOT a face protection)
+open), skin bars 8; strut ends 3096 (0 loose)
+  kelvin     skin      aes-auto-3mf-bracket       ok
+  kelvin     joins     aes-auto-3mf-bracket       ok
+  kelvin     loose     aes-auto-3mf-bracket       ok
+  [kelvin-aes-auto-3mf-bracket] file: ok 1 ok  (cells 63, bars 1592, left out 6, builds 3, 4420 ms)
+  kelvin     print     aes-auto-3mf-bracket       ok
+  kelvin     painted   aes-auto-3mf-bracket       ok
+  [kelvin-aes-grade-face-plate] cells 136 (floor 2.55 mm, largest 5.09), bars 1828, cut ends 224 (0 open), skin bars 196
+  kelvin     lays      aes-grade-face-plate       ok
+  kelvin     two_lines aes-grade-face-plate       ok
+  [kelvin-aes-grade-face-plate] before the drop: cut ends 232 (8 open), skin bars 196; strut ends 3312 (0 loose)
+  kelvin     skin      aes-grade-face-plate       ok
+  kelvin     joins     aes-grade-face-plate       ok
+  kelvin     loose     aes-grade-face-plate       ok
+  [kelvin-aes-grade-face-plate] file: ok 1 ok  (cells 136, bars 1828, left out 0, builds 1, 3788 ms)
+  kelvin     print     aes-grade-face-plate       ok
+  [kelvin-aes-stepped-face-bracket] cells 483 (floor 2.55 mm, largest 6.00), bars 11000, cut ends 0 (0 open), skin bars 0
+  kelvin     lays      aes-stepped-face-bracket   ok
+  kelvin     two_lines aes-stepped-face-bracket   ok
+  [kelvin-aes-stepped-face-bracket] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 22000 (0 loose)
+  kelvin     skin      aes-stepped-face-bracket   ok
+  kelvin     joins     aes-stepped-face-bracket   ok
+  kelvin     loose     aes-stepped-face-bracket   ok
+  [kelvin-aes-stepped-face-bracket] file: ok 1 ok  (cells 483, bars 11000, left out 0, builds 1, 12940 ms)
+  kelvin     print     aes-stepped-face-bracket   ok
+  [kelvin-str-auto-face-cube] cells 4 (floor 4.74 mm, largest 6.00), bars 68, cut ends 0 (0 open), skin bars 0
+  kelvin     lays      str-auto-face-cube         ok
+  kelvin     two_lines str-auto-face-cube         ok
+  [kelvin-str-auto-face-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 136 (0 loose)
+  kelvin     skin      str-auto-face-cube         ok
+  kelvin     joins     str-auto-face-cube         ok
+  kelvin     loose     str-auto-face-cube         ok
+  [kelvin-str-auto-face-cube] file: ok 1 ok  (cells 4, bars 68, left out 0, builds 1, 6115 ms)
+  kelvin     print     str-auto-face-cube         ok
+  kelvin     strength  str-auto-face-cube         ok
+  [kelvin-str-auto-face-cube] margin 25.228
+  [kelvin-str-typed-whole-cube] cells 8 (floor 4.74 mm, largest 5.00), bars 240, cut ends 0 (0 open), skin bars 0
+  kelvin     lays      str-typed-whole-cube       ok
+  kelvin     two_lines str-typed-whole-cube       ok
+  [kelvin-str-typed-whole-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 480 (0 loose)
+  kelvin     skin      str-typed-whole-cube       ok
+  kelvin     joins     str-typed-whole-cube       ok
+  kelvin     loose     str-typed-whole-cube       ok
+  [kelvin-str-typed-whole-cube] file: ok 1 ok  (cells 8, bars 240, left out 0, builds 1, 10245 ms)
+  kelvin     print     str-typed-whole-cube       ok
+  kelvin     strength  str-typed-whole-cube       ok
+  kelvin     credit    str-typed-whole-cube       ok
+  [kelvin-str-typed-whole-cube] margin nan
+  kelvin     cap       auto-whole-coupon16        ok
+  [kelvin-coupon] ok  (cells 140, bars 2053, bed 1464 mm2, builds 1) -> /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build/lattice_types_matrix/coupon-kelvin/kelvin_coupon_lattice.stl
+  kelvin     coupon    8mm                        ok
+
+== diamond ==
+  width bounds: open look 0.1898, touch 0.3536; floor cell at two lines 4.74 mm (quilt 2.55 mm)
+  band 0.0387..0.5920; density at the open look 0.1630; the band's floor at strut/cell 0.0879 (within the open look)
+  [diamond-aes-auto-face-cube] cells 4 (floor 4.74 mm, largest 6.00), bars 28, cut ends 0 (0 open), skin bars 0
+  diamond    lays      aes-auto-face-cube         ok
+  diamond    two_lines aes-auto-face-cube         ok
+  [diamond-aes-auto-face-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 72 (0 loose)
+  diamond    skin      aes-auto-face-cube         ok
+  diamond    joins     aes-auto-face-cube         ok
+  diamond    loose     aes-auto-face-cube         ok
+  [diamond-aes-auto-face-cube] file: ok 1 ok  (cells 4, bars 28, left out 0, builds 1, 111 ms)
+  diamond    print     aes-auto-face-cube         ok
+  [diamond-aes-typed-whole-cube] cells 8 (floor 4.74 mm, largest 5.00), bars 112, cut ends 0 (0 open), skin bars 0
+  diamond    lays      aes-typed-whole-cube       ok
+  diamond    two_lines aes-typed-whole-cube       ok
+  [diamond-aes-typed-whole-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 256 (0 loose)
+  diamond    skin      aes-typed-whole-cube       ok
+  diamond    joins     aes-typed-whole-cube       ok
+  diamond    loose     aes-typed-whole-cube       ok
+  diamond    geometry  aes-typed-whole-cube       ok
+  [diamond-aes-typed-whole-cube] file: ok 1 ok  (cells 8, bars 112, left out 0, builds 1, 174 ms)
+  diamond    print     aes-typed-whole-cube       ok
+  [diamond-aes-auto-whole-plate] cells 176 (floor 4.74 mm, largest 4.74), bars 1218, cut ends 0 (0 open), skin bars 0
+  diamond    lays      aes-auto-whole-plate       ok
+  diamond    two_lines aes-auto-whole-plate       ok
+  [diamond-aes-auto-whole-plate] before the drop: cut ends 332 (332 open), skin bars 0; strut ends 3152 (0 loose)
+  diamond    joins     aes-auto-whole-plate       ok
+  diamond    loose     aes-auto-whole-plate       ok
+  [diamond-aes-auto-whole-plate] file: ok 1 ok  (cells 176, bars 1218, left out 0, builds 1, 2288 ms)
+  diamond    print     aes-auto-whole-plate       ok
+  [diamond-aes-typed-face-plate] cells 152 (floor 4.74 mm, largest 5.00), bars 1530, cut ends 252 (0 open), skin bars 432
+  diamond    lays      aes-typed-face-plate       ok
+  diamond    two_lines aes-typed-face-plate       ok
+  [diamond-aes-typed-face-plate] before the drop: cut ends 256 (4 open), skin bars 432; strut ends 2220 (0 loose)
+  diamond    skin      aes-typed-face-plate       ok
+  diamond    joins     aes-typed-face-plate       ok
+  diamond    loose     aes-typed-face-plate       ok
+  [diamond-aes-typed-face-plate] file: ok 1 ok  (cells 152, bars 1530, left out 24, builds 2, 6268 ms)
+  diamond    print     aes-typed-face-plate       ok
+  [diamond-aes-auto-3mf-bracket] cells 63 (floor 4.74 mm, largest 6.00), bars 866, cut ends 8 (0 open), skin bars 6
+  diamond    lays      aes-auto-3mf-bracket       ok
+  diamond    two_lines aes-auto-3mf-bracket       ok
+  [diamond-aes-auto-3mf-bracket] before the drop: cut ends 8 (0 open), skin bars 6; strut ends 1736 (0 loose)
+  diamond    skin      aes-auto-3mf-bracket       ok
+  diamond    joins     aes-auto-3mf-bracket       ok
+  diamond    loose     aes-auto-3mf-bracket       ok
+  [diamond-aes-auto-3mf-bracket] file: ok 1 ok  (cells 63, bars 931, left out 12, builds 3, 7237 ms)
+  diamond    print     aes-auto-3mf-bracket       ok
+  diamond    painted   aes-auto-3mf-bracket       ok
+  [diamond-aes-grade-face-plate] cells 136 (floor 2.55 mm, largest 5.09), bars 1454, cut ends 240 (0 open), skin bars 404
+  diamond    lays      aes-grade-face-plate       ok
+  diamond    two_lines aes-grade-face-plate       ok
+  [diamond-aes-grade-face-plate] before the drop: cut ends 244 (4 open), skin bars 404; strut ends 2132 (0 loose)
+  diamond    skin      aes-grade-face-plate       ok
+  diamond    joins     aes-grade-face-plate       ok
+  diamond    loose     aes-grade-face-plate       ok
+  [diamond-aes-grade-face-plate] file: ok 1 ok  (cells 136, bars 1454, left out 8, builds 2, 6127 ms)
+  diamond    print     aes-grade-face-plate       ok
+  [diamond-aes-stepped-face-bracket] cells 483 (floor 2.55 mm, largest 6.00), bars 6432, cut ends 0 (0 open), skin bars 0
+  diamond    lays      aes-stepped-face-bracket   ok
+  diamond    two_lines aes-stepped-face-bracket   ok
+  [diamond-aes-stepped-face-bracket] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 13152 (0 loose)
+  diamond    skin      aes-stepped-face-bracket   ok
+  diamond    joins     aes-stepped-face-bracket   ok
+  diamond    loose     aes-stepped-face-bracket   ok
+  [diamond-aes-stepped-face-bracket] file: ok 1 ok  (cells 483, bars 6432, left out 0, builds 1, 10349 ms)
+  diamond    print     aes-stepped-face-bracket   ok
+  [diamond-str-auto-face-cube] cells 4 (floor 4.74 mm, largest 6.00), bars 28, cut ends 0 (0 open), skin bars 0
+  diamond    lays      str-auto-face-cube         ok
+  diamond    two_lines str-auto-face-cube         ok
+  [diamond-str-auto-face-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 72 (0 loose)
+  diamond    skin      str-auto-face-cube         ok
+  diamond    joins     str-auto-face-cube         ok
+  diamond    loose     str-auto-face-cube         ok
+  [diamond-str-auto-face-cube] file: ok 1 ok  (cells 4, bars 28, left out 0, builds 1, 4739 ms)
+  diamond    print     str-auto-face-cube         ok
+  diamond    strength  str-auto-face-cube         ok
+  [diamond-str-auto-face-cube] margin 25.228
+  [diamond-str-typed-whole-cube] cells 8 (floor 4.74 mm, largest 5.00), bars 112, cut ends 0 (0 open), skin bars 0
+  diamond    lays      str-typed-whole-cube       ok
+  diamond    two_lines str-typed-whole-cube       ok
+  [diamond-str-typed-whole-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 256 (0 loose)
+  diamond    skin      str-typed-whole-cube       ok
+  diamond    joins     str-typed-whole-cube       ok
+  diamond    loose     str-typed-whole-cube       ok
+  [diamond-str-typed-whole-cube] file: ok 1 ok  (cells 8, bars 112, left out 0, builds 1, 6688 ms)
+  diamond    print     str-typed-whole-cube       ok
+  diamond    strength  str-typed-whole-cube       ok
+  diamond    credit    str-typed-whole-cube       ok
+  [diamond-str-typed-whole-cube] margin nan
+  diamond    cap       auto-whole-coupon16        ok
+  [diamond-coupon] ok  (cells 140, bars 1538, bed 1464 mm2, builds 3) -> /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build/lattice_types_matrix/coupon-diamond/diamond_coupon_lattice.stl
+  diamond    coupon    8mm                        ok
+
+== fcc ==
+  width bounds: open look 0.1898, touch 0.5774; floor cell at two lines 4.74 mm (quilt 1.56 mm)
+  band 0.0950..0.5909; density at the open look 0.1937; the band's floor at strut/cell 0.1279 (within the open look)
+  [fcc-aes-auto-face-cube] cells 4 (floor 4.74 mm, largest 6.00), bars 76, cut ends 32 (0 open), skin bars 28
+  fcc        lays      aes-auto-face-cube         ok
+  fcc        two_lines aes-auto-face-cube         ok
+  [fcc-aes-auto-face-cube] before the drop: cut ends 32 (0 open), skin bars 28; strut ends 96 (0 loose)
+  fcc        skin      aes-auto-face-cube         ok
+  fcc        joins     aes-auto-face-cube         ok
+  fcc        loose     aes-auto-face-cube         ok
+  [fcc-aes-auto-face-cube] file: ok 1 ok  (cells 4, bars 76, left out 0, builds 1, 217 ms)
+  fcc        print     aes-auto-face-cube         ok
+  [fcc-aes-typed-whole-cube] cells 8 (floor 4.74 mm, largest 5.00), bars 144, cut ends 0 (0 open), skin bars 0
+  fcc        lays      aes-typed-whole-cube       ok
+  fcc        two_lines aes-typed-whole-cube       ok
+  [fcc-aes-typed-whole-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 288 (0 loose)
+  fcc        skin      aes-typed-whole-cube       ok
+  fcc        joins     aes-typed-whole-cube       ok
+  fcc        loose     aes-typed-whole-cube       ok
+  fcc        geometry  aes-typed-whole-cube       ok
+  [fcc-aes-typed-whole-cube] file: ok 1 ok  (cells 8, bars 144, left out 0, builds 1, 234 ms)
+  fcc        print     aes-typed-whole-cube       ok
+  [fcc-aes-auto-whole-plate] cells 176 (floor 4.74 mm, largest 4.74), bars 972, cut ends 0 (0 open), skin bars 0
+  fcc        lays      aes-auto-whole-plate       ok
+  fcc        two_lines aes-auto-whole-plate       ok
+  [fcc-aes-auto-whole-plate] before the drop: cut ends 88 (88 open), skin bars 0; strut ends 2160 (0 loose)
+  fcc        joins     aes-auto-whole-plate       ok
+  fcc        loose     aes-auto-whole-plate       ok
+  [fcc-aes-auto-whole-plate] file: ok 1 ok  (cells 176, bars 972, left out 0, builds 1, 2107 ms)
+  fcc        print     aes-auto-whole-plate       ok
+  [fcc-aes-typed-face-plate] cells 152 (floor 4.74 mm, largest 5.00), bars 1152, cut ends 288 (0 open), skin bars 248
+  fcc        lays      aes-typed-face-plate       ok
+  fcc        two_lines aes-typed-face-plate       ok
+  [fcc-aes-typed-face-plate] before the drop: cut ends 288 (0 open), skin bars 248; strut ends 1840 (0 loose)
+  fcc        skin      aes-typed-face-plate       ok
+  fcc        joins     aes-typed-face-plate       ok
+  fcc        loose     aes-typed-face-plate       ok
+  [fcc-aes-typed-face-plate] file: ok 1 ok  (cells 152, bars 1152, left out 8, builds 2, 5614 ms)
+  fcc        print     aes-typed-face-plate       ok
+  [fcc-aes-auto-3mf-bracket] cells 63 (floor 4.74 mm, largest 6.00), bars 1048, cut ends 148 (0 open), skin bars 120
+  fcc        lays      aes-auto-3mf-bracket       ok
+  fcc        two_lines aes-auto-3mf-bracket       ok
+  [fcc-aes-auto-3mf-bracket] before the drop: cut ends 164 (16 open), skin bars 120; strut ends 1888 (0 loose)
+  fcc        skin      aes-auto-3mf-bracket       ok
+  fcc        joins     aes-auto-3mf-bracket       ok
+  fcc        loose     aes-auto-3mf-bracket       ok
+  [fcc-aes-auto-3mf-bracket] file: ok 1 ok  (cells 63, bars 1048, left out 0, builds 1, 2621 ms)
+  fcc        print     aes-auto-3mf-bracket       ok
+  fcc        painted   aes-auto-3mf-bracket       ok
+  [fcc-aes-grade-face-plate] cells 344 (floor 1.56 mm, largest 3.12), bars 4072, cut ends 1276 (0 open), skin bars 1212
+  fcc        lays      aes-grade-face-plate       ok
+  fcc        two_lines aes-grade-face-plate       ok
+  [fcc-aes-grade-face-plate] before the drop: cut ends 1276 (0 open), skin bars 1212; strut ends 5720 (0 loose)
+  fcc        skin      aes-grade-face-plate       ok
+  fcc        joins     aes-grade-face-plate       ok
+  fcc        loose     aes-grade-face-plate       ok
+  [fcc-aes-grade-face-plate] file: ok 1 ok  (cells 344, bars 4072, left out 0, builds 1, 5263 ms)
+  fcc        print     aes-grade-face-plate       ok
+  [fcc-aes-stepped-face-bracket] cells 1098 (floor 1.56 mm, largest 6.00), bars 15032, cut ends 1000 (0 open), skin bars 924
+  fcc        lays      aes-stepped-face-bracket   ok
+  fcc        two_lines aes-stepped-face-bracket   ok
+  [fcc-aes-stepped-face-bracket] before the drop: cut ends 1032 (32 open), skin bars 924; strut ends 28280 (0 loose)
+  fcc        skin      aes-stepped-face-bracket   ok
+  fcc        joins     aes-stepped-face-bracket   ok
+  fcc        loose     aes-stepped-face-bracket   ok
+  [fcc-aes-stepped-face-bracket] file: ok 1 ok  (cells 1098, bars 15032, left out 0, builds 1, 15956 ms)
+  fcc        print     aes-stepped-face-bracket   ok
+  [fcc-str-auto-face-cube] cells 4 (floor 4.74 mm, largest 6.00), bars 76, cut ends 32 (0 open), skin bars 28
+  fcc        lays      str-auto-face-cube         ok
+  fcc        two_lines str-auto-face-cube         ok
+  [fcc-str-auto-face-cube] before the drop: cut ends 32 (0 open), skin bars 28; strut ends 96 (0 loose)
+  fcc        skin      str-auto-face-cube         ok
+  fcc        joins     str-auto-face-cube         ok
+  fcc        loose     str-auto-face-cube         ok
+  [fcc-str-auto-face-cube] file: ok 1 ok  (cells 4, bars 76, left out 0, builds 1, 4293 ms)
+  fcc        print     str-auto-face-cube         ok
+  fcc        strength  str-auto-face-cube         ok
+  [fcc-str-auto-face-cube] margin 25.228
+  [fcc-str-typed-whole-cube] cells 8 (floor 4.74 mm, largest 5.00), bars 144, cut ends 0 (0 open), skin bars 0
+  fcc        lays      str-typed-whole-cube       ok
+  fcc        two_lines str-typed-whole-cube       ok
+  [fcc-str-typed-whole-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 288 (0 loose)
+  fcc        skin      str-typed-whole-cube       ok
+  fcc        joins     str-typed-whole-cube       ok
+  fcc        loose     str-typed-whole-cube       ok
+  [fcc-str-typed-whole-cube] file: ok 1 ok  (cells 8, bars 144, left out 0, builds 1, 3627 ms)
+  fcc        print     str-typed-whole-cube       ok
+  fcc        strength  str-typed-whole-[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9240 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9240 (structural pad, NOT a face protection)
+[mg-safe] lambda_max(D^-1 A) per smoothed level (omega=0.60 => safe <= 3.33): 4.064 4.143 ; lambda_max(D_l1^-1 A): 0.843 0.956
+[mg-safe] solve 1: shipped stalled (300 cycles, rel res 1.031e-01) -> multigrid (l1 smoother) CONVERGED in 75 cycles, rel res 7.636e-09, 1958 ms ; tol 1e-08, no guess (cold) ; loose pieces at the floor: 0 of 0 pieces (0 vox, largest 0, 0 frozen) of 0 elements
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9240 (structural pad, NOT a face protection)
+[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9240 (structural pad, NOT a face protection)
+cube       ok
+  fcc        credit    str-typed-whole-cube       ok
+  [fcc-str-typed-whole-cube] margin nan
+  fcc        cap       auto-whole-coupon16        ok
+  [fcc-coupon] ok  (cells 140, bars 1431, bed 1464 mm2, builds 2) -> /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build/lattice_types_matrix/coupon-fcc/fcc_coupon_lattice.stl
+  fcc        coupon    8mm                        ok
+
+== sc ==
+  width bounds: open look 0.1898, touch 1.0000; floor cell at two lines 4.74 mm (quilt 0.90 mm)
+  band 0.0161..0.4964; density at the open look 0.0756; the band's floor at strut/cell 0.0846 (within the open look)
+  [sc-aes-auto-face-cube] cells 4 (floor 4.74 mm, largest 6.00), bars 17, cut ends 8 (0 open), skin bars 8
+  sc         lays      aes-auto-face-cube         ok
+  sc         two_lines aes-auto-face-cube         ok
+  [sc-aes-auto-face-cube] before the drop: cut ends 8 (0 open), skin bars 8; strut ends 18 (0 loose)
+  sc         skin      aes-auto-face-cube         ok
+  sc         joins     aes-auto-face-cube         ok
+  sc         loose     aes-auto-face-cube         ok
+  [sc-aes-auto-face-cube] file: ok 1 ok  (cells 4, bars 17, left out 0, builds 1, 49 ms)
+  sc         print     aes-auto-face-cube         ok
+  [sc-aes-typed-whole-cube] cells 8 (floor 4.74 mm, largest 5.00), bars 54, cut ends 0 (0 open), skin bars 0
+  sc         lays      aes-typed-whole-cube       ok
+  sc         two_lines aes-typed-whole-cube       ok
+  [sc-aes-typed-whole-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 108 (0 loose)
+  sc         skin      aes-typed-whole-cube       ok
+  sc         joins     aes-typed-whole-cube       ok
+  sc         loose     aes-typed-whole-cube       ok
+  sc         geometry  aes-typed-whole-cube       ok
+  [sc-aes-typed-whole-cube] file: ok 1 ok  (cells 8, bars 54, left out 0, builds 1, 62 ms)
+  sc         print     aes-typed-whole-cube       ok
+  [sc-aes-auto-whole-plate] cells 176 (floor 4.74 mm, largest 4.74), bars 184, cut ends 0 (0 open), skin bars 0
+  sc         lays      aes-auto-whole-plate       ok
+  sc         two_lines aes-auto-whole-plate       ok
+  [sc-aes-auto-whole-plate] before the drop: cut ends 96 (96 open), skin bars 0; strut ends 560 (0 loose)
+  sc         joins     aes-auto-whole-plate       ok
+  sc         loose     aes-auto-whole-plate       ok
+  [sc-aes-auto-whole-plate] file: ok 1 ok  (cells 176, bars 184, left out 0, builds 1, 495 ms)
+  sc         print     aes-auto-whole-plate       ok
+  [sc-aes-typed-face-plate] cells 152 (floor 4.74 mm, largest 5.00), bars 456, cut ends 128 (0 open), skin bars 204
+  sc         lays      aes-typed-face-plate       ok
+  sc         two_lines aes-typed-face-plate       ok
+  [sc-aes-typed-face-plate] before the drop: cut ends 128 (0 open), skin bars 204; strut ends 504 (0 loose)
+  sc         skin      aes-typed-face-plate       ok
+  sc         joins     aes-typed-face-plate       ok
+  sc         loose     aes-typed-face-plate       ok
+  [sc-aes-typed-face-plate] file: ok 1 ok  (cells 152, bars 456, left out 0, builds 1, 1703 ms)
+  sc         print     aes-typed-face-plate       ok
+  [sc-aes-auto-3mf-bracket] cells 63 (floor 4.74 mm, largest 6.00), bars 338, cut ends 52 (0 open), skin bars 66
+  sc         lays      aes-auto-3mf-bracket       ok
+  sc         two_lines aes-auto-3mf-bracket       ok
+  [sc-aes-auto-3mf-bracket] before the drop: cut ends 52 (0 open), skin bars 66; strut ends 544 (0 loose)
+  sc         skin      aes-auto-3mf-bracket       ok
+  sc         joins     aes-auto-3mf-bracket       ok
+  sc         loose     aes-auto-3mf-bracket       ok
+  [sc-aes-auto-3mf-bracket] file: ok 1 ok  (cells 63, bars 338, left out 0, builds 1, 1699 ms)
+  sc         print     aes-auto-3mf-bracket       ok
+  sc         painted   aes-auto-3mf-bracket       ok
+  [sc-aes-grade-face-plate] cells 272 (floor 0.90 mm, largest 3.60), bars 812, cut ends 232 (0 open), skin bars 388
+  sc         lays      aes-grade-face-plate       ok
+  sc         two_lines aes-grade-face-plate       ok
+  [sc-aes-grade-face-plate] before the drop: cut ends 240 (8 open), skin bars 388; strut ends 864 (0 loose)
+  sc         skin      aes-grade-face-plate       ok
+  sc         joins     aes-grade-face-plate       ok
+  sc         loose     aes-grade-face-plate       ok
+  [sc-aes-grade-face-plate] file: ok 1 ok  (cells 272, bars 812, left out 0, builds 1, 2007 ms)
+  sc         print     aes-grade-face-plate       ok
+  [sc-aes-stepped-face-bracket] cells 2896 (floor 0.90 mm, largest 6.00), bars 13490, cut ends 0 (0 open), skin bars 0
+  sc         lays      aes-stepped-face-bracket   ok
+  sc         two_lines aes-stepped-face-bracket   ok
+  [sc-aes-stepped-face-bracket] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 26980 (0 loose)
+  sc         skin      aes-stepped-face-bracket   ok
+  sc         joins     aes-stepped-face-bracket   ok
+  sc         loose     aes-stepped-face-bracket   ok
+  [sc-aes-stepped-face-bracket] file: ok 1 ok  (cells 2896, bars 13490, left out 0, builds 1, 5419 ms)
+  sc         print     aes-stepped-face-bracket   ok
+  [sc-str-auto-face-cube] cells 4 (floor 4.74 mm, largest 6.00), bars 17, cut ends 8 (0 open), skin bars 8
+  sc         lays      str-auto-face-cube         ok
+  sc         two_lines str-auto-face-cube         ok
+  [sc-str-auto-face-cube] before the drop: cut ends 8 (0 open), skin bars 8; strut ends 18 (0 loose)
+  sc         skin      str-auto-face-cube         ok
+  sc         joins     str-auto-face-cube         ok
+  sc         loose     str-auto-face-cube         ok
+  [sc-str-auto-face-cube] file: ok 1 ok  (cells 4, bars 17, left out 0, builds 1, 4484 ms)
+  sc         print     str-auto-face-cube         ok
+  sc         strength  str-auto-face-cube         ok
+  [sc-str-auto-face-cube] margin 25.228
+  [sc-str-typed-whole-cube] cells 8 (floor 4.74 mm, largest 5.00), bars 54, cut ends 0 (0 open), skin bars 0
+  sc         lays      str-typed-whole-cube       ok
+  sc         two_lines str-typed-whole-cube       ok
+  [sc-str-typed-whole-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 108 (0 loose)
+  sc         skin      str-typed-whole-cube       ok
+  sc         joins     str-typed-whole-cube       ok
+  sc         loose     str-typed-whole-cube       ok
+  [sc-str-typed-whole-cube] file: ok 1 ok  (cells 8, bars 54, left out 0, builds 1, 26130 ms)
+  sc         print     str-typed-whole-cube       ok
+  sc         strength  str-typed-whole-cube       ok
+  sc         credit    str-typed-whole-cube       ok
+  [sc-str-typed-whole-cube] margin nan
+  sc         cap       auto-whole-coupon16        ok
+  [sc-coupon] ok  (cells 140, bars 449, bed 1464 mm2, builds 2) -> /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build/lattice_types_matrix/coupon-sc/sc_coupon_lattice.stl
+  sc         coupon    8mm                        ok
+
+== rhombic ==
+  width bounds: open look 0.1898, touch 0.3536; floor cell at two lines 4.74 mm (quilt 2.55 mm)
+  band 0.1724..0.5133; density at the open look 0.2920; the band's floor at strut/cell 0.1394 (within the open look)
+  [rhombic-aes-auto-face-cube] cells 4 (floor 4.74 mm, largest 6.00), bars 64, cut ends 0 (0 open), skin bars 0
+  rhombic    lays      aes-auto-face-cube         ok
+  rhombic    two_lines aes-auto-face-cube         ok
+  [rhombic-aes-auto-face-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 144 (0 loose)
+  rhombic    skin      aes-auto-face-cube         ok
+  rhombic    joins     aes-auto-face-cube         ok
+  rhombic    loose     aes-auto-face-cube         ok
+  [rhombic-aes-auto-face-cube] file: ok 1 ok  (cells 4, bars 64, left out 0, builds 1, 193 ms)
+  rhombic    print     aes-auto-face-cube         ok
+  [rhombic-aes-typed-whole-cube] cells 8 (floor 4.74 mm, largest 5.00), bars 256, cut ends 0 (0 open), skin bars 0
+  rhombic    lays      aes-typed-whole-cube       ok
+  rhombic    two_lines aes-typed-whole-cube       ok
+  [rhombic-aes-typed-whole-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 512 (0 loose)
+  rhombic    skin      aes-typed-whole-cube       ok
+  rhombic    joins     aes-typed-whole-cube       ok
+  rhombic    loose     aes-typed-whole-cube       ok
+  rhombic    geometry  aes-typed-whole-cube       ok
+  [rhombic-aes-typed-whole-cube] file: ok 1 ok  (cells 8, bars 256, left out 0, builds 1, 474 ms)
+  rhombic    print     aes-typed-whole-cube       ok
+  [rhombic-aes-auto-whole-plate] cells 176 (floor 4.74 mm, largest 4.74), bars 2496, cut ends 0 (0 open), skin bars 0
+  rhombic    lays      aes-auto-whole-plate       ok
+  rhombic    two_lines aes-auto-whole-plate       ok
+  [rhombic-aes-auto-whole-plate] before the drop: cut ends 664 (664 open), skin bars 0; strut ends 6328 (0 loose)
+  rhombic    joins     aes-auto-whole-plate       ok
+  rhombic    loose     aes-auto-whole-plate       ok
+  [rhombic-aes-auto-whole-plate] file: ok 1 ok  (cells 176, bars 2496, left out 0, builds 1, 3642 ms)
+  rhombic    print     aes-auto-whole-plate       ok
+  [rhombic-aes-typed-face-plate] cells 152 (floor 4.74 mm, largest 5.00), bars 2972, cut ends 524 (0 open), skin bars 740
+  rhombic    lays      aes-typed-face-plate       ok
+  rhombic    two_lines aes-typed-face-plate       ok
+  [rhombic-aes-typed-face-plate] before the drop: cut ends 524 (0 open), skin bars 740; strut ends 4464 (0 loose)
+  rhombic    skin      aes-typed-face-plate       ok
+  rhombic    joins     aes-typed-face-plate       ok
+  rhombic    loose     aes-typed-face-plate       ok
+  [rhombic-aes-typed-face-plate] file: ok 1 ok  (cells 152, bars 2972, left out 16, builds 2, 12659 ms)
+  rhombic    print     aes-typed-face-plate       ok
+  [rhombic-aes-auto-3mf-bracket] cells 63 (floor 4.74 mm, largest 6.00), bars 1744, cut ends 16 (0 open), skin bars 16
+  rhombic    lays      aes-auto-3mf-bracket       ok
+  rhombic    two_lines aes-auto-3mf-bracket       ok
+  [rhombic-aes-auto-3mf-bracket] before the drop: cut ends 16 (0 open), skin bars 16; strut ends 3472 (0 loose)
+  rhombic    skin      aes-auto-3mf-bracket       ok
+  rhombic    joins     aes-auto-3mf-bracket       ok
+  rhombic    loose     aes-auto-3mf-bracket       ok
+  [rhombic-aes-auto-3mf-bracket] file: ok 1 ok  (cells 63, bars 1872, left out 18, builds 3, 12399 ms)
+  rhombic    print     aes-auto-3mf-bracket       ok
+  rhombic    painted   aes-auto-3mf-bracket       ok
+  [rhombic-aes-grade-face-plate] cells 136 (floor 2.55 mm, largest 5.09), bars 2816, cut ends 492 (0 open), skin bars 688
+  rhombic    lays      aes-grade-face-plate       ok
+  rhombic    two_lines aes-grade-face-plate       ok
+  [rhombic-aes-grade-face-plate] before the drop: cut ends 492 (0 open), skin bars 688; strut ends 4256 (0 loose)
+  rhombic    skin      aes-grade-face-plate       ok
+  rhombic    joins     aes-grade-face-plate       ok
+  rhombic    loose     aes-grade-face-plate       ok
+  [rhombic-aes-grade-face-plate] file: ok 1 ok  (cells 136, bars 2816, left out 28, builds 2, 10285 ms)
+  rhombic    print     aes-grade-face-plate       ok
+  [rhombic-aes-stepped-face-bracket] cells 483 (floor 2.55 mm, largest 6.00), bars 13152, cut ends 0 (0 open), skin bars 0
+  rhombic    lays      aes-stepped-face-bracket   ok
+  rhombic    two_lines aes-stepped-face-bracket   ok
+  [rhombic-aes-stepped-face-bracket] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 26304 (0 loose)
+  rhombic    skin      aes-stepped-face-bracket   ok
+  rhombic    joins     aes-stepped-face-bracket   ok
+  rhombic    loose     aes-stepped-face-bracket   ok
+  [rhombic-aes-stepped-face-bracket] file: ok 1 ok  (cells 483, bars 13152, left out 0, builds 1, 21661 ms)
+  rhombic    print     aes-stepped-face-bracket   ok
+  [rhombic-str-auto-face-cube] cells 4 (floor 4.74 mm, largest 6.00), bars 64, cut ends 0 (0 open), skin bars 0
+  rhombic    lays      str-auto-face-cube         ok
+  rhombic    two_lines str-auto-face-cube         ok
+  [rhombic-str-auto-face-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 144 (0 loose)
+  rhombic    skin      str-auto-face-cube         ok
+  rhombic    joins     str-auto-face-cube         ok
+  rhombic    loose     str-auto-face-cube         ok
+  [rhombic-str-auto-face-cube] file: ok 1 ok  (cells 4, bars 64, left out 0, builds 1, 5754 ms)
+  rhombic    print     str-auto-face-cube         ok
+  rhombic    strength  str-auto-face-cube         ok
+  [rhombic-str-auto-face-cube] margin 25.228
+  [rhombic-str-typed-whole-cube] cells 8 (floor 4.74 mm, largest 5.00), bars 256, cut ends 0 (0 open), skin bars 0
+  rhombic    lays      str-typed-whole-cube       ok
+  rhombic    two_lines str-typed-whole-cube       ok
+  [rhombic-str-typed-whole-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 512 (0 loose)
+  rhombic    skin      str-typed-whole-cube       ok
+  rhombic    joins     str-typed-whole-cube       ok
+  rhombic    loose     str-typed-whole-cube       ok
+  [rhombic-str-typed-whole-cube] file: ok 1 ok  (cells 8, bars 256, left out 0, builds 1, 7935 ms)
+  rhombic    print     str-typed-whole-cube       ok
+  rhombic    strength  str-typed-whole-cube       ok
+  rhombic    credit    str-typed-whole-cube       ok
+  [rhombic-str-typed-whole-cube] margin nan
+  rhombic    cap       auto-whole-coupon16        ok
+  [rhombic-coupon] ok  (cells 140, bars 3056, bed 1464 mm2, builds 2) -> /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build/lattice_types_matrix/coupon-rhombic/rhombic_coupon_lattice.stl
+  rhombic    coupon    8mm                        ok
+
+== bccz ==
+  width bounds: open look 0.1898, touch 0.7071; floor cell at two lines 4.74 mm (quilt 1.27 mm)
+  [bccz-aes-auto-face-cube] cells 4 (floor 4.74 mm, largest 6.00), bars 69, cut ends 24 (0 open), skin bars 36
+  bccz       lays      aes-auto-face-cube         ok
+  bccz       two_lines aes-auto-face-cube         ok
+  [bccz-aes-auto-face-cube] before the drop: cut ends 24 (0 open), skin bars 36; strut ends 66 (0 loose)
+  bccz       skin      aes-auto-face-cube         ok
+  bccz       joins     aes-auto-face-cube         ok
+  bccz       loose     aes-auto-face-cube         ok
+  [bccz-aes-auto-face-cube] file: ok 1 ok  (cells 4, bars 69, left out 4, builds 6, 763 ms)
+  bccz       print     aes-auto-face-cube         ok
+  [bccz-aes-typed-whole-cube] cells 8 (floor 4.74 mm, largest 5.00), bars 82, cut ends 0 (0 open), skin bars 0
+  bccz       lays      aes-typed-whole-cube       ok
+  bccz       two_lines aes-typed-whole-cube       ok
+  [bccz-aes-typed-whole-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 164 (0 loose)
+  bccz       skin      aes-typed-whole-cube       ok
+  bccz       joins     aes-typed-whole-cube       ok
+  bccz       loose     aes-typed-whole-cube       ok
+  bccz       geometry  aes-typed-whole-cube       ok
+  [bccz-aes-typed-whole-cube] file: ok 1 ok  (cells 8, bars 82, left out 0, builds 1, 238 ms)
+  bccz       print     aes-typed-whole-cube       ok
+  [bccz-aes-auto-whole-plate] cells 176 (floor 4.74 mm, largest 4.74), bars 788, cut ends 0 (0 open), skin bars 0
+  bccz       lays      aes-auto-whole-plate       ok
+  bccz       two_lines aes-auto-whole-plate       ok
+  [bccz-aes-auto-whole-plate] before the drop: cut ends 436 (436 open), skin bars 0; strut ends 2456 (0 loose)
+  bccz       joins     aes-auto-whole-plate       ok
+  bccz       loose     aes-auto-whole-plate       ok
+  [bccz-aes-auto-whole-plate] file: ok 1 ok  (cells 176, bars 788, left out 0, builds 1, 2090 ms)
+  bccz       print     aes-auto-whole-plate       ok
+  [bccz-aes-typed-face-plate] cells 152 (floor 4.74 mm, largest 5.00), bars 1444, cut ends 412 (0 open), skin bars 628
+  bccz       lays      aes-typed-face-plate       ok
+  bccz       two_lines aes-typed-face-plate       ok
+  [bccz-aes-typed-face-plate] before the drop: cut ends 412 (0 open), skin bars 628; strut ends 1632 (0 loose)
+  bccz       skin      aes-typed-face-plate       ok
+  bccz       joins     aes-typed-face-plate       ok
+  bccz       loose     aes-typed-face-plate       ok
+  [bccz-aes-typed-face-plate] file: ok 1 ok  (cells 152, bars 1444, left out 16, builds 2, 6780 ms)
+  bccz       print     aes-typed-face-plate       ok
+  [bccz-aes-auto-3mf-bracket] cells 63 (floor 4.74 mm, largest 6.00), bars 702, cut ends 112 (0 open), skin bars 150
+  bccz       lays[loadcase] load-group 0: faces=1 |F|=20N voxels_tagged=1600 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=1 voxels_frozen=9240 (structural pad, NOT a face protection)
+      aes-auto-3mf-bracket       ok
+  bccz       two_lines aes-auto-3mf-bracket       ok
+  [bccz-aes-auto-3mf-bracket] before the drop: cut ends 112 (0 open), skin bars 150; strut ends 1104 (0 loose)
+  bccz       skin      aes-auto-3mf-bracket       ok
+  bccz       joins     aes-auto-3mf-bracket       ok
+  bccz       loose     aes-auto-3mf-bracket       ok
+  [bccz-aes-auto-3mf-bracket] file: ok 1 ok  (cells 63, bars 774, left out 16, builds 3, 5615 ms)
+  bccz       print     aes-auto-3mf-bracket       ok
+  bccz       painted   aes-auto-3mf-bracket       ok
+  [bccz-aes-grade-face-plate] cells 136 (floor 1.27 mm, largest 5.09), bars 1360, cut ends 380 (0 open), skin bars 584
+  bccz       lays      aes-grade-face-plate       ok
+  bccz       two_lines aes-grade-face-plate       ok
+  [bccz-aes-grade-face-plate] before the drop: cut ends 380 (0 open), skin bars 584; strut ends 1552 (0 loose)
+  bccz       skin      aes-grade-face-plate       ok
+  bccz       joins     aes-grade-face-plate       ok
+  bccz       loose     aes-grade-face-plate       ok
+  [bccz-aes-grade-face-plate] file: ok 1 ok  (cells 136, bars 1360, left out 8, builds 2, 3558 ms)
+  bccz       print     aes-grade-face-plate       ok
+  [bccz-aes-stepped-face-bracket] cells 1503 (floor 1.27 mm, largest 6.00), bars 10432, cut ends 0 (0 open), skin bars 0
+  bccz       lays      aes-stepped-face-bracket   ok
+  bccz       two_lines aes-stepped-face-bracket   ok
+  [bccz-aes-stepped-face-bracket] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 20864 (0 loose)
+  bccz       skin      aes-stepped-face-bracket   ok
+  bccz       joins     aes-stepped-face-bracket   ok
+  bccz       loose     aes-stepped-face-bracket   ok
+  [bccz-aes-stepped-face-bracket] file: ok 1 ok  (cells 1503, bars 10432, left out 0, builds 1, 11413 ms)
+  bccz       print     aes-stepped-face-bracket   ok
+  [bccz-str-refused] type_not_supported: This lattice type is stiffer one way than the others, so its strength cannot be checked yet: pick it in Aesthetic, or pick another type for Structural.
+  bccz       refused   str-auto-face-cube         ok
+  bccz       cap       auto-whole-coupon16        ok
+  [bccz-coupon] ok  (cells 140, bars 1444, bed 1464 mm2, builds 4) -> /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build/lattice_types_matrix/coupon-bccz/bccz_coupon_lattice.stl
+  bccz       coupon    8mm                        ok
+
+== fccz ==
+  width bounds: open look 0.1898, touch 0.5000; floor cell at two lines 4.74 mm (quilt 1.80 mm)
+  [fccz-aes-auto-face-cube] cells 4 (floor 4.74 mm, largest 6.00), bars 77, cut ends 32 (0 open), skin bars 28
+  fccz       lays      aes-auto-face-cube         ok
+  fccz       two_lines aes-auto-face-cube         ok
+  [fccz-aes-auto-face-cube] before the drop: cut ends 32 (0 open), skin bars 28; strut ends 98 (0 loose)
+  fccz       skin      aes-auto-face-cube         ok
+  fccz       joins     aes-auto-face-cube         ok
+  fccz       loose     aes-auto-face-cube         ok
+  [fccz-aes-auto-face-cube] file: ok 1 ok  (cells 4, bars 77, left out 0, builds 1, 77 ms)
+  fccz       print     aes-auto-face-cube         ok
+  [fccz-aes-typed-whole-cube] cells 8 (floor 4.74 mm, largest 5.00), bars 162, cut ends 0 (0 open), skin bars 0
+  fccz       lays      aes-typed-whole-cube       ok
+  fccz       two_lines aes-typed-whole-cube       ok
+  [fccz-aes-typed-whole-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 324 (0 loose)
+  fccz       skin      aes-typed-whole-cube       ok
+  fccz       joins     aes-typed-whole-cube       ok
+  fccz       loose     aes-typed-whole-cube       ok
+  fccz       geometry  aes-typed-whole-cube       ok
+  [fccz-aes-typed-whole-cube] file: ok 1 ok  (cells 8, bars 162, left out 0, builds 1, 151 ms)
+  fccz       print     aes-typed-whole-cube       ok
+  [fccz-aes-auto-whole-plate] cells 176 (floor 4.74 mm, largest 4.74), bars 1040, cut ends 0 (0 open), skin bars 0
+  fccz       lays      aes-auto-whole-plate       ok
+  fccz       two_lines aes-auto-whole-plate       ok
+  [fccz-aes-auto-whole-plate] before the drop: cut ends 156 (156 open), skin bars 0; strut ends 2432 (0 loose)
+  fccz       joins     aes-auto-whole-plate       ok
+  fccz       loose     aes-auto-whole-plate       ok
+  [fccz-aes-auto-whole-plate] file: ok 1 ok  (cells 176, bars 1040, left out 0, builds 1, 1069 ms)
+  fccz       print     aes-auto-whole-plate       ok
+  [fccz-aes-typed-face-plate] cells 152 (floor 4.74 mm, largest 5.00), bars 1456, cut ends 400 (0 open), skin bars 440
+  fccz       lays      aes-typed-face-plate       ok
+  fccz       two_lines aes-typed-face-plate       ok
+  [fccz-aes-typed-face-plate] before the drop: cut ends 400 (0 open), skin bars 440; strut ends 2064 (0 loose)
+  fccz       skin      aes-typed-face-plate       ok
+  fccz       joins     aes-typed-face-plate       ok
+  fccz       loose     aes-typed-face-plate       ok
+  [fccz-aes-typed-face-plate] file: ok 1 ok  (cells 152, bars 1456, left out 0, builds 1, 2285 ms)
+  fccz       print     aes-typed-face-plate       ok
+  [fccz-aes-auto-3mf-bracket] cells 63 (floor 4.74 mm, largest 6.00), bars 1096, cut ends 148 (0 open), skin bars 120
+  fccz       lays      aes-auto-3mf-bracket       ok
+  fccz       two_lines aes-auto-3mf-bracket       ok
+  [fccz-aes-auto-3mf-bracket] before the drop: cut ends 164 (16 open), skin bars 120; strut ends 1984 (0 loose)
+  fccz       skin      aes-auto-3mf-bracket       ok
+  fccz       joins     aes-auto-3mf-bracket       ok
+  fccz       loose     aes-auto-3mf-bracket       ok
+  [fccz-aes-auto-3mf-bracket] file: ok 1 ok  (cells 63, bars 1172, left out 0, builds 1, 1937 ms)
+  fccz       print     aes-auto-3mf-bracket       ok
+  fccz       painted   aes-auto-3mf-bracket       ok
+  [fccz-aes-grade-face-plate] cells 272 (floor 1.80 mm, largest 3.60), bars 3668, cut ends 1192 (0 open), skin bars 1260
+  fccz       lays      aes-grade-face-plate       ok
+  fccz       two_lines aes-grade-face-plate       ok
+  [fccz-aes-grade-face-plate] before the drop: cut ends 1200 (8 open), skin bars 1260; strut ends 4832 (0 loose)
+  fccz       skin      aes-grade-face-plate       ok
+  fccz       joins     aes-grade-face-plate       ok
+  fccz       loose     aes-grade-face-plate       ok
+  [fccz-aes-grade-face-plate] file: ok 1 ok  (cells 272, bars 3668, left out 0, builds 1, 3549 ms)
+  fccz       print     aes-grade-face-plate       ok
+  [fccz-aes-stepped-face-bracket] cells 1155 (floor 1.80 mm, largest 6.00), bars 16744, cut ends 1112 (0 open), skin bars 996
+  fccz       lays      aes-stepped-face-bracket   ok
+  fccz       two_lines aes-stepped-face-bracket   ok
+  [fccz-aes-stepped-face-bracket] before the drop: cut ends 1112 (0 open), skin bars 996; strut ends 31496 (0 loose)
+  fccz       skin      aes-stepped-face-bracket   ok
+  fccz       joins     aes-stepped-face-bracket   ok
+  fccz       loose     aes-stepped-face-bracket   ok
+  [fccz-aes-stepped-face-bracket] file: ok 1 ok  (cells 1155, bars 16744, left out 0, builds 1, 13938 ms)
+  fccz       print     aes-stepped-face-bracket   ok
+  [fccz-str-refused] type_not_supported: This lattice type is stiffer one way than the others, so its strength cannot be checked yet: pick it in Aesthetic, or pick another type for Structural.
+  fccz       refused   str-auto-face-cube         ok
+  fccz       cap       auto-whole-coupon16        ok
+  [fccz-coupon] would_not_print After 3 tries the lattice still has 3 places that would start printing in mid-air. No file was made. A larger cell or a Protect skin near those places usually fixes it. (cells 140, bars 1578, bed 1464 mm2, builds 3) -> 
+  fccz       coupon    8mm                        not made: would_not_print: After 3 tries the lattice still has 3 places that would start printing in mid-air. No file was made. A larger cell or a Protect skin near those places usually fixes it.
+
+== reentrant ==
+  width bounds: open look 0.1898, touch 0.3333; floor cell at two lines 4.74 mm (quilt 2.70 mm)
+  [reentrant-aes-auto-face-cube] cells 4 (floor 4.74 mm, largest 6.00), bars 121, cut ends 48 (0 open), skin bars 56
+  reentrant  lays      aes-auto-face-cube         ok
+  reentrant  two_lines aes-auto-face-cube         ok
+  [reentrant-aes-auto-face-cube] before the drop: cut ends 48 (0 open), skin bars 56; strut ends 130 (0 loose)
+  reentrant  skin      aes-auto-face-cube         ok
+  reentrant  joins     aes-auto-face-cube         ok
+  reentrant  loose     aes-auto-face-cube         ok
+  [reentrant-aes-auto-face-cube] file: ok 1 ok  (cells 4, bars 121, left out 120, builds 6, 739 ms)
+  reentrant  print     aes-auto-face-cube         clean 1, mid-air 0/0, one-ended 0, long bridges 0, left out 120 of 121 bars
+  [reentrant-aes-typed-whole-cube] cells 8 (floor 4.74 mm, largest 5.00), bars 146, cut ends 0 (0 open), skin bars 0
+  reentrant  lays      aes-typed-whole-cube       ok
+  reentrant  two_lines aes-typed-whole-cube       ok
+  [reentrant-aes-typed-whole-cube] before the drop: cut ends 0 (0 open), skin bars 0; strut ends 292 (0 loose)
+  reentrant  skin      aes-typed-whole-cube       ok
+  reentrant  joins     aes-typed-whole-cube       ok
+  reentrant  loose     aes-typed-whole-cube       ok
+  reentrant  geometry  aes-typed-whole-cube       ok
+  [reentrant-aes-typed-whole-cube] file: ok 1 ok  (cells 8, bars 146, left out 0, builds 1, 368 ms)
+  reentrant  print     aes-typed-whole-cube       ok
+  [reentrant-aes-auto-whole-plate] cells 176 (floor 4.74 mm, largest 4.74), bars 1532, cut ends 0 (0 open), skin bars 0
+  reentrant  lays      aes-auto-whole-plate       ok
+  reentrant  two_lines aes-auto-whole-plate       ok
+  [reentrant-aes-auto-whole-plate] before the drop: cut ends 716 (716 open), skin bars 0; strut ends 4560 (0 loose)
+  reentrant  joins     aes-auto-whole-plate       ok
+  reentrant  loose     aes-auto-whole-plate       ok
+  [reentrant-aes-auto-whole-plate] file: ok 1 ok  (cells 176, bars 1532, left out 0, builds 1, 3580 ms)
+  reentrant  print     aes-auto-whole-plate       ok
+  [reentrant-aes-typed-face-plate] cells 152 (floor 4.74 mm, largest 5.00), bars 2700, cut ends 632 (0 open), skin bars 1244
+  reentrant  lays      aes-typed-face-plate       ok
+  reentrant  two_lines aes-typed-face-plate       ok
+  [reentrant-aes-typed-face-plate] before the drop: cut ends 640 (0 open), skin bars 1244; strut ends 2960 (0 loose)
+  reentrant  skin      aes-typed-face-plate       ok
+  reentrant  joins     aes-typed-face-plate       ok
+  reentrant  loose     aes-typed-face-plate       ok
+  [reentrant-aes-typed-face-plate] file: ok 1 ok  (cells 152, bars 2700, left out 24, builds 3, 18019 ms)
+  reentrant  print     aes-typed-face-plate       ok
+  [reentrant-aes-auto-3mf-bracket] cells 63 (floor 4.74 mm, largest 6.00), bars 1316, cut ends 220 (0 open), skin bars 260
+  reentrant  lays      aes-auto-3mf-bracket       ok
+  reentrant  two_lines aes-auto-3mf-bracket       ok
+  [reentrant-aes-auto-3mf-bracket] before the drop: cut ends 220 (0 open), skin bars 260; strut ends 2112 (0 loose)
+  reentrant  skin      aes-auto-3mf-bracket       ok
+  reentrant  joins     aes-auto-3mf-bracket       ok
+  reentrant  loose     aes-auto-3mf-bracket       ok
+  [reentrant-aes-auto-3mf-bracket] file: ok 1 ok  (cells 63, bars 1426, left out 24, builds 4, 14384 ms)
+  reentrant  print     aes-auto-3mf-bracket       ok
+  reentrant  painted   aes-auto-3mf-bracket       ok
+  [reentrant-aes-grade-face-plate] cells 136 (floor 2.70 mm, largest 5.40), bars 2328, cut ends 552 (0 open), skin bars 1096
+  reentrant  lays      aes-grade-face-plate       ok
+  reentrant  two_lines aes-grade-face-plate       ok
+  [reentrant-aes-grade-face-plate] before the drop: cut ends 552 (0 open), skin bars 1096; strut ends 2496 (0 loose)
+  reentrant  skin      aes-grade-face-plate       ok
+  reentrant  joins     aes-grade-face-plate       ok
+  reentrant  loose     aes-grade-face-plate       ok
+  [reentrant-aes-grade-face-plate] file: ok 1 ok  (cells 136, bars 2328, left out 4, builds 2, 9508 ms)
+  reentrant  print     aes-grade-face-plate       ok
+  [reentrant-aes-stepped-face-bracket] cells 483 (floor 2.70 mm, largest 6.00), bars 7204, cut ends 96 (0 open), skin bars 148
+  reentrant  lays      aes-stepped-face-bracket   ok
+  reentrant  two_lines aes-stepped-face-bracket   ok
+  [reentrant-aes-stepped-face-bracket] before the drop: cut ends 96 (0 open), skin bars 148; strut ends 14112 (0 loose)
+  reentrant  skin      aes-stepped-face-bracket   ok
+  reentrant  joins     aes-stepped-face-bracket   ok
+  reentrant  loose     aes-stepped-face-bracket   ok
+  [reentrant-aes-stepped-face-bracket] file: ok 1 ok  (cells 483, bars 7204, left out 0, builds 1, 16343 ms)
+  reentrant  print     aes-stepped-face-bracket   ok
+  [reentrant-str-refused] type_not_supported: This lattice type is stiffer one way than the others, so its strength cannot be checked yet: pick it in Aesthetic, or pick another type for Structural.
+  reentrant  refused   str-auto-face-cube         ok
+  reentrant  cap       auto-whole-coupon16        ok
+  [reentrant-coupon] ok  (cells 140, bars 2480, bed 1464 mm2, builds 4) -> /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build/lattice_types_matrix/coupon-reentrant/reentrant_coupon_lattice.stl
+  reentrant  coupon    8mm                        ok
+
+== RED controls ==
+  lays on a 1 mm region: no cells
+  two_lines at one line: 144 bars under two lines (thinnest 0.450 mm)
+  skin with Skin off: 64 of 64 cut ends open (100%), 0 skin bars
+  loose with join and drop off: 0 loose ends, 4 pieces adrift (4 bars)
+  print on a result that starts in mid-air: clean 0, mid-air 2/0, one-ended 0, long bridges 0, left out 0 of 100 bars
+  strength with no strength job: the strength check did not run
+  painted on the cube: no overhang found
+  refused on a Structural octet: made
+  geometry of the octet read as bcc: angles above level (tenths of a degree): 0 450
+  cap on sc typed at 16 mm: largest cell 16.00 mm (cap 10.00), longest level reach 7.08 mm
+  coupon at one line: clean 1, mid-air 0, flat on the bed 1464 mm2, thinnest strut 0.450 mm
+
+== the octet's bytes ==
+  {"aes-auto-face-cube bars", 0x42f01b1238a2936dULL},
+  {"aes-auto-face-cube cells", 0x73ffd5cd82417e43ULL},
+  {"aes-auto-face-cube file", 0x49c0ff53e378304dULL},
+  {"aes-auto-whole-plate bars", 0x131dd17dc90d3857ULL},
+  {"aes-auto-whole-plate cells", 0x0790363c35c968efULL},
+  {"aes-auto-whole-plate file", 0xd749eeefc8c47ae3ULL},
+  {"aes-grade-face-plate bars", 0x5e4368bb32d28806ULL},
+  {"aes-grade-face-plate cells", 0xdc10f18a3d7d6373ULL},
+  {"aes-grade-face-plate file", 0xafd0ede2728f6535ULL},
+  {"aes-typed-face-plate bars", 0x5bdf2c55ab6a5217ULL},
+  {"aes-typed-face-plate cells", 0xf58ae9d5e07bc243ULL},
+  {"aes-typed-face-plate file", 0x9071ab450398365fULL},
+  {"aes-typed-whole-cube bars", 0xaa81ce86b5f9abd7ULL},
+  {"aes-typed-whole-cube cells", 0x3dca4e3ec5a17343ULL},
+  {"aes-typed-whole-cube file", 0xdf8272ddea526aceULL},
+
+== the matrix ==
+ok    octet      lays      (9 cases)
+ok    octet      two_lines (9 cases)
+ok    octet      skin      (8 cases)
+ok    octet      joins     (9 cases)
+ok    octet      loose     (9 cases)
+ok    octet      print     (9 cases)
+ok    octet      strength  (2 cases)
+ok    octet      credit    (1 cases)
+ok    octet      painted   (1 cases)
+ok    octet      geometry  (1 cases)
+ok    octet      cap       (1 cases)
+ok    octet      coupon    (1 cases)
+ok    bcc        lays      (9 cases)
+ok    bcc        two_lines (9 cases)
+ok    bcc        skin      (8 cases)
+ok    bcc        joins     (9 cases)
+ok    bcc        loose     (9 cases)
+ok    bcc        print     (9 cases)
+ok    bcc        strength  (2 cases)
+ok    bcc        credit    (1 cases)
+ok    bcc        painted   (1 cases)
+ok    bcc        geometry  (1 cases)
+ok    bcc        cap       (1 cases)
+ok    bcc        coupon    (1 cases)
+ok    kelvin     lays      (9 cases)
+ok    kelvin     two_lines (9 cases)
+ok    kelvin     skin      (8 cases)
+ok    kelvin     joins     (9 cases)
+ok    kelvin     loose     (9 cases)
+ok    kelvin     print     (9 cases)
+ok    kelvin     strength  (2 cases)
+ok    kelvin     credit    (1 cases)
+ok    kelvin     painted   (1 cases)
+ok    kelvin     geometry  (1 cases)
+ok    kelvin     cap       (1 cases)
+ok    kelvin     coupon    (1 cases)
+ok    diamond    lays      (9 cases)
+ok    diamond    two_lines (9 cases)
+ok    diamond    skin      (8 cases)
+ok    diamond    joins     (9 cases)
+ok    diamond    loose     (9 cases)
+ok    diamond    print     (9 cases)
+ok    diamond    strength  (2 cases)
+ok    diamond    credit    (1 cases)
+ok    diamond    painted   (1 cases)
+ok    diamond    geometry  (1 cases)
+ok    diamond    cap       (1 cases)
+ok    diamond    coupon    (1 cases)
+ok    fcc        lays      (9 cases)
+ok    fcc        two_lines (9 cases)
+ok    fcc        skin      (8 cases)
+ok    fcc        joins     (9 cases)
+ok    fcc        loose     (9 cases)
+ok    fcc        print     (9 cases)
+ok    fcc        strength  (2 cases)
+ok    fcc        credit    (1 cases)
+ok    fcc        painted   (1 cases)
+ok    fcc        geometry  (1 cases)
+ok    fcc        cap       (1 cases)
+ok    fcc        coupon    (1 cases)
+ok    sc         lays      (9 cases)
+ok    sc         two_lines (9 cases)
+ok    sc         skin      (8 cases)
+ok    sc         joins     (9 cases)
+ok    sc         loose     (9 cases)
+ok    sc         print     (9 cases)
+ok    sc         strength  (2 cases)
+ok    sc         credit    (1 cases)
+ok    sc         painted   (1 cases)
+ok    sc         geometry  (1 cases)
+ok    sc         cap       (1 cases)
+ok    sc         coupon    (1 cases)
+ok    rhombic    lays      (9 cases)
+ok    rhombic    two_lines (9 cases)
+ok    rhombic    skin      (8 cases)
+ok    rhombic    joins     (9 cases)
+ok    rhombic    loose     (9 cases)
+ok    rhombic    print     (9 cases)
+ok    rhombic    strength  (2 cases)
+ok    rhombic    credit    (1 cases)
+ok    rhombic    painted   (1 cases)
+ok    rhombic    geometry  (1 cases)
+ok    rhombic    cap       (1 cases)
+ok    rhombic    coupon    (1 cases)
+ok    bccz       lays      (7 cases)
+ok    bccz       two_lines (7 cases)
+ok    bccz       skin      (6 cases)
+ok    bccz       joins     (7 cases)
+ok    bccz       loose     (7 cases)
+ok    bccz       print     (7 cases)
+ok    bccz       painted   (1 cases)
+ok    bccz       refused   (1 cases)
+ok    bccz       geometry  (1 cases)
+ok    bccz       cap       (1 cases)
+ok    bccz       coupon    (1 cases)
+ok    fccz       lays      (7 cases)
+ok    fccz       two_lines (7 cases)
+ok    fccz       skin      (6 cases)
+ok    fccz       joins     (7 cases)
+ok    fccz       loose     (7 cases)
+ok    fccz       print     (7 cases)
+ok    fccz       painted   (1 cases)
+ok    fccz       refused   (1 cases)
+ok    fccz       geometry  (1 cases)
+ok    fccz       cap       (1 cases)
+XFAIL fccz       coupon    8mm: not made: would_not_print: After 3 tries the lattice still has 3 places that would start printing in mid-air. No file was made. A larger cell or a Protect skin near those places usually fixes it.  [known: the mesh writer leaves a thin web between a level bridge's square bar and the 12-sided tube of a leg where they meet a z column (3 mid-air islands at x 21, y 20.4, z 18.5 to 18.9 that the print loop cannot clear); with 16 sides it prints clean: the writer's union, not the type's geometry]
+ok    reentrant  lays      (7 cases)
+ok    reentrant  two_lines (7 cases)
+ok    reentrant  skin      (6 cases)
+ok    reentrant  joins     (7 cases)
+ok    reentrant  loose     (7 cases)
+XFAIL reentrant  print     aes-auto-face-cube: clean 1, mid-air 0/0, one-ended 0, long bridges 0, left out 120 of 121 bars  [known: on the cube's face region its cells are cut by the cube's sides: the waist struts there start in the air just above the solid floor, the print loop leaves them out and, as each waist hangs from only two struts below it, the rest go after them (120 of 121 struts left out; print-clean, but no lattice)]
+ok    reentrant  painted   (1 cases)
+ok    reentrant  refused   (1 cases)
+ok    reentrant  geometry  (1 cases)
+ok    reentrant  cap       (1 cases)
+ok    reentrant  coupon    (1 cases)
+
+149 checks, 0 failed, 2 known failures
+<end of output>
+Test time = 567.76 sec
+----------------------------------------------------------
+Test Passed.
+"lattice_types_matrix" end time: Nov 25 03:00 EST
+"lattice_types_matrix" time elapsed: 00:09:27
+----------------------------------------------------------
+
+166/210 Testing: lattice_type_strut_law
+166/210 Test: lattice_type_strut_law
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build/test_lattice_type_strut_law"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/agent-a674e3a725f63d72f/core/build
+"lattice_type_strut_law" start time: Nov 25 03:00 EST
+Output:
+----------------------------------------------------------
+[type law] §1/§3's lattice runs skipped: set TOPOPT_LONG_TESTS=1 (about 2.4 h)
+           law at rho 0.256: Kd 71.69 Kv 20.39 (octet's 31.19 19.16)
+           kfit.csv: 12 rows, every row reproduced exactly
+           law at rho 0.312: Kd 51.39 Kv 16.55 (octet's 23.62 15.47)
+           kfit.csv: 9 rows, every row reproduced exactly
+           law at rho 0.343: Kd 19.43 Kv 12.51 (octet's 21.62 14.37)
+           kfit.csv: 6 rows, every row reproduced exactly
+           law at rho 0.315: Kd 29.03 Kv 14.50 (octet's 23.39 15.34)
+           kfit.csv: 10 rows, every row reproduced exactly
+           law at rho 0.299: Kd 31.94 Kv 12.04 (octet's 25.36 16.32)
+           kfit.csv: 6 rows, every row reproduced exactly
+           law at rho 0.343: Kd 26.97 Kv 12.62 (octet's 21.63 14.38)
+           kfit.csv: 5 rows, every row reproduced exactly
+           law at rho 0.375: Kd 19.50 Kv 11.85 (octet's 19.55 13.24)
+           kfit.csv: 5 rows, every row reproduced exactly
+           law at rho 0.400: Kd 17.36 Kv 11.78 (octet's 17.96 12.36)
+           kfit.csv: 4 rows, every row reproduced exactly
+PASS: 83 checks, 0 failures
+<end of output>
+Test time =   0.40 sec
+----------------------------------------------------------
+Test Passed.
+"lattice_type_strut_law" end time: Nov 25 03:00 EST
+"lattice_type_strut_law" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Nov 25 03:00 EST

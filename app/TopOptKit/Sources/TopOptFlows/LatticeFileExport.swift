@@ -1,7 +1,11 @@
 // LatticeFileExport — the EXPORT button (his go 2026-11-13): the print file, made on the Mac from the SAME layout the new engine's
 // preview draws (contract: docs/design/lattice-rebuild/04-layout-file-job.md). The app sends the model (with its painted-faces
 // sidecar, as every job does) and a `lattice_file` job whose `layout` is the preview's own settings under the bridge's names; the
-// worker runs `topopt-cli lattice-file`; the app fetches `lattice.stl` and `lattice_file.json` and offers the file to save or share.
+// worker runs `topopt-cli lattice-file`; the app fetches the file the report names and `lattice_file.json` and offers the file.
+// ★ notes29 (his rule 11-24: "if we are saying 3mf in two separate places, it should at least default to exporting 3mf"):
+// EVERY print file job asks for a 3MF (`file_format`), a cell lattice's as an Organic one's, made on the Mac or on this iPad —
+// so core paints the part's own overhangs as supports and the file carries them (an STL cannot). Core writes "lattice.3mf"
+// in place of the job's "lattice.stl" and names it in its report; the app reads every file by that name.
 // Shown only with "New engine (test)" on, on Lattice Setup, above the preview's lines.
 import Foundation
 import SwiftUI
@@ -12,8 +16,13 @@ import simd
 // MARK: the job
 
 public enum LatticeFileJob {
+    /// The job's `output` (core writes the 3MF as "lattice.3mf" in its place and names it in its report, `file`).
     public static let outputName = "lattice.stl"
     public static let reportName = "lattice_file.json"
+    /// ★ notes29: the format every print file job asks for (core's `file_format`; its own default for a cell lattice is STL).
+    public static let fileFormat = "3mf"
+    /// RED CONTROL (tests only): release 20's job — a 3MF for Organic alone, a cell lattice left to core's default (an STL).
+    nonisolated(unsafe) static var controlOrganicOnly3MF = false
 
     /// Every field of the preview's settings, by its Swift name → its key in the job's `layout` (the bridge's names). The test
     /// holds this table to `Settings` itself, so a setting added later can never be left out of the file silently.
@@ -31,6 +40,11 @@ public enum LatticeFileJob {
         "percentile": "percentile", "response": "response", "maxStep": "max_step",
         "bedFloorMM": "organic_bed_floor_mm",   // the flat floor (Organic only; written only when on)
         "cellSearch": "cell_search/stretch_edges",   // K7, K8 (Auto only; written only when on)
+        "sheetSeam": "sheet_seam", "autoByCell": "auto_by_cell",   // ★ SHEETS (written for a sheet type only)
+        // ★ SHEETS, builder E (notes30 M1 names it here): the seams the LAST print file fell back on, for the preview's lay only
+        // (core's Session::Settings::sheet_walls) — never sent in a file job: the file decides each Blend seam itself, once
+        // (make_file_mesh), and core's file job takes no such key
+        "sheetWalls": "(preview only: the print file decides its own seams)",
     ]
 
     /// The stress result's name beside the job (core's top-level "demand"; the demand file format of 04-layout-file-job.md).
@@ -221,6 +235,12 @@ public enum LatticeFileJob {
         if s.bedFloorMM > 0 { layout["organic_bed_floor_mm"] = s.bedFloorMM }
         // K7, K8: Auto's cells fitted to the square faces; written only when on, so every other job is the bytes it was
         if s.cellSearch { layout["cell_search"] = true; layout["stretch_edges"] = true }
+        // ★ SHEETS (the contract's job keys): "Where regions meet" and Auto's wall by the cell, for a sheet type only, so every
+        // strut job is the bytes it was
+        if LatticeTypeCatalog.sheetIDs.contains(s.topology) {
+            layout["sheet_seam"] = s.sheetSeam
+            layout["auto_by_cell"] = s.autoByCell
+        }
         if s.byStress { layout["per_region"] = false }   // core refuses By stress with Per region
         // an area's own settings (C23), its Finish (S13), zones (D21): one entry per region, null where it states nothing
         func own(_ o: LatticeLayoutSession.AreaOwn) -> Any {
@@ -291,8 +311,10 @@ public enum LatticeFileJob {
                 }
             }
             if let tensor { top["tensor"] = tensor }
-            top["file_format"] = "3mf"
+            top["file_format"] = fileFormat
         }
+        // ★ notes29: a cell lattice's file is a 3MF too (its painted supports and print settings with it)
+        if !controlOrganicOnly3MF { top["file_format"] = fileFormat }
         var job: [String: Any] = ["mode": "lattice_file", "model": modelName, "output": outputName,
                                   "linear_deflection": linearDeflection, "threads": 0, "layout": layout]
         for (k, v) in top { job[k] = v }
@@ -320,6 +342,8 @@ public struct LatticeFileReport: Equatable, Sendable {
     /// supports ("off" for separate tubes), as lattice_file.json gives them.
     public var file: String? = nil
     public var slicerSupports: String? = nil
+    /// ★ notes29: "tubes" for an Organic file (separate closed tubes, after the solid's triangles), nil for a cell lattice's.
+    public var weaveMesh: String? = nil
 
     public static func parse(_ d: Data) -> LatticeFileReport? {
         guard let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return nil }
@@ -330,10 +354,11 @@ public struct LatticeFileReport: Equatable, Sendable {
                                  plasticMM3: m["mm3"] as? Double ?? 0, partMM3: m["part_mm3"] as? Double ?? 0,
                                  clean: p["clean"] as? Bool ?? false, posts: (p["posts"] as? [Any])?.count ?? 0,
                                  strength: (o["strength"] as? [String: Any]).map(LatticeFileStrength.init(block:)),
-                                 file: file, slicerSupports: o["slicer_supports"] as? String)
+                                 file: file, slicerSupports: o["slicer_supports"] as? String,
+                                 weaveMesh: o["weave_mesh"] as? String)
     }
 
-    /// The file's name: the one the report gives (a 3MF for Organic), else the job's own output.
+    /// The file's name: the one the report gives (★ notes29: a 3MF for every print file), else the job's own output.
     public var fileName: String { file ?? LatticeFileJob.outputName }
     public var isThreeMF: Bool { fileName.lowercased().hasSuffix(".3mf") }
 
@@ -365,6 +390,9 @@ public struct LatticeFileStrength: Equatable, Sendable {
     public var strutMarginsFile: String? = nil
     /// ★ notes27 F1: every bar's two ends and width (bars.bin, "TOBARS1", strut_margins.bin's order), or nil (an older core).
     public var barsFile: String? = nil
+    /// ★ notes28 SHEETS (builder B): a sheet's cells as the check judged them (sheet_cells.bin, "TOSHEET1": per cell its frame,
+    /// cube, wall, cells across, flags and margin; core's read_sheet_cells_file), by the block's key "sheet_cells", or nil.
+    public var sheetCellsFile: String? = nil
     public var maxInterlayerTensionMPa: Double
     /// The build direction the check judged the layers along, or nil.
     public var buildDirection: SIMD3<Double>?
@@ -393,11 +421,20 @@ public struct LatticeFileStrength: Equatable, Sendable {
                                                     // ★ Organic cut 2 (handover b): the struts short (fail); the frame of beams
                                                     // not solved, or too little of it judged (solid only)
                                                     strutMargin = "strut_margin", frameNotSolved = "frame_not_solved",
-                                                    frameUnjudged = "frame_unjudged" }
+                                                    frameUnjudged = "frame_unjudged",
+                                                    // ★ notes30 (core OS19, the interim guard, 2026-11-26): a load on bare
+                                                    // vines (an Organic weave right under a loaded face)
+                                                    loadOnBareLattice = "load_on_bare_lattice" }
     public var failReason: FailReason?
     /// The load landing on cells that get no credit, and the whole load (N), where countable.
     public var loadOnNoCreditN: Double?
     public var loadTotalN: Double?
+    /// ★ notes30: what core said with `load_on_bare_lattice` (the load on the vines, its share, where it lands, core's
+    /// sentence); nil for any other reason.
+    public var bareVines: OrganicBareVines.Found?
+    /// ★ 362 (11-26): the printer's wall (the cover a Solid finish lays), when the page knows it — the line then names only the
+    /// fixes offered; nil: unknown (no Solid named when core gave the depth).
+    public var solidWallMM: Double? = nil
 
     public init(block b: [String: Any]) {
         func num(_ v: Any?) -> Double { (v as? NSNumber)?.doubleValue ?? 0 }
@@ -414,6 +451,7 @@ public struct LatticeFileStrength: Equatable, Sendable {
         scenarioFields = b["scenario_fields"] as? String
         strutMarginsFile = b["strut_margins"] as? String
         barsFile = b["bars"] as? String
+        sheetCellsFile = b["sheet_cells"] as? String   // ★ notes28 SHEETS
         maxInterlayerTensionMPa = num(b["max_interlayer_tension_mpa"])
         buildDirection = (b["build_direction"] as? [NSNumber]).flatMap {
             $0.count == 3 ? SIMD3($0[0].doubleValue, $0[1].doubleValue, $0[2].doubleValue) : nil
@@ -429,6 +467,8 @@ public struct LatticeFileStrength: Equatable, Sendable {
         failReason = (b["fail_reason"] as? String).flatMap(FailReason.init(rawValue:))
         loadOnNoCreditN = (b["load_on_no_credit_n"] as? NSNumber)?.doubleValue
         loadTotalN = (b["load_total_n"] as? NSNumber)?.doubleValue
+        bareVines = OrganicBareVines.found(strength: b)
+        if bareVines == nil, failReason == .loadOnBareLattice { failReason = nil }   // only under the RED control (the old read)
     }
 
     /// The one-tap fix for a load on open lattice (his words to come; the tap keeps the loaded face solid).
@@ -444,7 +484,8 @@ public struct LatticeFileStrength: Equatable, Sendable {
             }
             return "The load lands on open lattice\(share), so nothing carries it to the anchors. " + Self.protectLoadedFace + "."
         case .noLoadPath?: return "Nothing carries the load to the anchors."
-        case .solidMargin?, .strutMargin?, .frameNotSolved?, .frameUnjudged?, nil: return nil
+        // ★ notes30: a setting fixes a load on bare vines (a Solid finish or a Protect skin on the loaded face): its own words
+        case .solidMargin?, .strutMargin?, .frameNotSolved?, .frameUnjudged?, .loadOnBareLattice?, nil: return nil
         }
     }
 
@@ -481,6 +522,9 @@ public struct LatticeFileStrength: Equatable, Sendable {
         case .fail:
             switch failReason {
             case .loadOnOpenLattice?: return "Not strong enough · the load lands on open lattice"
+            // ★ notes30: what lands where, and the fix; no margin (★ 362 11-26: only the fixes offered)
+            case .loadOnBareLattice?:
+                return bareVines.map { OrganicBareVines.printLine(OrganicBareVines.offers($0, wallMM: solidWallMM)) } ?? OrganicBareVines.line
             case .noLoadPath?: return "Not strong enough · nothing carries the load"
             case .strutMargin?: return "Not strong enough · struts: " + (strutsLine ?? Self.strutsNot).lowercased()
             case .solidMargin?, .frameNotSolved?, .frameUnjudged?, nil:
@@ -520,7 +564,7 @@ public enum LatticeFileRun {
     /// What the Mac made: the file, its report, the strength check's views beside it (fields.bin, scenario_fields.bin; only
     /// when the report names them) and the worker's own record of how long it took.
     public struct Made {
-        /// The file's bytes: an STL, or (Organic, `report.isThreeMF`) core's 3MF.
+        /// The file's bytes: core's 3MF (`report.isThreeMF`: every print file since notes29), or an STL (a job that asked none).
         public var stl: Data
         public var report: LatticeFileReport
         /// The report's whole JSON (the Results screen reads its `strength` block).
@@ -532,6 +576,8 @@ public enum LatticeFileRun {
         public var jobID: String? = nil
         /// ★ notes25 C3: strut_margins.bin (every bar's margin), fetched beside fields.bin when the report names it.
         public var strutMargins: Data? = nil
+        /// ★ notes28 SHEETS: sheet_cells.bin (a sheet's cells as judged), fetched beside fields.bin when the block names it.
+        public var sheetCells: Data? = nil
         /// ★ notes27 F1: bars.bin (every bar's ends and width), fetched with strut_margins.bin when the report names it.
         public var bars: Data? = nil
     }
@@ -810,6 +856,7 @@ public enum LatticeFileRun {
                         timing: RunTiming.fromWorker(createdAt: state["created_at"] as? Double, startedAt: state["started_at"] as? Double,
                                                      finishedAt: state["finished_at"] as? Double),
                         jobID: id, strutMargins: named(report.strength?.strutMarginsFile),
+                        sheetCells: named(report.strength?.sheetCellsFile),   // ★ notes28 SHEETS
                         bars: named(report.strength?.barsFile))   // ★ notes27 F1
         } catch let f as Failure where !f.transient {
             record?.ended(id)
@@ -825,7 +872,8 @@ public enum LatticeFileRun {
             public var additionsName: String
             public var additions: Data
         }
-        /// done (passes), limit (rounds used up), nothing_to_vary, frame_not_solved: core's word.
+        /// done (passes), limit (rounds used up), nothing_to_vary, frame_not_solved, load_on_bare_lattice (★ notes30: a load
+        /// on bare vines, stopped before any round): core's word.
         public var code: String
         public var why: String
         public var passing: Bool
@@ -840,6 +888,9 @@ public enum LatticeFileRun {
         /// ★ 362 11-23 (his run stalled 10 minutes while he was in another app): the print-file job the MAC made itself when
         /// the strengthening ended (the worker's `next`, asked by "then" = file); nil from a worker that does not chain.
         public var nextJobID: String? = nil
+        /// ★ notes30 depth: a load on bare vines stopped it — the depth of solid that clears it, when strengthen.json says
+        /// (`solid_depth_needed_mm`); nil otherwise (the print file's strength block carries it too).
+        public var depthNeededMM: Double? = nil
 
         /// strengthen.json read (the files fetched apart). nil: not core's strengthen.json.
         public static func parse(_ d: Data) -> (summary: Strengthened, lastRound: String?)? {
@@ -852,14 +903,17 @@ public enum LatticeFileRun {
                 past = Swift.max(past, (lim?["struts"] as? NSNumber)?.intValue ?? 0)
                 widest = Swift.max(widest, (lim?["widest_mm"] as? NSNumber)?.doubleValue ?? 0)
             }
-            let s = Strengthened(code: o["code"] as? String ?? "", why: o["why"] as? String ?? "",
+            var s = Strengthened(code: o["code"] as? String ?? "", why: o["why"] as? String ?? "",
                                  passing: o["passing"] as? Bool ?? false, rounds: rounds.count, pastLimitStruts: past,
                                  pastLimitWidestMM: widest, files: nil, summaryJSON: d)
+            if s.code == OrganicBareVines.reason { s.depthNeededMM = OrganicBareVines.depth(o) }   // ★ notes30 depth
             return (s, o["strengthened"] as? String)
         }
 
         /// One plain line: what the strengthening did.
         public var line: String {
+            // ★ notes30 (core OS19): a load on bare vines stops it before any round (rounds_fixed 0); the fix, in core's words
+            if code == OrganicBareVines.reason { return why.isEmpty ? OrganicBareVines.text : why }
             let r = rounds == 1 ? "1 round" : "\(rounds) rounds"
             var out = passing ? "Strengthened in \(r): the struts keep the margin" : "Strengthened \(r): some struts still short"
             if pastLimitStruts > 0 {
@@ -980,6 +1034,10 @@ public enum LatticeFileButton {
         var mesh: (vertices: [Float], indices: [Int32])
         if m.report.isThreeMF {
             do { mesh = try CoreThreeMF.mesh(m.stl) } catch { throw LatticeFileRun.Failure("\(error)") }
+            // ★ notes29: a cell lattice's 3MF shares its corners; Results draws it as it drew its STL — each triangle its own
+            // corners, so its flat faces stay flat and the part's edges sharp (smooth normals over shared corners round them).
+            // Organic's tubes keep theirs (they shade round).
+            if !organic, m.report.weaveMesh != "tubes" { mesh = CoreThreeMF.unshared(mesh) }
         } else {
             let s = MeshExport.parseBinarySTL(m.stl)
             mesh = (s.vertices, s.indices)
@@ -998,6 +1056,7 @@ public enum LatticeFileButton {
         let accepted = organic || passes
         // ★ notes25 C3: the solid's own margin per voxel and every bar's margin ride with the result (Results colours by them)
         let reportJSON = withStrength(organic ? withSpots(m.reportJSON, fields: fields) : m.reportJSON, fields: fields,
+                                      sheetCells: m.sheetCells,   // ★ notes28 SHEETS
                                       strutMargins: m.strutMargins, bars: m.bars)
         // ★ notes25 C3: ONE "how strong" number — the smaller of the solid's margin at his infill and the weakest strut's
         let governing = ((try? JSONSerialization.jsonObject(with: reportJSON)) as? [String: Any])
@@ -1069,7 +1128,11 @@ public enum LatticeFileButton {
     /// ★ notes25 C3: the report with the solid's margin per voxel (fields.bin's block 2, requested_volume_fraction -1, where core
     /// judged a voxel as solid) and every bar's margin (strut_margins.bin), so a saved result colours by them whenever it opens.
     /// ★ notes27 F1: and every bar's ends and width (bars.bin, kept as core wrote it), so every strut is coloured by its margin.
-    static func withStrength(_ report: Data, fields: RemoteFieldsContainer?, strutMargins: Data?, bars: Data? = nil) -> Data {
+    /// ★ notes28 SHEETS: and a sheet's cells as judged (sheet_cells.bin, kept as core wrote it under `sheetCellsKey`), so the
+    /// K4 colours read each cell's margin (LatticeLayoutColours.sheetMarginColours) whenever the result opens.
+    static let sheetCellsKey = "app_sheet_cells"
+    static func withStrength(_ report: Data, fields: RemoteFieldsContainer?, sheetCells: Data? = nil, strutMargins: Data?,
+                             bars: Data? = nil) -> Data {
         guard var o = (try? JSONSerialization.jsonObject(with: report)) as? [String: Any], o["strength"] is [String: Any] else {
             return report
         }
@@ -1086,6 +1149,10 @@ public enum LatticeFileButton {
         }
         if let d = bars, PrintFileParts.parseBars(d) != nil {
             o[PrintFileParts.barsKey] = d.base64EncodedString()   // ★ notes27 F1: each bar's ends and width, the same order
+            changed = true
+        }
+        if let d = sheetCells, d.count >= 20, d.prefix(8) == Data("TOSHEET1".utf8) {
+            o[sheetCellsKey] = d.base64EncodedString()   // ★ notes28 SHEETS: per cell its margin and flags, as core wrote it
             changed = true
         }
         guard changed else { return report }
@@ -1199,10 +1266,14 @@ public enum LatticeFileButton {
     /// `outcome`. One coarse tick, as the old on-device Lattice: no fake progress.
     public static func deviceRunner(job: LatticeFileJob.ForPart, strengthJob: Data?, materialsPath: String, rulesPath: String,
                                     densityGCm3: Double) -> RunModel.Runner {
-        { _, progress, _ in
+        { request, progress, _ in
             _ = progress(0, 1, 0)
             let made = try runHere(job: job, strengthJob: strengthJob, materialsPath: materialsPath, rulesPath: rulesPath)
-            return try outcome(made, densityGCm3: densityGCm3)
+            let o = try outcome(made, densityGCm3: densityGCm3)
+            // ★ notes29: the file made here kept as the Mac's is (LatticeJobRecorder.reading), so Results' Export hands out this
+            // 3MF itself — its painted supports and print settings with it
+            if let id = request.projectID { PrintFileKeep.stash(made.stl, name: made.report.fileName, projectID: id) }
+            return o
         }
     }
 
@@ -1263,6 +1334,7 @@ public enum LatticeFileButton {
         return LatticeFileRun.Made(stl: stl, report: report, reportJSON: rd, fields: report.strength?.fields.flatMap(file),
                                    scenarioFields: report.strength?.scenarioFields.flatMap(file), timing: nil,
                                    strutMargins: report.strength?.strutMarginsFile.flatMap(file),
+                                   sheetCells: report.strength?.sheetCellsFile.flatMap(file),   // ★ notes28 SHEETS
                                    bars: report.strength?.barsFile.flatMap(file))   // ★ notes27 F1
     }
 }
@@ -1333,7 +1405,7 @@ public final class LatticeFileExport: ObservableObject {
             state = .failed(why.line); return
         }
         let path = job.modelPath, demand = job.demand, tensor = job.tensor
-        let name = p.name, f = Flag()
+        let name = p.name, f = Flag(), params = p.printParams
         flag = f
         token &+= 1
         let t = token
@@ -1355,7 +1427,11 @@ public final class LatticeFileExport: ObservableObject {
                 let safe = name.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespaces)
                 let ext = r.report.isThreeMF ? "3mf" : "stl"   // ★ Organic cut 2: core's 3MF
                 let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(safe.isEmpty ? "Part" : safe) lattice.\(ext)")
-                saved = Result { try r.stl.write(to: url, options: .atomic); return url }
+                saved = Result {
+                    try r.stl.write(to: url, options: .atomic)
+                    if r.report.isThreeMF { try ThreeMFPrintSettings.stamp(url, params: params) }   // ★ notes30: his print settings
+                    return url
+                }
             }
             await MainActor.run { [weak self] in
                 guard let self, self.token == t else { return }

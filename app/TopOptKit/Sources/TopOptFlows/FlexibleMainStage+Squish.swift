@@ -37,6 +37,8 @@ struct FlexibleFEView: Equatable {
     var token = 0
     /// A sim of the sequence still runs.
     var pending = false
+    /// ★ notes29: the sims wait for a local topology run on this device (one in-process solve at a time).
+    var heldByRun = false
     /// Nothing of the sequence has a field and a sim failed: core's words.
     var failure: String?
     /// The largest scale every field of the sequence stays injective at (s · gmax ≤ ½).
@@ -74,9 +76,12 @@ struct FlexibleFEView: Equatable {
     var turned = false
     /// The FE field moves the picture.
     var active: Bool { !sequence.isEmpty }
+    /// ★ notes30 FF1: the lattice generation `token` was made for (nil: no token — nothing landed for it); the page's picture
+    /// worker makes the token again with the overlay it made the meshes on.
+    var tokenGeneration: Int?
 
     static func == (a: Self, b: Self) -> Bool {
-        a.token == b.token && a.sequence == b.sequence && a.pending == b.pending && a.failure == b.failure
+        a.token == b.token && a.sequence == b.sequence && a.pending == b.pending && a.heldByRun == b.heldByRun && a.failure == b.failure
             && a.requested == b.requested && a.skipped == b.skipped && a.retained == b.retained
             && a.refining?.id == b.refining?.id && a.refining?.step == b.refining?.step && a.refining?.total == b.refining?.total
             && a.refineKept == b.refineKept && a.shownSequence == b.shownSequence
@@ -87,8 +92,9 @@ extension FlexibleMainStage {
 
     /// The FE view of `drawn` (the lattice as the player shows it), starting its sims when they
     /// have not started (the shown sim first). Cheap: the mesh displacements are cached per
-    /// (overlay, field).
-    func feView(_ m: FlexibleStageModel, drawn: FlexibleGeneratedLattice?) -> FlexibleFEView {
+    /// (overlay, field). ★ notes30 FF1: `meshes` false (refresh's gather) — the plan only; the page's picture worker makes
+    /// the meshes and the token.
+    func feView(_ m: FlexibleStageModel, drawn: FlexibleGeneratedLattice?, meshes: Bool = true) -> FlexibleFEView {
         guard let g = drawn, !m.latticeIsStale, !controlColumnSquish else { return FlexibleFEView() }
         let groupIDs = m.squishSims.map(\.sim.id)
         // the sequence: the pick, or every group ("Play all", or one group with nothing to pick)
@@ -103,6 +109,7 @@ extension FlexibleMainStage {
             && m.squishScheduled != g.generation && !groupIDs.isEmpty
         var v = FlexibleFEView()
         v.requested = seqIDs
+        v.heldByRun = m.squishHeldByRun   // ★ notes29
         guard m.squishGeneration == g.generation, groups.contains(where: { $0.state != nil }) else {
             v.pending = unscheduled
             return v
@@ -120,7 +127,7 @@ extension FlexibleMainStage {
         } else {
             v.fields = quick
         }
-        v.mesh = v.fields.map { feMesh(for: $0) }
+        v.mesh = meshes ? v.fields.map { feMesh(for: $0) } : []
         v.sequence = seqIDs.compactMap { id in v.fields.firstIndex { $0.simID == id } }
         v.pending = seqIDs.contains { m.squish[$0] == .pending } || unscheduled
         if v.sequence.isEmpty, !v.pending { v.failure = seqIDs.compactMap { m.squish[$0]?.failure }.first }
@@ -130,6 +137,7 @@ extension FlexibleMainStage {
         for f in v.fields { h.combine(f.serial); h.combine(f.scale) }
         h.combine(overlaySerial)
         v.token = h.finalize()
+        v.tokenGeneration = g.generation   // ★ notes30 FF1
         // ★ BATCH N VERIFICATION: what the renderer SHOWS of the sequence — a refined field whose quick one
         // is still on screen (kept beside it) is read as that quick one until the swap at rest
         v.shownSequence = v.sequence.map { i in
@@ -296,12 +304,13 @@ extension FlexibleMainStage {
     /// "Squish sim failed" when it fell back, "Group 2's sim failed" when
     /// Play all plays the others.
     var feNote: String? {
-        if fe.pending { return FlexibleFE.pending }
+        if fe.pending { return fe.heldByRun ? FlexibleFE.waitingForRun : FlexibleFE.pending }   // ★ notes29
         if fe.failure != nil { return FlexibleFE.failed }
         if let id = fe.skipped.first, let sim = sims.first(where: { $0.id == id }) { return FlexibleFE.skipped(sim.short) }
         // ★ BATCH N: the quick squish plays while the steps run, then the refined one swaps in at rest
         // (★ verification: the group named — "Refining Group 2… 3/8")
         if let r = fe.refining {
+            if fe.heldByRun { return FlexibleFE.waitingForRun }   // ★ notes29: yielded to a local run
             return FlexibleFERefine.refining(sims.first { $0.id == r.id }?.short ?? "the squish", r.step, of: r.total)
         }
         if let why = fe.refineKept { return FlexibleFERefine.kept(why) }

@@ -93,9 +93,14 @@ final class LatticeLayoutSolidViewTests: XCTestCase {
         let wall = SolidReason.of(share: 0.12, nocell: [3, 997, 0, 0, 0], lattice: l)
         XCTAssertEqual(wall?.cause, .wallNarrow, "★ the main reason by volume")
         XCTAssertEqual(wall?.line, "12% of the lattice you asked for is solid: the walls there are too thin for a whole cell")
+        // ★ notes29b: "Small cells in thin walls" is offered again (with Allow quilt off it lays a thin wall's own small
+        // cells, never fused)
         XCTAssertEqual(wall?.fixes, [.letWallsCutCells, .smallCells], "★ the fixes that open a thin wall")
         l.letWallsCutCells = true
         XCTAssertEqual(SolidReason.of(share: 0.12, nocell: [3, 997, 0, 0, 0], lattice: l)?.fixes, [.smallCells], "a fix already on is not offered")
+        l.smallCellsInThinWalls = true
+        XCTAssertEqual(SolidReason.of(share: 0.12, nocell: [3, 997, 0, 0, 0], lattice: l)?.fixes, [], "nor this one, once on")
+        l.smallCellsInThinWalls = false
         l.stageMode = .structural
         l.letWallsCutCells = false
         XCTAssertEqual(SolidReason.of(share: 0.12, nocell: [0, 10, 0, 0, 0], lattice: l)?.fixes, [.aestheticCutCells, .smallCells],

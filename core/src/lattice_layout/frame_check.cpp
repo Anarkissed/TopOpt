@@ -579,6 +579,31 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
       out.load_on_frame_n = on;
     }
     out.load_on_open_lattice = out.load_unheld_n > 0.0 && share > s.load_unheld_share;
+    // The interim guard (the reviewer's ruling with the owner's approval, 2026-11-26): more than load_unheld_share of
+    // the whole load put on the vines by the rule above is a load on bare lattice, refused until the load transfer is
+    // checked against a reference. Its place: the force-weighted mean of the loaded grid nodes touching lattice material.
+    out.load_on_bare_lattice = out.load_on_frame_n > s.load_unheld_share * out.load_total_n;
+    {
+      double wsum = 0.0;
+      Vec3 at{0.0, 0.0, 0.0};
+      for (const auto& [node, fv] : force) {
+        const double mag = std::sqrt(fv[0] * fv[0] + fv[1] * fv[1] + fv[2] * fv[2]);
+        if (!(mag > 0.0)) continue;
+        const int a = node % NX, b = (node / NX) % NY, c = node / (NX * NY);
+        bool touches = false;
+        for (int dk = -1; dk <= 0 && !touches; ++dk)
+          for (int dj = -1; dj <= 0 && !touches; ++dj)
+            for (int di = -1; di <= 0 && !touches; ++di) {
+              const int i = a + di, j = b + dj, k = c + dk;
+              if (i < 0 || j < 0 || k < 0 || i >= g.nx || j >= g.ny || k >= g.nz) continue;
+              touches = mat.lattice[g.index(i, j, k)] > 0.0f;
+            }
+        if (!touches) continue;
+        wsum += mag;
+        at = {at.x + mag * (g.origin.x + a * h), at.y + mag * (g.origin.y + b * h), at.z + mag * (g.origin.z + c * h)};
+      }
+      if (wsum > 0.0) out.load_on_lattice_at = {at.x / wsum, at.y / wsum, at.z / wsum};
+    }
     // OS9 amended: the adrift parts, and the load that lands only near them.
     {
       std::unordered_map<int, std::size_t> slot;   // adrift part -> its place in out.adrift

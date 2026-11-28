@@ -95,111 +95,69 @@ public enum FlexibleFaceStats {
     }
 }
 
-/// ★ REVIEW OF R7-D2: where the (i)'s card goes. From the CHIP (its (i) sits inside the chip): BELOW the chip, lined up
-/// with the (i) (the mockup's `placeInfo`), else above it, else beside it — never on it (R7-D2 put it right of the (i), on the
-/// chip's own title and segment, at all four sizes). From the LIST: beside its (i), to the right (the mockup), off the list.
-/// Each spot is kept 8 pt inside the screen and, where one is clear, off the page's keep-outs.
-enum FlexibleFaceStatsPlacement {
-    static let gap: CGFloat = 8
-    /// The card's height before it is measured (the four rows, the caption, the title: 160 as drawn, a little to spare).
-    static func estimatedHeight(rows: Bool) -> CGFloat { rows ? 172 : 96 }
+/// ★ notes30 (his one (i), notes29: "please follow the front-and-centre notification version across the ENTIRE APP"): what
+/// a face's (i) shows under its words in the centred notification (AppPopups.help, raised by FlexibleInfoButton) — his four
+/// rows of the lattice drawn at that face, read live (a lattice that lands while it is open shows at once), else "No numbers
+/// yet for this face". The notification carries the face's name (`title`) and the caption; any tap closes it. It was a card
+/// of its own beside the (i) (FlexibleFaceStatsCard, placed by FlexibleFaceStatsPlacement below the chip or beside the list,
+/// with its own ✕); both went.
+struct FlexibleFaceStatsRows: View {
+    @ObservedObject var main: FlexibleMainStage
+    let group: UUID
+    let ref: LatticeSelectableRef
 
-    static func frame(anchor a: CGRect, chip: CGRect?, size: CGSize, viewport v: CGSize, keepOut: [CGRect]) -> CGRect {
-        let w = size.width, h = size.height
-        func fits(_ r: CGRect) -> Bool { r.minX >= gap - 0.5 && r.minY >= gap - 0.5 && r.maxX <= v.width - gap + 0.5 && r.maxY <= v.height - gap + 0.5 }
-        func overlap(_ r: CGRect) -> CGFloat {
-            keepOut.reduce(0) { acc, k in let i = r.intersection(k); return acc + (i.isNull ? 0 : i.width * i.height) }
-        }
-        func pick(_ cands: [CGRect], avoid: CGRect?) -> CGRect? {
-            let ok = cands.filter { fits($0) && !(avoid?.intersects($0) ?? false) }
-            return ok.first { overlap($0) == 0 } ?? ok.min { overlap($0) < overlap($1) }
-        }
-        if let c = chip {
-            func xs(_ x: CGFloat) -> [CGFloat] { [x, c.minX, c.maxX - w].map { min(max(gap, $0), v.width - gap - w) } }
-            let below = c.maxY + gap, above = c.minY - gap - h
-            var cands: [CGRect] = []
-            for x in xs(a.minX - 12) { cands.append(CGRect(x: x, y: below, width: w, height: h)) }   // below the chip (the mockup)
-            for x in xs(a.minX - 12) { cands.append(CGRect(x: x, y: above, width: w, height: h)) }   // above it
-            for y in [c.minY, c.maxY - h] {
-                cands.append(CGRect(x: c.maxX + gap, y: y, width: w, height: h))                       // right of it
-                cands.append(CGRect(x: c.minX - gap - w, y: y, width: w, height: h))                   // left of it
-            }
-            return pick(cands, avoid: c) ?? CGRect(x: min(max(gap, c.minX), v.width - gap - w), y: min(max(gap, below), v.height - gap - h), width: w, height: h)
-        }
-        // the list's (i): to the right of the panel it sits in (the mockup), its middle on the (i), else its top or bottom there,
-        // else just above or below whatever is in the way there (the chip, at 11" portrait), the nearest first
-        let host = keepOut.first { $0.contains(CGPoint(x: a.midX, y: a.midY)) }
-        let x = max(a.maxX, host?.maxX ?? a.maxX) + gap
-        var around: [CGFloat] = []
-        for k in keepOut { around.append(k.minY - gap - h); around.append(k.maxY + gap) }
-        let mid = a.midY - h / 2
-        around.sort { abs($0 - mid) < abs($1 - mid) }
-        let first: [CGFloat] = [mid, a.minY - 12, a.maxY + 12 - h]
-        let top = v.height - gap - h
-        let ys: [CGFloat] = (first + around).map { (y: CGFloat) -> CGFloat in min(max(gap, y), top) }
-        let cands = ys.map { CGRect(x: x, y: $0, width: w, height: h) } + ys.map { CGRect(x: a.minX - gap - w, y: $0, width: w, height: h) }
-        return pick(cands, avoid: nil) ?? CGRect(x: min(max(gap, x), v.width - gap - w), y: ys[0], width: w, height: h)
-    }
-}
-
-/// The (i)'s card: the face's name, his four rows, the note, the one caption — drawn by the on-model layer beside the (i)
-/// it opened from (the list's or the chip's).
-struct FlexibleFaceStatsCard: View {
-    let title: String
-    let rows: FlexibleFaceStats.Rows?
-    let close: () -> Void
-    static let width: CGFloat = 280
+    /// The notification's title: the face's name and "lattice" (the old card's own title).
+    static func title(_ name: String) -> String { name + " \u{00B7} lattice" }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DS.Space.s) {
-            HStack(spacing: DS.Space.s) {
-                Image(systemName: "square.grid.3x3.fill").font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(FlexibleStageStyle.facePrismToken.color)
-                Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                Button(action: close) {
-                    Image(systemName: "xmark").font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(DS.Color.textSecondary.color)
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .padding(.vertical, -10).padding(.trailing, -10)
-                .accessibilityLabel("Close the numbers")
-                .accessibilityIdentifier("flexible-face-info-close")
-            }
-            if let rows {
-                VStack(spacing: 6) {
+        if let model = main.model {
+            Live(main: main, model: model, group: group, ref: ref)
+        } else {
+            FlexibleFaceStatsNone()
+        }
+    }
+
+    /// Drawn again when the stage's lattice changes (the model publishes it).
+    private struct Live: View {
+        let main: FlexibleMainStage
+        @ObservedObject var model: FlexibleStageModel
+        let group: UUID
+        let ref: LatticeSelectableRef
+
+        var body: some View {
+            if let rows = main.faceStats(ref, group: group, project: model.project) {
+                VStack(spacing: 8) {
                     ForEach(rows.rows, id: \.label) { r in
                         HStack {
-                            Text(r.label).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
+                            Text(r.label).font(.system(size: 15)).foregroundStyle(DS.Color.textSecondary.color)
                             Spacer(minLength: DS.Space.s)
-                            Text(r.value).font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                            Text(r.value).font(.system(size: 15, weight: .semibold)).monospacedDigit()
                                 .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
                         }
+                        .said(r.label + " " + r.value)
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("flexible-face-info-row-\(r.label)")
                     }
+                    if let n = rows.note {
+                        Text(n).font(.system(size: 13)).foregroundStyle(DS.Color.textTertiary.color)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
-                if let n = rows.note {
-                    Text(n).font(.system(size: 11.5)).foregroundStyle(DS.Color.textTertiary.color).lineLimit(1)
-                }
-                Text(FlexibleSelectionsCopy.statsCaption)
-                    .font(.system(size: 11.5)).foregroundStyle(DS.Color.textTertiary.color)
-                    .lineLimit(1).minimumScaleFactor(0.9)
-                    .accessibilityIdentifier("flexible-face-info-caption")
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("flexible-face-info-card")
             } else {
-                Text(FlexibleSelectionsCopy.noNumbers)
-                    .font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
-                    .accessibilityIdentifier("flexible-face-info-none")
+                FlexibleFaceStatsNone()
             }
         }
-        .padding(DS.Space.m)
-        .frame(width: Self.width, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(DS.Color.chipSolid.color.opacity(0.96))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-        .dsShadow(DS.Shadow.panel)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("flexible-face-info-card")
+    }
+}
+
+/// No lattice drawn at the face yet.
+private struct FlexibleFaceStatsNone: View {
+    var body: some View {
+        Text(FlexibleSelectionsCopy.noNumbers)
+            .font(.system(size: 15)).foregroundStyle(DS.Color.textSecondary.color)
+            .said(FlexibleSelectionsCopy.noNumbers)
+            .accessibilityIdentifier("flexible-face-info-none")
     }
 }

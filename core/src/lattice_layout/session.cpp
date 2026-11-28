@@ -40,6 +40,35 @@ namespace {
 double ms_since(std::chrono::steady_clock::time_point t0) {
   return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
 }
+// SHEETS (SPEC 1.2 item 3): Structural's member floor for a sheet, in cells (0: none). Structural is the count of cells
+// across a wall it sends (three or more: the type's own, lattice_cells_per_member_min); never under the sheet's own
+// floor (sheet_structural_floor_cells). A strut type, and Aesthetic (one or two across), have none.
+double sheet_floor_cells(const Settings& s, const CellSpec& rc) {
+  if (!sheet_kind_of(s.cells.topology) || rc.min_cells_across < 3) return 0.0;
+  return std::max(static_cast<double>(rc.min_cells_across), sheet_structural_floor_cells(s.cells.topology));
+}
+// The cell a sheet region asks for before its depth divides it: typed, else Max cell held under the type's cap.
+double sheet_target_mm(const CellSpec& rc) {
+  return rc.cell_mm > 0.0 ? rc.cell_mm : std::min(rc.cell_max_mm, auto_cell_cap_mm(rc.topology));
+}
+const AreaOwn* own_of(const Settings& s, int id) {
+  for (const Settings::RegionAsk& r : s.regions)
+    if (r.id == id && r.role == Role::Lattice && r.own.any()) return &r.own;
+  return nullptr;
+}
+CellSpec cells_of(const Settings& s, int id) {
+  const AreaOwn* o = id > 0 ? own_of(s, id) : nullptr;
+  return o ? region_cells(s.cells, *o) : s.cells;
+}
+// Does any sheet floor apply (the part's, or any Lattice region's own)?
+bool sheet_floors(const Settings& s) {
+  if (!sheet_kind_of(s.cells.topology)) return false;
+  if (sheet_floor_cells(s, s.cells) > 0.0) return true;
+  for (const Settings::RegionAsk& r : s.regions)
+    if (r.role == Role::Lattice && sheet_floor_cells(s, cells_of(s, r.id)) > 0.0) return true;
+  return false;
+}
+
 // Every setting that decides WHERE lattice goes, written out exactly: two settings with
 // the same text read the part the same way.
 std::string where_text(const Settings& s) {
@@ -93,6 +122,17 @@ std::string where_text(const Settings& s) {
     for (int f : p.faces) whole(f);
     pieces(p.pieces);
     out += ";";
+  }
+  // SHEETS: a sheet's Structural floor is a "where" setting (Region::min_wall_mm): its cells and floor per region.
+  // Written only when one applies (every other text is as it was).
+  if (sheet_floors(s)) {
+    out += "S";
+    whole(static_cast<long>(s.cells.topology));
+    num(sheet_floor_cells(s, s.cells)); num(sheet_target_mm(s.cells));
+    for (const Settings::RegionAsk& r : s.regions) {
+      const CellSpec rc = cells_of(s, r.id);
+      whole(r.id); num(sheet_floor_cells(s, rc)); num(sheet_target_mm(rc));
+    }
   }
   return out;
 }
@@ -150,8 +190,21 @@ void Session::ready_domain(const Settings& settings) {
       region.weave = r.weave;
       region.cover_open_face = r.weave && !zone;   // OJ2: an Organic area's Solid closes its open face only
       region.from_zone = zone && r.faces.empty() && !cut;   // OG2f
+      if (r.role == Role::Lattice && sheet_floors(settings)) {
+        // SHEETS (SPEC 1.2 item 3): Structural's floor, floor cells x the region's cell (a flat region's cell divides
+        // its depth, one grid: C15); a region with no floor of its own keeps the part's D8, not the part's floor.
+        const CellSpec rc = cells_of(settings, r.id);
+        const double floor_cells = sheet_floor_cells(settings, rc);
+        double cell = sheet_target_mm(rc);
+        if (!region.is_shell() && region.prism.valid && region.prism.depth > 0.0 && cell > 0.0)
+          cell = region.prism.depth / std::max(1.0, std::ceil(region.prism.depth / cell - 1e-9));
+        region.min_wall_mm = floor_cells > 0.0 ? std::max(settings.min_wall_mm, floor_cells * cell) : settings.min_wall_mm;
+      }
       spec.regions.push_back(std::move(region));
     }
+    if (settings.start == Start::AllLattice && sheet_floor_cells(settings, settings.cells) > 0.0)   // SHEETS: the whole part's
+      spec.min_wall_mm = std::max(settings.min_wall_mm,
+                                  sheet_floor_cells(settings, settings.cells) * sheet_target_mm(settings.cells));
     for (const Settings::ProtectAsk& p : settings.protect)
       spec.protect.push_back({p.id, p.pieces.empty() ? faces_mesh(model_, p.faces) : pieces_mesh(model_, p.pieces),
                               p.depth_mm, p.pieces});
@@ -194,10 +247,34 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
   try {
     // (The reading itself happens inside the first lay_cells of a new domain.)
     CellSpec cells = settings.cells;
-    // One switch for the quilt (R2). His per-part choice lets the CELLS go as small, and only the cells: the struts
-    // are still set without the quilt, so a small cell carries the thinnest strut (set_struts: never under it).
-    cells.allow_quilt = settings.struts.allow_quilt || settings.small_cells_in_thin_walls;
+    // One switch for the quilt (R2). ★ notes29 (his iPad notes on release 20, 2026-11-25: "No matter what I did, the
+    // quilting kept on happening -- even with quilting off"): "Small cells in thin walls" no longer lets the cells go
+    // under the open look's floor. It did so for the WHOLE layout, not the thin walls alone, and each such cell carried
+    // the thinnest strut up to touching: the quilt, wherever the band or the stress shrank the cells. With Allow quilt off
+    // the cells' own floor is the open look's smallest cell again (what the lattice lays on its own).
+    cells.allow_quilt = settings.struts.allow_quilt;
+    // ★ notes29b (his question the same day: "Are you saying that no matter what happens, all Small cells in thin walls are
+    // going to be quilted?"): read again with Allow quilt off, for the THIN WALLS only (CellSpec::small_in_thin_walls), down
+    // to the cell the thinnest strut stays a printed line short of touching in. Nothing else is laid smaller for it.
+    cells.small_in_thin_walls = settings.small_cells_in_thin_walls && !settings.struts.allow_quilt;
     cells.one_grid = settings.one_grid;   // "Let walls cut cells": the per-part switch is the session's
+    // SHEETS (SPEC 1.2 items 1, 2): one cell size per region (a period change leaves sheets unjoined) on ONE grid per
+    // region cut by everything, in Aesthetic and Structural alike; nothing that grades or fits cells applies.
+    const bool sheet = sheet_kind_of(cells.topology);
+    if (sheet) {
+      cells.algorithm = Algorithm::Uniform;
+      cells.one_grid = true;
+      cells.grade_to_shape = false;
+      cells.band_mm = 0.0;
+      cells.by_stress = false;
+      cells.max_step = 0.0;
+      cells.cell_search = false;
+      cells.stretch_edges = false;
+      // ★ notes30 M1 (the merge with notes29b): Small cells in thin walls gives a thin wall its own smaller cell, a period
+      // change the sheet cannot follow (SPEC 1.2 item 1: one cell size per region), and its limit is a strut type's
+      // (lattice_quilt_off_cell_mm throws for a sheet). A thin wall is cut by the region's one grid, as every wall is.
+      cells.small_in_thin_walls = false;
+    }
     // The stress the lattice is graded by (R16, R17), resolved ONCE, before the cells, for the cells (C22) and the
     // struts (By stress) alike: the stated reference, else the part's own, kept while the domain, the field and the
     // percentile are the same (a slider move never reads the field again). Resolved only when it is asked for: the
@@ -212,7 +289,15 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
     for (const Settings::RegionAsk& r : settings.regions) {
       if (r.role != Role::Lattice || !r.own.any()) continue;
       own[r.id] = r.own;
-      const CellSpec rc = region_cells(cells, r.own);
+      if (sheet) {   // SHEETS: a region's own cells cannot grade either (SPEC 1.2 item 1)
+        AreaOwn& o = own[r.id];
+        if (o.algorithm) o.algorithm = Algorithm::Uniform;
+        if (o.grade_to_shape) o.grade_to_shape = false;
+        if (o.band_mm) o.band_mm = 0.0;
+        if (o.cells_by_stress) o.cells_by_stress = false;
+        if (o.max_step) o.max_step = 0.0;
+      }
+      const CellSpec rc = region_cells(cells, own[r.id]);
       const bool wants = (r.own.by_stress ? *r.own.by_stress : settings.struts.mode == Density::ByStress) ||
                          (rc.by_stress && !(rc.cell_mm > 0.0) && rc.algorithm != Algorithm::Uniform);
       if (wants && !(r.own.reference_mpa && *r.own.reference_mpa > 0.0)) asked = true;
@@ -240,65 +325,11 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
     out.stress_reference_mpa = reference;
     out.step_held_at = step_held(cells);   // C24
     out.layout = lay_cells(*domain_, cells, threads, own_or_none);
-    // K3 (his 11-23 notes: quilting "should ALWAYS be off by default unless it is literally impossible to lattice without
-    // it"): with the quilt off, a Lattice region that lays NO cell at all (every place of it solid: its walls too thin
-    // for the smallest cell the thinnest strut leaves open) is laid again with the quilt's smallest cell, that region
-    // only, and named (Outcome::quilt_regions). Every other region keeps the layout it had, byte for byte. The struts are
-    // still set without the quilt (a small cell carries the thinnest strut), as with Small cells in thin walls.
-    // Only where the cell is Auto (cell_mm 0, the part's or the region's own, C23): a typed cell is his choice, and one
-    // that fits nowhere stays solid (his D4: "Cannot Lattice"; 362, 2026-11-24: quilt cells instead of his typed size
-    // ignore it).
-    if (!cells.allow_quilt) {
-      std::vector<int> bare;   // frames of regions with no cell and something solid, whose cell is Auto
-      for (const RegionCells& r : out.layout.regions) {
-        if (!(r.cells == 0 && r.solid > 0)) continue;
-        const auto o = own.find(r.region);
-        const double typed = o != own.end() ? region_cells(cells, o->second).cell_mm : cells.cell_mm;
-        if (!(typed > 0.0)) bare.push_back(r.frame);
-      }
-      if (!bare.empty()) {
-        CellSpec quilt = cells;
-        quilt.allow_quilt = true;
-        Layout again = lay_cells(*domain_, quilt, threads, own_or_none);
-        Layout& a = out.layout;
-        // The two lays open the same frames in the same order (one per region, region by region): a region's frame,
-        // walls, cells and solid places are taken from the second where it lays cells there.
-        if (again.frames.size() == a.frames.size() && again.regions.size() == a.regions.size()) {
-          std::vector<char> take(a.frames.size(), 0);
-          for (const int f : bare)
-            for (const RegionCells& r : again.regions)
-              if (r.frame == f && r.cells > 0 && static_cast<std::size_t>(f) < take.size()) take[static_cast<std::size_t>(f)] = 1;
-          bool any = false;
-          for (const char t : take) any = any || t;
-          if (any) {
-            std::vector<Cell> cells_now, solid_now;
-            std::vector<SolidWhy> why_now;
-            for (const Cell& c : a.cells)
-              if (!take[static_cast<std::size_t>(c.frame)]) cells_now.push_back(c);
-            for (std::size_t i = 0; i < a.solid.size(); ++i)
-              if (!take[static_cast<std::size_t>(a.solid[i].frame)]) { solid_now.push_back(a.solid[i]); why_now.push_back(a.solid_why[i]); }
-            for (const Cell& c : again.cells)
-              if (take[static_cast<std::size_t>(c.frame)]) cells_now.push_back(c);
-            for (std::size_t i = 0; i < again.solid.size(); ++i)
-              if (take[static_cast<std::size_t>(again.solid[i].frame)]) {
-                solid_now.push_back(again.solid[i]);
-                why_now.push_back(again.solid_why[i]);
-              }
-            for (std::size_t f = 0; f < take.size(); ++f)
-              if (take[f]) a.walls[f] = again.walls[f];
-            for (std::size_t i = 0; i < a.regions.size(); ++i)
-              if (take[static_cast<std::size_t>(a.regions[i].frame)]) {
-                a.regions[i] = again.regions[i];
-                out.quilt_regions.push_back(a.regions[i].region);
-              }
-            a.cells.swap(cells_now);
-            a.solid.swap(solid_now);
-            a.solid_why.swap(why_now);
-            if (a.absorb) a.index = index_cells(a);
-          }
-        }
-      }
-    }
+    // K3's quilt fallback (his 11-23 notes: a Lattice region that laid no cell at all was laid again with the quilt's
+    // smallest cell) is withdrawn by his notes on release 20 (2026-11-25: "even with quilting off", "limit both when
+    // 'Allow quilt' is turned off"): with Allow quilt off such a region stays solid, and the layout says why (its solid
+    // places' NoCell: the wall too thin, the region too shallow), so the app offers the fix. Outcome::quilt_regions is
+    // kept, always empty.
     unread_ = false;
     if (strands)   // O2: each weave region carries the smallest spacing of its strands
       for (Layout::Weave& w : out.layout.weave)
@@ -316,11 +347,42 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
     const double laid = ms_since(t0);
     (out.read_again ? out.ms_read : out.ms_cells) = laid;
     last_cells_.regions = out.layout.regions;   // D23: what Session::places reads of this layout
+    if (sheet) {
+      // SHEETS (SPEC 1.2 item 5, 1.4, 1.5): no bars. P8 (f) as for struts (a cut piece thinner than its wall against
+      // solid is solid); then one field per laid region, the pairs that touch, and the solid wall's membrane.
+      if (settings.bars) {
+        t0 = std::chrono::steady_clock::now();
+        domain_->check_stop();
+        out.thin_solid = solidify_thin_cuts(out.layout, *domain_, threads);
+      }
+      out.sheets = sheet_fields(out.layout);
+      const double line = domain_->spec().bead_mm;
+      out.sheet_seams = sheet_seams(out.layout, out.sheets, settings.sheet_seam, line);
+      // E: a seam the app's last print file fell back on is the solid wall here too (the preview draws what printed)
+      for (SheetSeamBand& sb : out.sheet_seams) {
+        if (sb.solid_wall) continue;
+        for (const auto& w : settings.sheet_walls)
+          if ((w[0] == sb.region_a && w[1] == sb.region_b) || (w[1] == sb.region_a && w[0] == sb.region_b)) {
+            sb.solid_wall = sb.fell_back = true;
+            sb.why = "The print file made this seam a solid wall: its blend could not be made to print.";
+            break;
+          }
+      }
+      set_sheet_membrane(out.layout, out.sheet_seams, out.sheets, line);
+      // E: a sheet beside an Organic region meets it at the solid wall (no blend with Organic), its side two lines.
+      set_sheet_weave_membrane(out.layout, *domain_, out.sheets, line);
+      // E: where each Blend seam's two regions meet (sheet_seam_mm: the file, the strength check and the map read it).
+      sheet_seams_across(*domain_, out.layout, out.sheets, out.sheet_seams, threads);
+      if (settings.bars) out.ms_bars = ms_since(t0);
+      domain_->check_stop();
+      if (!strands) return out;
+      // With an Organic region beside the sheets (O1), its weave is laid below as for any lay; the cells lay no bars.
+    }
     if (settings.bars) {
       t0 = std::chrono::steady_clock::now();
       domain_->check_stop();
-      out.thin_solid = solidify_thin_cuts(out.layout, *domain_, threads);   // P8 (f): before any bar is laid
-      out.bars = lay_bars(out.layout, *domain_, threads);
+      if (!sheet) out.thin_solid = solidify_thin_cuts(out.layout, *domain_, threads);   // P8 (f): before any bar is laid
+      out.bars = sheet ? Bars{} : lay_bars(out.layout, *domain_, threads);
       if (strands) {   // O2: the weave's bars, cut at their crossings, after the cells'
         Bars weave = weave_bars(*domain_, *strands, threads);
         const bool cut = !(finish && finish->draft);   // brief L2, item 3: the draft has no cut at crossings (no links)
@@ -402,7 +464,24 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
       if (settings.drop_loose && !draft) {
         drop_loose_bars(out.bars, finish && !finish->arrived.empty() ? &finish->arrived : nullptr);   // G11
         out.stepped_edges = stepped_edges(out.bars);
-        out.pieces = drop_adrift_bars(out.bars, *domain_, &out.layout);
+        // ★ notes29 (his notes on release 20: "There were even *holes* in the lattice -- which should NEVER happen"): a
+        // patch of cells of one size whose nodes meet none of the next size's (kelvin, rhombic: no node at a cube's
+        // corner) was a piece adrift, and the drop below took every strut of it. Its free nodes are run on into the
+        // lattice beside it first (join_cut_off_pieces); then what is still adrift goes, as before. Cube lattices only.
+        // S-1 (notes30, the maintainer's yes 2026-11-26): when the join changed no bar, its own count of the pieces is
+        // the drop's (the same bars, domain and layout: count_pieces gives the same answer, flag for flag), and the
+        // pieces are counted once. When an end was joined the drop counts again.
+        std::optional<PiecesCount> unchanged;
+        if (!strands)
+          out.cut_off_joined =
+              join_cut_off_pieces(out.bars, *domain_, threads, &out.layout, pieces_once_ ? &unchanged : nullptr);
+        out.pieces = drop_adrift_bars(out.bars, *domain_, &out.layout, unchanged ? &*unchanged : nullptr);
+        if (unchanged) ++counted_once_;
+        // ★ notes29 ("the solid outline isn't even, there is a chunk cut out of it on either side"): a cell left with no
+        // strut of its own (a cut cell at the part's edge whose pieces were all too short or left hanging) is opened
+        // space in the file with nothing printed in it: a hole, or a notch in the outline. It is solid (D14).
+        if (!strands) out.empty_solid = solidify_empty_cells(out.layout, out.bars);
+        if (out.empty_solid > 0) last_cells_.regions = out.layout.regions;   // D23 reads the counts as they now are
         if (finish && !finish->prune.empty()) prune_weave(out.bars, finish->prune);   // J2, where the dropping ends
       } else {
         out.pieces = count_pieces(out.bars, *domain_, nullptr, nullptr, &out.layout);
@@ -464,11 +543,11 @@ Outcome Session::lay_with(const Settings& settings, const std::vector<Strand>* s
   return out;
 }
 
-std::vector<Place> Session::places(const Settings& settings) const {
+std::vector<Place> Session::places(const Settings& settings, const std::atomic<bool>* stop) const {
   if (!domain_ || where_text(settings) != where_) return {};
   const CellSpec& c = settings.cells;
   return find_places(model_, *domain_, domain_no_chips_.get(), chip_ids_, settings.regions, last_cells_,
-                     c.cell_max_mm > 0.0 ? c.cell_max_mm : c.cell_mm);
+                     c.cell_max_mm > 0.0 ? c.cell_max_mm : c.cell_mm, stop);   // ★ notes30 Q1
 }
 
 // ── his 11-22: watch it grow ────────────────────────────────────────────────────

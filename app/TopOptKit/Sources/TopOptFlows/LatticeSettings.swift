@@ -418,7 +418,7 @@ public struct LatticeRegionSpec: Equatable, Sendable {
         if abs(e) < 1e-9, strips.isEmpty { return outlineLoops }
         guard let g = TopOptKit.outlinePolygon(raw: outlineLoops, trueSegments: abs(e) < 1e-9 ? [] : segs,
                                                strips: strips, expandMM: e) else {
-            NSLog("DIAG generatedOutlineLoops: the bridge refused (\(TopOptKit.lastCoreRefusal ?? "no reason")) — the raw outline stands")
+            OutlineRefusalLog.once(TopOptKit.lastCoreRefusal ?? "no reason")   // ★ notes30: read as views draw — once per reason
             return outlineLoops
         }
         return g
@@ -2050,9 +2050,12 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// (2026-09-16: None came back as Skin after Save & Exit).
     public var jobSkinResolved: String {
         if isOrganic { return "diagrid" }
-        if singleCellMembers, boundary == .none || boundary == .rim { return LatticeBoundaryTreatment.fullSkin.jobSkinValue }
+        if singleCellMembersInEffect, boundary == .none || boundary == .rim { return LatticeBoundaryTreatment.fullSkin.jobSkinValue }
         return boundary.jobSkinValue
     }
+    /// ★ notes29 (his 11-25: "there is NO single-cell available in structural"): single-cell members act on the Aesthetic stage
+    /// only — a saved "on" carried to Structural adds no skin, sets no one-cell floor and locks nothing.
+    public var singleCellMembersInEffect: Bool { singleCellMembers && (stageMode ?? .structural) == .aesthetic }
     public var boundary: LatticeBoundaryTreatment
     /// Density mode (uniform run fill vs field-graded preview, bar B6).
     public var densityMode: LatticeDensityMode
@@ -2367,6 +2370,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// no grade changes. Per part, Aesthetic only (Structural keeps cells fitted to walls and the app sends false). Not
     /// written while off, so older bytes are unchanged.
     public var letWallsCutCells: Bool = false
+    /// ★ SHEETS (notes28 sheets SPEC 1.5, his yes 11-25): "Where regions meet" for two sheet regions that touch — "blend" or
+    /// "solid_wall"; nil = the stage's default (Blend in Aesthetic, Solid wall in Structural: `LatticeSheets.seam`). Not
+    /// written while nil, so older bytes are unchanged.
+    public var sheetSeam: String? = nil
     /// ★ INSTALL 2, THE MANUAL CONTROLS (00-proposal.md, "Manual controls for engineers — DECIDED"; his 11-14 pick 1, 2, 4,
     /// 5, 6, 7, 8). Each nil (or off) is Auto: the engine chooses, as before. None is written while Auto, so older bytes are
     /// unchanged. Read by the new engine only. An area's own (LatticeAreaGrading) wins over these on its regions.
@@ -2433,13 +2440,24 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         }
         return out
     }
-    /// ★ B7 (E3): the Lattice page's area grades saved (`areas` = `ProjectModel.latticeAreaGroups`, in tab order). The
-    /// preview draws ONE grade for the part, so where every area agrees that grade is the part's and no area sends its own
-    /// — the picture is the run. Where they differ, the first area's is the part's and each other area keeps what differs
-    /// (its tab says the preview shows one grade). Under Start from − the part's grade is the rest of the part's: not moved.
-    public mutating func saveAreaGrading(_ edits: [UUID: LatticeAreaGrading], areas: [UUID]) {
+    /// ★ B7 (E3): the Lattice page's area grades saved (`areas` = `ProjectModel.latticeAreaGroups`, in tab order).
+    /// ★ notes30 (his rule, notes29: "It should always be 'Stress & Shape'"): Save never moves an area's grade onto the part.
+    /// The part's grade, band and Strength stay what the Part tab holds (Stress + shape unless he picked another there), and
+    /// each area keeps what differs from them, sent on its own regions (the preview draws each area's own too, since Install
+    /// 2's `LatticeLayoutPreview.areaOwn`). An area gone from the list drops. It was B7's rule: where the areas differed the
+    /// FIRST area's grade became the part's — so one Save turned the part (and every new group after it) to Group 1's grade.
+    /// `firstAreaLeads`: that rule, a test's RED CONTROL only.
+    public mutating func saveAreaGrading(_ edits: [UUID: LatticeAreaGrading], areas: [UUID], firstAreaLeads: Bool = false) {
         var out = edits.filter { areas.contains($0.key) && !$0.value.isEmpty }
-        if !wholePart, let first = areas.first {
+        if !firstAreaLeads {
+            for (g, a) in out {
+                var own = a   // a finish and (Install 2) the Manual controls are the area's own, as set
+                if own.gradingMode == gradingMode { own.gradingMode = nil }
+                if own.shapeFitBandMM == shapeFitBandMM { own.shapeFitBandMM = nil }
+                if own.shapeGradeStrength == shapeFitGradeStrength { own.shapeGradeStrength = nil }
+                out[g] = own.isEmpty ? nil : own
+            }
+        } else if !wholePart, let first = areas.first {
             let partMode = gradingMode, partBand = shapeFitBandMM, partStrength = shapeFitGradeStrength
             let leadMode = out[first]?.gradingMode ?? partMode, leadBand = out[first]?.shapeFitBandMM ?? partBand
             let leadStrength = out[first]?.shapeGradeStrength ?? partStrength
@@ -2713,6 +2731,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case simulateStresses
         // sub-floor retention (task 2026-08-05-lattice-retention-app-control)
         case retainSubfloorInUnloadedRegions, subfloorStressFraction, singleCellMembers, smallCellsInThinWalls, letWallsCutCells
+        case sheetSeam   // ★ SHEETS: "Where regions meet" (absent ⇒ the stage's default)
         case allowQuilt
         // ★ Install 2: the Manual controls (none written while Auto)
         case strutFromMM, strutToMM, cellsAcrossMin, neverSkipCellSize, stressTargetMPa, skinBarWidthMM, skinReachCells
@@ -2880,8 +2899,12 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         subfloorPerRegion = try c.decodeIfPresent(Bool.self, forKey: .subfloorPerRegion) ?? false
         // Absent from every older snapshot ⇒ off ⇒ core's floor of 2, unchanged.
         singleCellMembers = try c.decodeIfPresent(Bool.self, forKey: .singleCellMembers) ?? false
+        // ★ notes29 (his 11-25: Skin stuck on Structural): a saved Structural lattice with single-cell members on (carried
+        // over from Aesthetic) opens with it off, so no saved project keeps the Finish locked to Skin
+        if stageMode == .structural { singleCellMembers = false }
         smallCellsInThinWalls = try c.decodeIfPresent(Bool.self, forKey: .smallCellsInThinWalls) ?? false
         letWallsCutCells = try c.decodeIfPresent(Bool.self, forKey: .letWallsCutCells) ?? false
+        sheetSeam = try c.decodeIfPresent(String.self, forKey: .sheetSeam)   // ★ SHEETS
         // ★ Install 2: the Manual controls; absent ⇒ Auto
         strutFromMM = try c.decodeIfPresent(Double.self, forKey: .strutFromMM)
         strutToMM = try c.decodeIfPresent(Double.self, forKey: .strutToMM)
@@ -3001,6 +3024,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(singleCellMembers, forKey: .singleCellMembers)
         if smallCellsInThinWalls { try c.encode(true, forKey: .smallCellsInThinWalls) }   // ★ 11-13: off is not written
         if letWallsCutCells { try c.encode(true, forKey: .letWallsCutCells) }             // ★ 11-14: off is not written
+        if let v = sheetSeam { try c.encode(v, forKey: .sheetSeam) }                       // ★ SHEETS: nil is not written
         // ★ Install 2: the Manual controls, only where set
         try c.encodeIfPresent(strutFromMM, forKey: .strutFromMM)
         try c.encodeIfPresent(strutToMM, forKey: .strutToMM)
@@ -3458,7 +3482,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         let id = topology ?? topologyID
         let limits = TopOptKit.latticeLimits(topology: id)
         // ★ RELEASE (2), E2: a type core builds runs only once its app batch has shipped (the type gate)
-        let generatable = LatticeTypeCatalog.appBatches.contains(id)
+        let generatable = LatticeTypeCatalog.oldRunShipped(id)   // ★ notes28 (his 11-25): the old run keeps the octet only
             && TopOptKit.latticeGeneratableTopologies.contains(id)
         return runSpec(limits: limits, generatable: generatable, memberMM: memberMM,
                        lineWidthMM: lineWidthMM, emitSTL: emitSTL, emit3MF: emit3MF,
@@ -3881,4 +3905,20 @@ public struct LatticeBounds: Equatable, Sendable {
     /// conservative choice, never sparser (hence weaker) than the previewed range. When
     /// graded generation lands this becomes the range itself.
     public var generateRelativeDensity: Double { densityHi }
+}
+
+/// ★ notes30 (his crash 11-26: a log line per render stalled the app when Xcode's log pipe stopped draining): `outlinePolygon` is
+/// read as views draw and scenes bake, so the bridge's refusal is written once per reason this process, never per read.
+enum OutlineRefusalLog {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var said = Set<String>()
+    /// Lines written (tests).
+    nonisolated(unsafe) static var lines = 0
+    static func once(_ why: String) {
+        lock.lock()
+        let first = said.count < 64 && said.insert(why).inserted
+        if first { lines += 1 }
+        lock.unlock()
+        if first { NSLog("DIAG generatedOutlineLoops: the bridge refused (%@) — the raw outline stands", why) }
+    }
 }

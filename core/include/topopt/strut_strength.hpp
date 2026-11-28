@@ -182,6 +182,66 @@ std::string strut_law_source(LatticeTopology topo);
 double strut_law_bulk_only_below(LatticeTopology topo);
 std::string strut_law_resolution_note(LatticeTopology topo);
 
+// ── ★ notes30 SA1 (Structural Auto, REMOVE.md: this block to "notes30 SA1 end"; his 11-24 vision: "work backwards from the amount the user wants to beat the load capacity
+// and guess at the best possible settings for the least possible plastic"; his 11-26 D1: the target is the part's own Safety
+// margin, 150 % by default) — THE SAME LAW, TURNED ROUND ──────────────────────────────────────────────────────────────────
+// The strength check judges a credited strut cell by the law above: at one voxel, with the lattice's macro stress Sigma
+// (von Mises vm, pressure p) and the cell's density rho,
+//   margin(rho) = min( yield / [Kd vm + Kv |p|],
+//                      z_knockdown yield / [Kild vm + Kilv |p| + cross (Kd vm + Kv |p|)] )
+// (cross = il_cross_factor of the build direction, 0 on a cube axis). These functions answer the other question: the
+// LIGHTEST density whose margin reaches `target`, and the strut / cell that density is laid with. Pure, deterministic,
+// no allocation per voxel; the check itself is not touched (every number he sees stays the check's).
+//
+// The margin at one voxel and density, exactly as evaluate_strut_strength reads it (the law clamped to its span). +inf
+// when nothing loads the struts (vm and p both 0). Throws for a type with no law, a non-positive yield or z_knockdown, or
+// a zero build direction (evaluate_strut_strength's own refusals).
+double strut_law_margin_at(LatticeTopology topo, double rho, double vm, double pressure, const Vec3& build_dir,
+                           double yield_strength_mpa, double z_knockdown);
+// The densities sizing may lay (a strut pass is given on them, and the check credits them):
+//   floor   the highest of the law's first row, the band the check credits (lattice_rho_min) and the bulk-only floor
+//           (strut_law_bulk_only_below: octet 0.10 — a lighter cell is given no strut pass, so sizing never lays one);
+//   ceiling the lower of the law's last row and the band the check credits (lattice_rho_max): a cell denser than the
+//           band gets no credit at all (void in the check's solve), so sizing never asks past it.
+double strut_sizing_rho_floor(LatticeTopology topo);
+double strut_sizing_rho_ceiling(LatticeTopology topo);
+// The strut / cell a density is laid with: the smallest ratio whose lattice_density_from_strut (the direction the check
+// credits a cell by) reaches `rho` — scale free (density depends on strut / cell only). Bisection to 1e-9; held to the
+// type's touch (lattice_width_bounds) — a density past what the touch lays returns the touch.
+double strut_ratio_for_rho(LatticeTopology topo, double rho);
+// The lightest density for one voxel.
+struct StrutLawSize {
+  double rho = 0.0;              // the lightest density FROM WHICH the margin stays >= target up to the ceiling (a heavier
+                                 // cell never drops under it: sc's K_vol rises between rows, so the margin is not monotone
+                                 // everywhere and the lowest crossing alone would not do), held to [floor, ceiling]
+  double ratio = 0.0;            // strut / cell for rho (strut_ratio_for_rho)
+  double margin = 0.0;           // the law's margin at rho (+inf: nothing loads the struts)
+  bool at_floor = false;         // the floor set it: the stress asks for less
+  bool short_of_target = false;  // even the ceiling's margin is under the target: rho is the ceiling, still short
+};
+// Throws as strut_law_margin_at, and for a target that is not finite and > 0.
+StrutLawSize strut_size_for_margin(LatticeTopology topo, double vm, double pressure, const Vec3& build_dir,
+                                   double yield_strength_mpa, double z_knockdown, double target);
+// The field form, for the app's sizing (StructuralAutoSizing): per voxel of a Voigt stress field (6 per voxel, TRUE shear,
+// MPa, stress_tensor_field's order) the ratio and density above, written into the caller's arrays (each n long, n =
+// tensor.size() / 6; null skips that output). The density -> ratio step reads a table of `kStrutSizingTableSteps` steps
+// over [floor, ceiling], taking the step AT OR ABOVE the density (never lighter than the law asks). Returns the summary.
+inline constexpr int kStrutSizingTableSteps = 4096;
+struct StrutLawSizeSummary {
+  std::size_t voxels = 0;           // voxels sized (n)
+  std::size_t loaded = 0;           // voxels with any stress (vm or p > 0)
+  std::size_t at_floor = 0;         // voxels the floor set
+  std::size_t short_of_target = 0;  // voxels even the ceiling leaves short (their ratio is the ceiling's)
+  double rho_floor = 0.0, rho_ceiling = 0.0;
+  double ratio_floor = 0.0, ratio_ceiling = 0.0;
+  double highest_ratio = 0.0;       // the largest ratio asked
+  double rho_sum = 0.0;             // sum of rho over the loaded voxels (the plastic the law asks there, in voxels)
+};
+StrutLawSizeSummary strut_size_field(LatticeTopology topo, const double* tensor, std::size_t tensor_count,
+                                     const Vec3& build_dir, double yield_strength_mpa, double z_knockdown, double target,
+                                     float* ratio_out, float* rho_out, unsigned char* short_out);
+// ★ notes30 SA1 end
+
 }  // namespace topopt
 
 #endif  // TOPOPT_STRUT_STRENGTH_HPP

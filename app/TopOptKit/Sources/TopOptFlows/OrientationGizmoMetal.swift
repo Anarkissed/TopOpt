@@ -427,6 +427,8 @@ struct GizmoMetalView {
     @MainActor
     final class Coordinator: NSObject {
         var renderer: GizmoRenderer?
+        /// ★ notes29: the projection the renderer was built for (its constants are compiled into its shader).
+        var orthographic = false
         private var cancellable: AnyCancellable?
 
         /// Mirror the shared camera's rotation onto the renderer, and — when static (Reduce
@@ -468,8 +470,10 @@ struct GizmoMetalView {
         #elseif os(macOS)
         view.layer?.isOpaque = false
         #endif
-        if let device, let renderer = GizmoRenderer(device: device) {
+        let ortho = camera.camera.orthographic   // ★ notes29: the cube follows the app's one projection
+        if let device, let renderer = GizmoRenderer(device: device, constants: .projection(orthographic: ortho)) {
             coordinator.renderer = renderer
+            coordinator.orthographic = ortho
             view.delegate = renderer
         }
         coordinator.bind(camera, to: view)
@@ -478,6 +482,16 @@ struct GizmoMetalView {
 
     @MainActor
     fileprivate func apply(_ view: MTKView, _ coordinator: Coordinator) {
+        // ★ notes29 (his 11-25: the projection button "should work everywhere, including … the cube"): a projection switch
+        // rebuilds the renderer with the other lens (Orthographic: the telephoto, GizmoConstants.orthographic)
+        let ortho = camera.camera.orthographic
+        if ortho != coordinator.orthographic, let device = view.device,
+           let renderer = GizmoRenderer(device: device, constants: .projection(orthographic: ortho)) {
+            renderer.rotation = camera.viewRotation
+            coordinator.renderer = renderer
+            coordinator.orthographic = ortho
+            view.delegate = renderer
+        }
         coordinator.renderer?.hoverId = hoverId
         coordinator.renderer?.freezePose = interacting
         coordinator.renderer?.reduceMotion = reduceMotion

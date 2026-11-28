@@ -1,0 +1,14 @@
+[loadcase] load-group 0: faces=1 |F|=30N voxels_tagged=432 status=ok
+[loadcase] load-group 1: faces=1 |F|=300N voxels_tagged=324 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=2 voxels_frozen=2916 (structural pad, NOT a face protection)
+[mg] smoother check (S7): 2 levels, lambda_max(D^-1 A) per smoothed level: 3.140 ; omega=0.60 => safe <= 3.333 : safe
+[lattice] vf=1.00 certificate from what shipped: the law counted 24052.1 mm3, the file holds 22616.7; certified 21284.3 mm3 (4583 voxel(s) lowered to the file, 12 of them held at the band floor 0.0387)
+[lattice] vf=1.00 volume check: 1 pocket(s), exported 22616.7 / certified 21284.3 mm3 (+6.26 %); lightest judged pocket 7776 voxels +6.26 % (heaviest +6.26 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (1990656 points, 0.00 s)
+[loadcase] load scenario "light down": 684 clamped nodes, 0 weak-spring nodes (anchors OFF), 559 load entries
+[loadcase] load scenario "heavy side": 684 clamped nodes, 0 weak-spring nodes (anchors OFF), 433 load entries
+[type law] diamond  : lattice_voxels 7776, margin 0.1728, gated true, accepted false
+           law at rho 0.315: Kd 29.03 Kv 14.50 (octet's 23.39 15.34)
+           kfit.csv: 10 rows, every row reproduced exactly
+PASS: 18 checks, 0 failures

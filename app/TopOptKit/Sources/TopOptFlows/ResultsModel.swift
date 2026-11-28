@@ -371,8 +371,8 @@ public struct ResultVariantVM: Equatable, Sendable {
     public let savingsLabel: String
     /// Printed mass in grams (spacing-aware, from the core).
     public let massGrams: Double
-    /// Formatted mass, e.g. "199 g" / "1.24 kg".
-    public let massLabel: String
+    /// Formatted mass, e.g. "199 g" / "1.24 kg" (★ TO rebuild stage 2: "85 g printed" when they are printed grams).
+    public var massLabel: String
     /// Support-material estimate for the chosen orientation (cm³).
     public let supportCm3: Double
     /// Formatted support, e.g. "3.8 cm³" or "minimal".
@@ -439,6 +439,9 @@ public struct ResultVariantVM: Equatable, Sendable {
     /// separate verdicts: a rung whose solid passes can produce a lattice that does
     /// not, and one badge must never stand for the other.
     public let latticeAccepted: Bool?
+    /// ★ notes30 (362's review): the words in its margin's place when the check refused to judge the load (a load on bare
+    /// vines: "Load on bare vines"); nil: its margin shows.
+    public var marginWords: String? = nil
 
     /// The tab's sub-line, e.g. "199 g · selected" / "199 g · plastic" (design).
     /// A latticed tab says what it is and which rung it came off instead, since its
@@ -686,6 +689,9 @@ public final class ResultsModel: ObservableObject {
     /// EVERY displayed physics figure is knocked down to this infill consistently
     /// (`infillKnockdown` / `effectiveYieldStrengthMPa`). 100 means solid (knockdown 1).
     public let infillPercent: Int
+    /// ★ 362 (11-26): the printer's wall ring (mm) — the cover a Solid finish lays — so a load on bare vines names only the
+    /// fixes the wizard offers (LatticeReview's depth rule); nil: not known (a test's model).
+    public let solidWallMM: Double?
     /// The project's infill pattern (M7.params), for the infill-aware labels
     /// (e.g. "Holds ~157 lb at 20% gyroid"). Purely descriptive — the knockdown math
     /// depends only on the infill %.
@@ -868,6 +874,10 @@ public final class ResultsModel: ObservableObject {
         m.relay = m.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         return m
     }()
+    /// ★ TO rebuild stages 1-2: the report's true-loads keys (TrueLoadsReport); empty while core's switches are off.
+    public private(set) var trueLoads = TrueLoadsReport()
+    /// ★ TO rebuild: a pad's face or cut piece by its plain name (the workspace's `ProjectModel.padPlaceName`); nil → "A face".
+    public var placeName: (@MainActor (TrueLoadsReport.Pad) -> String?)?
     public private(set) var reportBlocks: RunReportBlocks?   // Flexible (PR #362) H56f: redesign to strengthen (overnight plan 2026-10-25) — the strengthen cards + bodies (RedesignToStrengthen.swift)
 
     /// THE HEADLINE OF A GROWTH RUN: how much plastic the SELECTED variant adds and
@@ -1192,8 +1202,9 @@ public final class ResultsModel: ObservableObject {
                 infillPercent: Int = 100, infillPattern: String = "gyroid",
                 loadLocations: [SIMD3<Float>] = [],
                 loadDirections: [SIMD3<Float>] = [], anchorPoints: [SIMD3<Float>] = [],
-                materialDensityGCm3: Double? = nil) {
+                materialDensityGCm3: Double? = nil, solidWallMM: Double? = nil) {
         self.projectName = projectName
+        self.solidWallMM = solidWallMM   // ★ 362 (11-26): before `apply` reads it
         self.materialName = materialName
         self.yieldStrengthMPa = max(0, yieldStrengthMPa)
         self.appliedLoadKg = max(0, appliedLoadKg)
@@ -1240,6 +1251,7 @@ public final class ResultsModel: ObservableObject {
         // numbers as reduction numbers mid-run.
         ladderMode = outcome.growthLadder ? .growth : .reduction
         if let d = outcome.reportJSON { reportBlocks = RunReportBlocks.decode(reportJSON: d) }   // Flexible (PR #362) H56f: redesign to strengthen (overnight plan 2026-10-25) — a streamed partial (no report) never erases it
+        if let d = outcome.reportJSON { trueLoads = TrueLoadsReport.decode(reportJSON: d) }   // ★ TO rebuild: a partial never erases it
         // Only a timing-bearing outcome updates the duration: `apply` also runs for
         // every STREAMED partial (which has no timing yet), and a partial landing
         // after the authoritative final must not erase the run's recorded duration.
@@ -1248,6 +1260,7 @@ public final class ResultsModel: ObservableObject {
         if let d = outcome.reportJSON, let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
             scenarioResults = ScenarioResult.parse(o)
             latticeAnswer = LatticeStrengthAnswer.decode(report: o)   // ★ notes25 C3
+            latticeAnswer?.solidWallMM = solidWallMM   // ★ 362 (11-26): the Checks line names only the fixes offered
             solidMargins = SolidMarginVoxels.decode(report: o)
             printFacts = PrintReportFacts.decode(o)   // ★ notes27: its print frame, supports word, ranking, re-check
             printFileParts = latticeAnswer == nil ? nil : PrintFileParts.decode(report: o)   // ★ notes27 F1
@@ -1267,6 +1280,18 @@ public final class ResultsModel: ObservableObject {
                                       knockdown: latticeAnswer == nil ? infillKnockdown : 1,
                                       remote: outcome.computedRemotely)
         if let g = latticeAnswer?.governing { tabs = tabs.map { $0.withWorstCaseMargin(g) } }
+        // ★ TO rebuild stage 2: with its switch on each version's grams are printed grams, and the label says so
+        if trueLoads.printedGrams {
+            tabs = tabs.map { var t = $0; if !t.isLatticed, t.massGrams > 0 { t.massLabel = TrueLoadsWords.printed(t.massLabel) }; return t }
+        }
+        // ★ notes30 (362's review): a load on bare vines has no valid margin — its words stand in the number's place (the list
+        // row, Compare), and no scenario says a margin either
+        if let w = OrganicBareVines.marginWords(reportJSON: outcome.reportJSON) {
+            tabs = tabs.map { var t = $0; t.marginWords = w; return t }
+            scenarioResults = scenarioResults.map {
+                ScenarioResult(name: $0.name, margin: nil, governs: $0.governs, unheld: $0.unheld, peakMPa: $0.peakMPa, peakMM: $0.peakMM)
+            }
+        }
         shownLetters.merge(FinalCheckWords.letters(tabs: tabs, blocks: reportBlocks,
                                                    vf: { self.requestedVolumeFraction(of: $0) })) { first, _ in first }
         // M7.viz.1 "honest heatmap": key the shared stress scale to the MATERIAL

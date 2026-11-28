@@ -33,36 +33,31 @@ final class FlexibleR7D2ReviewTests: XCTestCase {
         return (r, r.project, c)
     }
 
-    // MARK: R1 — the chip's (i) card sits below the chip, never on it
+    // MARK: R1 — the chip's (i) never covers the chip
 
-    func testTheChipsInfoCardSitsBelowTheChipNeverOnIt() {
-        let size = CGSize(width: FlexibleFaceStatsCard.width, height: FlexibleFaceStatsPlacement.estimatedHeight(rows: true))
-        for (tag, v) in Self.viewports {
-            // the chip where his pad put it (13p: 612,903 404×132) and two other spots, its (i) inside its second line
-            for chip in [CGRect(x: 612, y: 903, width: 404, height: 132).offsetBy(dx: v.width > 1100 ? 0 : -200, dy: v.height > 1100 ? 0 : -300),
-                         CGRect(x: 420, y: 120, width: 404, height: 132), CGRect(x: 16, y: v.height - 16 - 132, width: 404, height: 132)] {
-                let info = CGRect(x: chip.minX + 70, y: chip.minY + 76, width: 44, height: 44)
-                let card = FlexibleFaceStatsPlacement.frame(anchor: info, chip: chip, size: size, viewport: v, keepOut: [])
-                XCTAssertFalse(card.intersects(chip), "★ \(tag): the (i)'s card never covers its chip (\(card) vs \(chip))")
-                XCTAssertTrue(card.minX >= 7.5 && card.maxX <= v.width - 7.5 && card.minY >= 7.5 && card.maxY <= v.height - 7.5,
-                              "\(tag): on screen \(card)")
-                if chip.maxY + 8 + size.height <= v.height - 8 {
-                    XCTAssertEqual(card.minY, chip.maxY + 8, accuracy: 0.5, "★ \(tag): below the chip (the mockup's spot)")
-                    XCTAssertEqual(card.minX, max(8, min(info.minX - 12, v.width - 8 - size.width)), accuracy: 0.5,
-                                   "\(tag): lined up with the (i)")
-                }
-                // ★ RED CONTROL: the old spot — to the right of the (i), which is inside the chip — lands on the chip
-                let old = CGRect(x: min(max(8, info.maxX + 8), v.width - 8 - size.width), y: min(max(8, info.midY - size.height / 2), v.height - 8 - size.height),
-                                 width: size.width, height: size.height)
-                XCTAssertTrue(old.intersects(chip), "★ RED CONTROL \(tag): beside the (i) it covers the chip")
-            }
+    /// ★ RE-PINNED (notes30, his rule of notes29: ONE (i) app-wide, opening the centred notification; builder F1): was
+    /// `testTheChipsInfoCardSitsBelowTheChipNeverOnIt` — the (i)'s own card placed below the chip (FlexibleFaceStatsPlacement,
+    /// gone). A face's (i), the chip's and the list's, now opens the one centred notification over everything
+    /// (Notes30FollowUpsHostedTests clicks both); the layer draws no card of its own, so none can sit on the chip. RED CONTROL:
+    /// release 21's layer and (i) (they drew and opened the card beside it) are caught.
+    func testTheFacesInfoOpensTheCentredNotificationNotACardOfItsOwn() throws {
+        let layer = try String(contentsOf: FlexibleRound7SelectionsHookTests.sources.appendingPathComponent("FlexibleOnModelLayer.swift"), encoding: .utf8)
+        func drawsItsOwnCard(_ t: String) -> Bool { t.contains("statsCard(") || t.contains("FlexibleFaceStatsCard(") || t.contains("ui.info") }
+        XCTAssertFalse(drawsItsOwnCard(layer), "★ the on-model layer draws no (i) card of its own")
+        let list = try String(contentsOf: FlexibleRound7SelectionsHookTests.sources.appendingPathComponent("FlexibleSelectionsList.swift"), encoding: .utf8)
+        let r = try XCTUnwrap(list.range(of: "struct FlexibleInfoButton: View {"))
+        let button = String(list[r.upperBound...].prefix(1200))
+        func opensTheNotification(_ t: String) -> Bool {
+            t.contains("AppInfoButton(title: FlexibleFaceStatsRows.title(name), text: FlexibleSelectionsCopy.statsCaption,")
+                && !t.contains("tap:") && !t.contains("lit: on) {") && !drawsItsOwnCard(t)
         }
-        // the list's (i): still beside the list (the mockup), no chip given
-        let list = CGRect(x: 24, y: 600, width: 348, height: 300)
-        let info = CGRect(x: 320, y: 700, width: 44, height: 44)
-        let card = FlexibleFaceStatsPlacement.frame(anchor: info, chip: nil, size: size, viewport: Self.viewports[0].1, keepOut: [list])
-        XCTAssertGreaterThanOrEqual(card.minX, info.maxX + 8 - 0.5, "the list's (i): to its right")
-        XCTAssertFalse(card.intersects(list), "and off the list")
+        XCTAssertTrue(opensTheNotification(button), "★ the face's (i) is the one (i): its words in the centred notification")
+        // RED CONTROL: release 21's layer drew the card, and its (i) opened it with a tap of its own
+        XCTAssertTrue(drawsItsOwnCard("                if let info = ui.info {\n                    let fromChip = info.key.hasPrefix(\"c-\")\n"
+                                      + "                    statsCard(info, origin: origin, viewport: v,"), "RED CONTROL: the old layer")
+        XCTAssertFalse(opensTheNotification("        AppInfoButton(title: \"Its lattice numbers\", text: \"\", lit: on) {\n            ui.roleOpen = nil\n"
+                                            + "            ui.info = on ? nil : FlexibleFaceChipState.Info(key: key, group: group, ref: ref, anchor: frame)"),
+                       "RED CONTROL: the old (i)")
     }
 
     // MARK: R2 — the message never sits on the player

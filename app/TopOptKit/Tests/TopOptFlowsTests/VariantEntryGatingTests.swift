@@ -367,7 +367,15 @@ final class VariantEntryGatingTests: XCTestCase {
     /// revert in either direction is loud.
     func testTheAppBlockTracksTheCoreRefusalInBothDirections() throws {
         let runJob = Self.repoRoot.appendingPathComponent("core/src/cli/run_job.cpp")
-        let src = try String(contentsOf: runJob, encoding: .utf8)
+        // ★ TO rebuild Stage 0 (TOReview b760e6c9): run_job.cpp's TO parts moved into includes beside it (to_*.inc, one
+        // translation unit), so core's text is run_job.cpp WITH its parts — else the "must NOT contain" checks below
+        // would pass by not looking.
+        let cli = runJob.deletingLastPathComponent()
+        let parts = try FileManager.default.contentsOfDirectory(atPath: cli.path)
+            .filter { $0.hasPrefix("to_") && $0.hasSuffix(".inc") }.sorted()
+        let src = try ([runJob] + parts.map { cli.appendingPathComponent($0) })
+            .map { try String(contentsOf: $0, encoding: .utf8) }.joined(separator: "\n")
+        XCTAssertFalse(parts.isEmpty, "premise: Stage 0's includes are beside run_job.cpp")
 
         let coreRefusesEveryDesignBox =
             src.contains(LatticeCoreCapability.designBoxRefusalPhrase)

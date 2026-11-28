@@ -1,7 +1,7 @@
 // VersionViewState.swift — ★ his iPad notes on release 18 (2026-11-24, img 84): "it automatically opens on the topology stage".
 //
-// A version opens as he left it: on the stage last open in it (Topology or the lattice stage, and the lattice stage's Cells
-// page), with its panels (Selections folded or open, the Topology panel on Lattice Setup, the colour key folded), its view
+// A version opens as he left it: on the stage last open in it (Topology or the lattice stage — ★ notes30, his 11-26: within the
+// lattice stage always its Lattice view with the lattice drawn, never the settings, whatever page was kept), with its panels (Selections folded or open, the Topology panel on Lattice Setup, the colour key folded), its view
 // buttons (Outlines, X-ray, Forces, Hide keep clears, the Design box, Stress) and its camera (the turn, the zoom, the pan).
 //
 // A version WITH a result: a tap on its card opens the result (as before, LibraryCardOpen); "Open" (its ⋯, its long press, the
@@ -139,4 +139,11 @@ public final class VersionViewOpen {
 
     /// RED CONTROL (VersionViewStateTests): every version opens on Topology, with the page as it is made (release 18).
     public static var controlOpensAsBefore = false
+
+    /// ★ notes30 (his 11-26): each version reopened on the lattice stage and the page it had kept there — it opened on the
+    /// Lattice view all the same (tests read it).
+    public static var reopenedOnLattice: [UUID: String] = [:]
+    /// RED CONTROL (tests, notes30): a version kept on the settings reopens on them, and the stage's entry asks for the settings
+    /// once per visit (release 21).
+    public static var controlReopensSettings = false
 }

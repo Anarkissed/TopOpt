@@ -1,5 +1,6 @@
 #include "topopt/strut_strength.hpp"
 
+#include <algorithm>   // ★ notes30 SA1 (REMOVE.md)
 #include <array>
 #include <cmath>
 #include <limits>
@@ -65,7 +66,29 @@ constexpr std::array<LawRow, 9> kOctetStrutLaw = {{
 // with resolution (bulk rows quote vpc 48; the boundary blocks are coarser, so they read low
 // by that growth); the finite blocks are 3-4 cells across, under most types'
 // cells-per-member floors; z_knockdown is unsourced.
-constexpr std::array<LawRow, 7> kScStrutLaw = {{
+//
+// ★ LOW-DENSITY ROWS, BCC / DIAMOND / SC (2026-11-25, the maintainer's "STRENGTH: YES, MEASURE"):
+// their 11-09 bands started at strut/cell 0.219 / 0.186 / 0.204, at or past the open look 0.1898,
+// so nothing the new lattice engine lays without the quilt was credited. Each table now starts
+// with the `*_cert` columns of evidence/2026-11-25-strut-laws-low-density/<type>/kfit.csv,
+// VERBATIM: the rows UNDER the 11-09 floor, measured by the same probe and recipe on the band
+// the new low tensor rows give (lattice.cpp), down to strut/cell 0.080 / 0.088 / 0.085 (two
+// 0.45 mm lines on a 10-11 mm cell; the engine's default largest cell is 8 mm, 0.1125). Two
+// resolution rules added for struts this thin (the probe's options, off by default): the law
+// row (bulk, the finest) has >= 6 voxels across the strut (vpc 48-80, PR 198), and the boundary
+// fixtures start on the first ladder rung with >= 4 voxels across (N3 vpc24-56), the ladder
+// carrying on to vpc64 (diamond's floor re-measured at vpc56). The 11-09 rows are unchanged.
+// Carried caveats: lower bounds still rising with vpc (the floor rows' last 16-voxel step moved
+// bulk Kd -11 % to +54 %), each type's cells-per-member floor, the unsourced z_knockdown. And
+// one the receipt names: as in every 11-09 row, the cut-layer population that sets Kd_cert
+// includes the cut cells against the fixture's gripped faces, and reads as the grip population
+// (within 11 %); at these densities that is 1.7-5.5x the free surface (gripcheck.py).
+constexpr std::array<LawRow, 12> kScStrutLaw = {{
+    {0.01606, 23636.0223, 241.7194, 4755.0295, 277.5097},  // vpc 80, wall 3.0 vox (2026-11-25)
+    {0.02500, 8637.7485, 152.3915, 3273.9888, 181.3821},   // vpc 64, wall 3.0 vox (2026-11-25)
+    {0.03500, 4397.5416, 107.0221, 1335.2352, 119.6958},   // vpc 48, wall 3.0 vox (2026-11-25)
+    {0.05000, 2067.5213, 84.1543, 939.2906, 87.7251},      // vpc 48, wall 3.0 vox (2026-11-25)
+    {0.06500, 1077.4870, 57.1409, 456.9389, 59.6244},      // vpc 48, wall 3.0 vox (2026-11-25)
     {0.08659, 593.3318, 47.4848, 333.0303, 46.7385},  // vpc 48, wall 4.0 vox
     {0.10000, 428.9544, 47.2712, 292.3672, 41.3218},  // vpc 48, wall 5.0 vox
     {0.15700, 149.1965, 25.5308, 138.0702, 24.6725},  // vpc 48, wall 6.0 vox
@@ -74,7 +97,12 @@ constexpr std::array<LawRow, 7> kScStrutLaw = {{
     {0.45000, 22.9183, 9.3766, 21.6776, 9.1313},  // vpc 48, wall 11.0 vox
     {0.49638, 20.9140, 9.1517, 19.4363, 8.7827},  // vpc 48, wall 11.0 vox
 }};
-constexpr std::array<LawRow, 4> kBccStrutLaw = {{
+constexpr std::array<LawRow, 9> kBccStrutLaw = {{
+    {0.03194, 9894.2094, 141.4194, 5657.5734, 119.9384},   // vpc 80, wall 7.0 vox (2026-11-25)
+    {0.05000, 2965.8564, 73.9698, 1867.3840, 73.2825},     // vpc 64, wall 7.0 vox (2026-11-25)
+    {0.07000, 1711.5503, 61.3427, 936.3994, 59.3984},      // vpc 64, wall 8.0 vox (2026-11-25)
+    {0.10000, 784.5027, 42.2487, 413.5456, 41.0418},       // vpc 48, wall 7.0 vox (2026-11-25)
+    {0.15700, 276.1852, 28.1203, 153.0371, 25.3242},       // vpc 48, wall 9.0 vox (2026-11-25)
     {0.21050, 124.9008, 21.2407, 91.8965, 20.0861},  // vpc 48, wall 11.0 vox
     {0.31300, 50.9631, 16.5243, 54.8097, 15.7056},  // vpc 48, wall 13.0 vox
     {0.45000, 20.6504, 10.5115, 25.4605, 10.5675},  // vpc 48, wall 16.0 vox
@@ -88,7 +116,12 @@ constexpr std::array<LawRow, 6> kFccStrutLaw = {{
     {0.45000, 13.8613, 8.9162, 14.3575, 10.5389},  // vpc 48, wall 8.0 vox
     {0.59093, 9.6701, 6.6837, 8.6745, 7.7568},  // vpc 48, wall 9.0 vox
 }};
-constexpr std::array<LawRow, 5> kDiamondStrutLaw = {{
+constexpr std::array<LawRow, 10> kDiamondStrutLaw = {{
+    {0.03874, 2201.7873, 159.8467, 1444.3150, 104.3430},   // vpc 80, wall 7.0 vox (2026-11-25)
+    {0.05000, 1014.8546, 96.6463, 586.0303, 66.5721},      // vpc 64, wall 7.0 vox (2026-11-25)
+    {0.07000, 569.4935, 76.7328, 356.8425, 59.2921},       // vpc 64, wall 8.0 vox (2026-11-25)
+    {0.10000, 280.3965, 50.8865, 170.5318, 40.8014},       // vpc 48, wall 7.0 vox (2026-11-25)
+    {0.12500, 197.0456, 48.7400, 122.2613, 29.8714},       // vpc 48, wall 8.0 vox (2026-11-25)
     {0.15712, 108.3321, 32.6702, 64.2847, 23.7821},  // vpc 48, wall 9.0 vox
     {0.20000, 73.7044, 28.0786, 44.1802, 16.4015},  // vpc 48, wall 11.0 vox
     {0.31300, 29.2723, 14.5723, 19.4339, 9.5788},  // vpc 48, wall 13.0 vox
@@ -268,11 +301,17 @@ std::string strut_law_source(LatticeTopology topo) {
            "Kv(rho)*|p(Sigma)|, interlayer analogue Kild/Kilv; the 0.04959 row is bulk only (a lower "
            "bound)";
   const std::string id = lattice_topology_name(topo);
+  // bcc, diamond and sc: measured on down to the struts the new lattice engine lays (2026-11-25).
+  const bool low = topo == LatticeTopology::Bcc || topo == LatticeTopology::Diamond ||
+                   topo == LatticeTopology::SimpleCubic;
   return id + "'s own law, measured the PR 259 way: kfit *_cert envelope "
-              "(bulk/free-surface/cut populations), "
-              "evidence/2026-11-09-lattice-type-strut-laws/" +
-         id + "/kfit.csv; strut_vm <= Kd(rho)*vm(Sigma) + Kv(rho)*|p(Sigma)|, "
-              "interlayer analogue Kild/Kilv";
+              "(bulk/free-surface/cut populations), " +
+         (low ? "evidence/2026-11-25-strut-laws-low-density/" + id +
+                    "/kfit.csv (the rows under the 11-09 floor) and "
+              : std::string()) +
+         "evidence/2026-11-09-lattice-type-strut-laws/" + id +
+         "/kfit.csv; strut_vm <= Kd(rho)*vm(Sigma) + Kv(rho)*|p(Sigma)|, "
+         "interlayer analogue Kild/Kilv";
 }
 
 std::string strut_law_resolution_note(LatticeTopology topo) {
@@ -281,10 +320,11 @@ std::string strut_law_resolution_note(LatticeTopology topo) {
   const char* drift = nullptr;
   switch (topo) {
     case LatticeTopology::Octet:       drift = "+6% to +29%"; break;   // 2026-11-17, full octet
-    case LatticeTopology::SimpleCubic: drift = "-11% to +50%"; break;
-    case LatticeTopology::Bcc:         drift = "+5% to +47%"; break;
+    // bcc, diamond, sc: the 11-09 rows' 32 -> 48 step, then the low rows' last 16-voxel step (2026-11-25).
+    case LatticeTopology::SimpleCubic: drift = "-11% to +50% (the low rows -25% to +49%)"; break;
+    case LatticeTopology::Bcc:         drift = "+5% to +47% (the low rows -11% to +51%)"; break;
     case LatticeTopology::Fcc:         drift = "+8% to +20%"; break;
-    case LatticeTopology::Diamond:     drift = "+8% to +34%"; break;
+    case LatticeTopology::Diamond:     drift = "+8% to +34% (the low rows -5% to +54%)"; break;
     case LatticeTopology::Kelvin:      drift = "+11% to +39%"; break;
     case LatticeTopology::Rhombic:     drift = "+23% to +48%"; break;
     case LatticeTopology::Gyroid:      drift = "-1% to +11%"; break;
@@ -389,5 +429,218 @@ StrutStrengthReport evaluate_with(const LawTable& T,
 }
 
 }  // namespace
+
+// ── ★ notes30 SA1 (Structural Auto, REMOVE.md: this block to "notes30 SA1 end"): the law turned round ─────────────────
+namespace {
+
+double cross_factor_of(const Vec3& build_dir, const char* who) {
+  const double bn = std::sqrt(build_dir.x * build_dir.x + build_dir.y * build_dir.y + build_dir.z * build_dir.z);
+  if (!(bn > 0.0) || !std::isfinite(bn))
+    throw std::invalid_argument(std::string(who) + ": build_dir must be nonzero and finite");
+  const double nx = build_dir.x / bn, ny = build_dir.y / bn, nz = build_dir.z / bn;
+  return (2.0 / std::sqrt(3.0)) * (std::fabs(nx * ny) + std::fabs(ny * nz) + std::fabs(nz * nx));
+}
+
+void check_material(double yield_strength_mpa, double z_knockdown, const char* who) {
+  if (!(yield_strength_mpa > 0.0) || !std::isfinite(yield_strength_mpa))
+    throw std::invalid_argument(std::string(who) + ": yield_strength_mpa must be finite and > 0");
+  if (!(z_knockdown > 0.0) || !std::isfinite(z_knockdown))
+    throw std::invalid_argument(std::string(who) + ": z_knockdown must be finite and > 0");
+}
+
+// The two bounds at one density, the evaluator's formula (the K's clamped to the law's span, as it reads them).
+struct Bounds { double ip, il; };
+Bounds bounds_at(const LawTable& T, double rho, double vm, double p, double cross) {
+  const StrutLawK K = law_at(T, rho, nullptr);
+  const double ip = K.Kd * vm + K.Kv * p;
+  return {ip, K.Kild * vm + K.Kilv * p + cross * ip};
+}
+
+double margin_of(const Bounds& b, double yield, double zk) {
+  const double inf = std::numeric_limits<double>::infinity();
+  const double a = b.ip > 0.0 ? yield / b.ip : inf;
+  const double c = b.il > 0.0 ? (zk * yield) / b.il : inf;
+  return std::min(a, c);
+}
+
+// The type's touch as a density (the densest a strut lays at all: past it the cell is the quilt's, then solid).
+double rho_at_touch(LatticeTopology topo) {
+  const double touch = lattice_width_bounds(topo).touch;
+  try {
+    const double r = lattice_density_from_strut(topo, 1.0, 0.5 * touch);
+    return std::isfinite(r) && r > 0.0 ? std::min(1.0, r) : 1.0;
+  } catch (const std::exception&) {
+    return 1.0;   // the touch fills the cell (sc's edges): no density under it is barred by the touch
+  }
+}
+
+// The lightest density in [lo, hi] FROM WHICH the margin stays >= target up to hi, the law piecewise-linear between rows:
+// on each piece both bounds are linear in rho, so each limit (ip <= yield / target, il <= zk yield / target) holds on a
+// half-line of the piece. Walks down from hi while whole pieces hold; in the first piece that does not, the lowest point
+// from which it holds up to the piece's top. `hi` itself must hold (the caller checks).
+double lightest_holding(const LawTable& T, double lo, double hi, double vm, double p, double cross, double yield,
+                        double zk, double target) {
+  const double cap_ip = yield / target, cap_il = zk * yield / target;
+  // The pieces' ends inside [lo, hi]: the law's rows strictly between, plus the two ends.
+  std::array<double, 32> knots{};   // every table has at most 12 rows (no allocation per voxel)
+  std::size_t nk = 0;
+  knots[nk++] = hi;
+  for (int i = T.n - 1; i >= 0 && nk + 1 < knots.size(); --i)
+    if (T.rows[i].rho < hi && T.rows[i].rho > lo) knots[nk++] = T.rows[i].rho;
+  knots[nk++] = lo;
+  double from = hi;
+  for (std::size_t k = 0; k + 1 < nk; ++k) {
+    const double top = knots[k], bot = knots[k + 1];
+    const Bounds bt = bounds_at(T, top, vm, p, cross), bb = bounds_at(T, bot, vm, p, cross);
+    const bool holds_bot = bb.ip <= cap_ip && bb.il <= cap_il;
+    if (holds_bot) { from = bot; continue; }
+    // The lowest r in [bot, top] with both linear limits holding from r to top (they hold at top).
+    double r = bot;
+    const auto lift = [&](double f_bot, double f_top, double cap) {
+      if (f_bot <= cap) return;              // holds at the bottom: the whole piece (linear, holds at top too)
+      // f linear, f(bot) > cap >= f(top): it crosses once, holding above the crossing
+      const double t = (f_bot - cap) / (f_bot - f_top);
+      r = std::max(r, bot + std::clamp(t, 0.0, 1.0) * (top - bot));
+    };
+    lift(bb.ip, bt.ip, cap_ip);
+    lift(bb.il, bt.il, cap_il);
+    // Round-off: step up until the margin truly holds there (a few ulps at most).
+    for (int guard = 0; guard < 64 && margin_of(bounds_at(T, r, vm, p, cross), yield, zk) < target; ++guard)
+      r = std::min(top, r + std::max(1e-12, (top - bot) * 1e-9));
+    return r;
+  }
+  return from;
+}
+
+}  // namespace
+
+double strut_law_margin_at(LatticeTopology topo, double rho, double vm, double pressure, const Vec3& build_dir,
+                           double yield_strength_mpa, double z_knockdown) {
+  const LawTable T = law_table_or_throw(topo, "strut_law_margin_at");
+  check_material(yield_strength_mpa, z_knockdown, "strut_law_margin_at");
+  const double cross = cross_factor_of(build_dir, "strut_law_margin_at");
+  return margin_of(bounds_at(T, rho, std::fabs(vm), std::fabs(pressure), cross), yield_strength_mpa, z_knockdown);
+}
+
+double strut_sizing_rho_floor(LatticeTopology topo) {
+  const LawTable T = law_table_or_throw(topo, "strut_sizing_rho_floor");
+  return std::max({T.rows[0].rho, lattice_rho_min(topo), strut_law_bulk_only_below(topo)});
+}
+
+double strut_sizing_rho_ceiling(LatticeTopology topo) {
+  const LawTable T = law_table_or_throw(topo, "strut_sizing_rho_ceiling");
+  const double c = std::min({T.rows[T.n - 1].rho, lattice_rho_max(topo), rho_at_touch(topo)});
+  return std::max(c, strut_sizing_rho_floor(topo));
+}
+
+double strut_ratio_for_rho(LatticeTopology topo, double rho) {
+  const double touch = lattice_width_bounds(topo).touch;
+  if (!(rho > 0.0) || !std::isfinite(rho)) throw std::invalid_argument("strut_ratio_for_rho: rho must be finite and > 0");
+  // Bracket on the type's own band (inside its table the two directions are each other's exact inverse, and no density
+  // off the table is integrated): the forward law's diameters at the band's ends, per unit cell.
+  const double band_lo = lattice_rho_min(topo), band_hi = lattice_rho_max(topo);
+  double lo = lattice_strut_diameter_mm(topo, band_lo, 1.0), hi = lattice_strut_diameter_mm(topo, band_hi, 1.0);
+  const auto density = [&](double ratio) {
+    try { return lattice_density_from_strut(topo, 1.0, 0.5 * ratio); } catch (const std::exception&) { return 1.0; }
+  };
+  if (rho <= density(lo)) return std::min(lo, touch);
+  if (density(hi) < rho) return std::min(hi, touch);
+  for (int i = 0; i < 200 && hi - lo > 1e-10; ++i) {
+    const double mid = 0.5 * (lo + hi);
+    (density(mid) >= rho ? hi : lo) = mid;
+  }
+  return std::min(hi, touch);   // the smallest ratio found that reaches rho (never under it)
+}
+
+StrutLawSize strut_size_for_margin(LatticeTopology topo, double vm, double pressure, const Vec3& build_dir,
+                                   double yield_strength_mpa, double z_knockdown, double target) {
+  const LawTable T = law_table_or_throw(topo, "strut_size_for_margin");
+  check_material(yield_strength_mpa, z_knockdown, "strut_size_for_margin");
+  if (!(target > 0.0) || !std::isfinite(target))
+    throw std::invalid_argument("strut_size_for_margin: target must be finite and > 0");
+  const double cross = cross_factor_of(build_dir, "strut_size_for_margin");
+  const double v = std::fabs(vm), p = std::fabs(pressure);
+  const double lo = strut_sizing_rho_floor(topo), hi = strut_sizing_rho_ceiling(topo);
+  StrutLawSize s;
+  const double m_hi = margin_of(bounds_at(T, hi, v, p, cross), yield_strength_mpa, z_knockdown);
+  if (m_hi < target) {
+    s.rho = hi;
+    s.short_of_target = true;
+  } else {
+    s.rho = lightest_holding(T, lo, hi, v, p, cross, yield_strength_mpa, z_knockdown, target);
+  }
+  s.at_floor = !s.short_of_target && s.rho <= lo;
+  s.margin = margin_of(bounds_at(T, s.rho, v, p, cross), yield_strength_mpa, z_knockdown);
+  s.ratio = strut_ratio_for_rho(topo, s.rho);
+  return s;
+}
+
+StrutLawSizeSummary strut_size_field(LatticeTopology topo, const double* tensor, std::size_t tensor_count,
+                                     const Vec3& build_dir, double yield_strength_mpa, double z_knockdown, double target,
+                                     float* ratio_out, float* rho_out, unsigned char* short_out) {
+  const LawTable T = law_table_or_throw(topo, "strut_size_field");
+  check_material(yield_strength_mpa, z_knockdown, "strut_size_field");
+  if (!(target > 0.0) || !std::isfinite(target))
+    throw std::invalid_argument("strut_size_field: target must be finite and > 0");
+  if (tensor_count % 6 != 0 || (tensor_count > 0 && tensor == nullptr))
+    throw std::invalid_argument("strut_size_field: the stress field must hold 6 values per voxel");
+  const double cross = cross_factor_of(build_dir, "strut_size_field");
+  StrutLawSizeSummary sum;
+  sum.voxels = tensor_count / 6;
+  sum.rho_floor = strut_sizing_rho_floor(topo);
+  sum.rho_ceiling = strut_sizing_rho_ceiling(topo);
+  // density -> ratio: a table over [floor, ceiling], read at the step at or above (never lighter than asked)
+  const int steps = kStrutSizingTableSteps;
+  std::vector<double> ratio_at(static_cast<std::size_t>(steps) + 1);
+  const double span = sum.rho_ceiling - sum.rho_floor;
+  for (int i = 0; i <= steps; ++i)
+    ratio_at[static_cast<std::size_t>(i)] =
+        strut_ratio_for_rho(topo, sum.rho_floor + (span > 0.0 ? span * i / steps : 0.0));
+  // the table must not fall anywhere (bisection to 1e-10 on a monotone law): hold it rising
+  for (int i = 1; i <= steps; ++i)
+    ratio_at[static_cast<std::size_t>(i)] = std::max(ratio_at[static_cast<std::size_t>(i)],
+                                                     ratio_at[static_cast<std::size_t>(i) - 1]);
+  sum.ratio_floor = ratio_at.front();
+  sum.ratio_ceiling = ratio_at.back();
+  const auto ratio_of = [&](double rho) {
+    if (!(span > 0.0)) return ratio_at.front();
+    const double x = (rho - sum.rho_floor) / span * steps;
+    const int i = std::clamp(static_cast<int>(std::ceil(x - 1e-9)), 0, steps);
+    return ratio_at[static_cast<std::size_t>(i)];
+  };
+  for (std::size_t e = 0; e < sum.voxels; ++e) {
+    const double* s = tensor + 6 * e;
+    const double vm = voigt_von_mises(s);
+    const double p = std::fabs(voigt_pressure(s));
+    double rho = sum.rho_floor;
+    bool shortv = false;
+    if (vm > 0.0 || p > 0.0) {
+      ++sum.loaded;
+      if (margin_of(bounds_at(T, sum.rho_ceiling, vm, p, cross), yield_strength_mpa, z_knockdown) < target) {
+        rho = sum.rho_ceiling;
+        shortv = true;
+        ++sum.short_of_target;
+      } else {
+        rho = lightest_holding(T, sum.rho_floor, sum.rho_ceiling, vm, p, cross, yield_strength_mpa, z_knockdown,
+                               target);
+      }
+      sum.rho_sum += rho;
+    }
+    if (!shortv && rho <= sum.rho_floor) ++sum.at_floor;
+    const double ratio = ratio_of(rho);
+    sum.highest_ratio = std::max(sum.highest_ratio, ratio);
+    // float32 (the demand file's own width), rounded UP: never a hair lighter than the law asks
+    const auto up = [](double x) {
+      float f = static_cast<float>(x);
+      if (static_cast<double>(f) < x) f = std::nextafter(f, std::numeric_limits<float>::infinity());
+      return f;
+    };
+    if (ratio_out) ratio_out[e] = up(ratio);
+    if (rho_out) rho_out[e] = up(rho);
+    if (short_out) short_out[e] = shortv ? 1 : 0;
+  }
+  return sum;
+}
+// ★ notes30 SA1 end
 
 }  // namespace topopt

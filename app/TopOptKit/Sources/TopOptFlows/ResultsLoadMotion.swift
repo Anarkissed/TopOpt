@@ -430,7 +430,10 @@ extension ResultsModel {
     public var motionSelection: String { "\(selectedIndex)|\(viewScenario ?? "")" }
 
     /// Break can show: a displacement to move and a load it gives way at (cheap — nothing is built for it).
-    public var canBreak: Bool { hasFlex && (latticeAnswer.map { $0.governing != nil } ?? (failurePrediction != nil)) }
+    /// ★ notes30: never on a load on bare vines (the check judged no load it gives way at).
+    public var canBreak: Bool {
+        hasFlex && (latticeAnswer.map { $0.governing != nil && $0.bareVines == nil } ?? (failurePrediction != nil))
+    }
 
     /// ★ C3: Break's top — a print file's governing margin; a solid result's: the load at which its colours first reach the top
     /// (the material's knocked-down yield) — nil where the result cannot say (no load, no material limit).

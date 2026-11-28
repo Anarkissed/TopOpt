@@ -85,7 +85,9 @@ public struct ResultsScreen: View {
     /// ★ Points on each load group's own faces (the light flow starts there), asked once when the screen opens.
     var loadSurfacePoints: () -> [[SIMD3<Float>]] = { [] }
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    /// ★ notes29: Reduce Motion, or Settings › Skip all animations.
+    private var reduceMotion: Bool { systemReduceMotion || AppSettings.skipAllAnimations }
     // ★ Results redesign state (his mockup, 2026-10-27)
     @State private var versionsOpen = true
     @State private var checksOpen = true
@@ -166,6 +168,7 @@ public struct ResultsScreen: View {
                 materialName: String = "", yieldStrengthMPa: Double = 0,
                 appliedLoadKg: Double = 0, loadUnit: WeightUnit = .kg,
                 infillPercent: Int = 100, infillPattern: String = "gyroid",
+                solidWallMM: Double? = nil,   // ★ 362 (11-26): the printer's wall ring, for the bare-vines fixes offered
                 loadLocations: [SIMD3<Float>] = [],
                 loadDirections: [SIMD3<Float>] = [], anchorPoints: [SIMD3<Float>] = [],
                 streaming: Bool = false, run: RunModel? = nil,
@@ -187,18 +190,24 @@ public struct ResultsScreen: View {
                 printOrientation: ResultsPrintOrientation? = nil,
                 printUp: SIMD3<Float>? = nil, chosenFace: Bool = false,
                 orientation: PrintOrientationHost? = nil,
+                placeName: (@MainActor (TrueLoadsReport.Pad) -> String?)? = nil,   // ★ TO rebuild: a pad's face by its plain name
                 certify: OrganicCertifyCard? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
         // through an injected scheduler / runner / notifier the same way). The screen
         // owns its ResultsModel as a @StateObject, so a test hosting this view has no
         // other way to read what the screen actually shows. Production passes nil.
-        _model = StateObject(wrappedValue: resultsModel ?? ResultsModel(
+        // ★ TO rebuild: the pads' namer rides on the model (a class), so this screen's own size never grows
+        _model = StateObject(wrappedValue: { () -> ResultsModel in
+            let m = resultsModel ?? ResultsModel(
             projectName: projectName, outcome: outcome,
             materialName: materialName, yieldStrengthMPa: yieldStrengthMPa,
             appliedLoadKg: appliedLoadKg, loadUnit: loadUnit,
             infillPercent: infillPercent, infillPattern: infillPattern,
             loadLocations: loadLocations,
-            loadDirections: loadDirections, anchorPoints: anchorPoints))
+            loadDirections: loadDirections, anchorPoints: anchorPoints, solidWallMM: solidWallMM)
+            if let placeName { m.placeName = placeName }
+            return m
+        }())
         self.liveOutcome = outcome
         self.streaming = streaming
         self.run = run
@@ -411,6 +420,7 @@ public struct ResultsScreen: View {
                                       centre: viewerMesh?.bounds.center ?? .zero, eye: cameraModel.camera.eye)
                     .zIndex(6)
             }
+            PrintResolutionLayer().zIndex(7)   // ★ his 11-25: Export's print resolutions, and the level being made
             if compare != nil {
                 ResultsCompareView(model: model, rows: versionRows, session: $compare, scenarioPick: $scenarioPick,
                                    close: { compare = nil },
@@ -508,6 +518,7 @@ public struct ResultsScreen: View {
             layers = ResultsLayers()   // ★ B4 (note 13): open plain, no view lit
             syncOrientPhase()
             orient.reset()   // ★ notes27 P6: the flow starts closed (it is shared: never another screen's state)
+            PrintResolutionFlow.shared.close()   // ★ his 11-25: the levels' card too (a level being made goes on)
             if let v = takeOpenOn?(), let t = model.tabs.first(where: { $0.variantIndex == v && !$0.isLatticed }) { model.select(t.index) }
             model.stressOn = layers.stress
             applyMotion(nil)
@@ -534,6 +545,13 @@ public struct ResultsScreen: View {
     /// + presentation live here. No-op when the variant has no exportable mesh (the
     /// button is disabled in that case anyway).
     private func exportSTL() {
+        // ★ his 11-25: a print file offers its three resolutions first (the one made exports at once, below)
+        if !model.exportIsStreamed, offerResolutions(format: "stl") { return }
+        exportMadeSTL()
+    }
+
+    /// The shown result's own STL (a print file's: the level it was made at).
+    private func exportMadeSTL() {
         exportFailure = nil
         Self.exportAttemptProbe?("stl")
         // A LATTICED SELECTION EXPORTS THE LATTICED FILE (task 2026-08-07-lattice-
@@ -580,7 +598,7 @@ public struct ResultsScreen: View {
     @ViewBuilder private var resolutionNote: some View {
         if let note = model.surfaceResolutionNote {
             HStack(alignment: .top, spacing: DS.Space.s) {
-                Image(systemName: "info.circle").font(.system(size: 12, weight: .semibold))
+                AppInfoGlyph()   // ★ notes29 (his 11-25): the one (i)'s glyph, on a note
                 Text(note).dsStyle(DS.TypeScale.caption)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1461,9 +1479,13 @@ public struct ResultsScreen: View {
             }
             .accessibilityIdentifier("results-details")
         } run: {
-            DSRunButton(exportTitle, subtitle: exportLine,
+            let line = exportLine
+            // ★ notes30 (his 11-27): a print file's line is "Turn on manual supports", its (i) beside the button says where
+            DSRunButton(exportTitle, subtitle: line,
                         state: model.canExport ? .ready : .disabled(model.exportDisabledReason ?? "Nothing to export"),
-                        key: "resultsExport") { exportFile() }   // ★ notes28 (4c): the 3MF by default (STL in the ⌃)
+                        key: "resultsExport",
+                        info: model.canExport && line == ResultsExportCopy.printFileLine ? ResultsExportCopy.supportsInfo : nil,
+                        infoTitle: ResultsExportCopy.supportsInfoTitle) { exportFile() }   // ★ notes28 (4c): the 3MF by default (STL in the ⌃)
                 .accessibilityLabel(model.canExport ? (model.exportIsStreamed ? "Export STL" : "Export 3MF")
                                     : (model.exportDisabledReason ?? "Export unavailable"))
         } split: {
@@ -1523,8 +1545,8 @@ public struct ResultsScreen: View {
 
     private func retryExport(_ f: ResultsExportFailure) {
         switch f {
-        case .file: exportFile()   // ★ notes28 (4c)
-        case .stl: exportSTL()
+        case .file: exportMadeFile()   // ★ notes28 (4c); ★ his 11-25: the same file again (never the levels' card)
+        case .stl: exportMadeSTL()
         case .stlAll: exportAll()
         case .video:
             videoExport.reset()
@@ -1550,10 +1572,39 @@ public struct ResultsScreen: View {
     /// worker's STL, as before.
     private func exportFile() {
         if model.exportIsStreamed { exportSTL(); return }
+        // ★ his 11-25: a print file offers its three resolutions first (the one made exports at once, below)
+        if offerResolutions(format: nil) { return }
+        exportMadeFile()
+    }
+
+    /// ★ his 11-25 ("Offer print resolutions when exporting. Full detail vs medium vs coarse."): Export on a print file whose
+    /// report gives its levels and whose file is kept here opens ONE centred card (PrintResolutionFlow): the three levels, each
+    /// with its resolution line, its size and (not made yet) how long the Mac takes. `format` nil: the made file's own.
+    private func offerResolutions(format: String?) -> Bool {
+        let facts = model.printResolutions
+        guard PrintResolutionFlow.offers(facts, kept: PrintFileKeep.openFile(exists: model.printFileIdentity)), let f = facts else {
+            return false
+        }
+        model.cornerDrawers.close()
+        Self.exportAttemptProbe?("resolutions")
+        let stl = format == "stl"
+        PrintResolutionFlow.shared.open(f, format: format ?? f.madeFormat, stem: model.exportStem(for: model.selected),
+                                        exportMade: stl ? { exportMadeSTL() } : { exportMadeFile() })
+        return true
+    }
+
+    /// The shown result's own file: a print file itself (kept with its version), else its shape as a 3MF.
+    private func exportMadeFile() {
         exportFailure = nil
         Self.exportAttemptProbe?("3mf")
         if Self.exportWriteFailsForTests { exportFailure = .file(CocoaError(.fileWriteNoPermission).localizedDescription); return }
+        // ★ notes30 (his word 11-26): the print settings he set go into the 3MF (ThreeMFPrintSettings)
+        let params = PrintFileKeep.openPrintParams()
         if let kept = PrintFileKeep.openFile(model.printFileIdentity, named: model.exportStem(for: model.selected)) {
+            do { try ThreeMFPrintSettings.stamp(kept, params: params) } catch {
+                exportFailure = .file(error.localizedDescription)
+                return
+            }
             stlExportURLs = [kept]
             return
         }
@@ -1561,6 +1612,7 @@ public struct ResultsScreen: View {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(model.exportThreeMFFilename)
         do {
             try data.write(to: url, options: .atomic)
+            try ThreeMFPrintSettings.stamp(url, params: params)
             stlExportURLs = [url]
         } catch {
             exportFailure = .file(error.localizedDescription)

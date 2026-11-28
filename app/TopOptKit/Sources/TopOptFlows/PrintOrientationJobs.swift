@@ -30,6 +30,9 @@ public struct PrintMeasured: Equatable, Sendable {
     public var layers: Int?
     public var bedMM2: Double?
     public var tookS: Double?
+    /// ★ notes30 (362's review): the words in the strength numbers' place when the check refused to judge the load (a load on
+    /// bare vines: no valid margin); nil: the numbers show.
+    public var strengthWords: String? = nil
     public init(strength: Double? = nil, layerStrength: Double? = nil, supportMM3: Double? = nil, paintedPlaces: Int? = nil,
                 heightMM: Double? = nil, layers: Int? = nil, bedMM2: Double? = nil, tookS: Double? = nil) {
         self.strength = strength; self.layerStrength = layerStrength; self.supportMM3 = supportMM3; self.paintedPlaces = paintedPlaces
@@ -70,9 +73,12 @@ public struct PrintBenefitRow: Equatable, Sendable, Identifiable {
         func less(_ o: Double?, _ n: Double?) -> Tone { (o != nil && n != nil && n! < o! * 0.995) ? .better : .plain }
         func more(_ o: Double?, _ n: Double?) -> Tone { (o != nil && n != nil && n! > o! * 1.005) ? .better : .plain }
         return [
-            PrintBenefitRow(label: "Strength", old: x(b.strength), new: x(a.strength), tone: gate(b.strength, a.strength)),
-            PrintBenefitRow(label: "Layer strength", old: x(b.layerStrength), new: x(a.layerStrength),
-                            tone: gate(b.layerStrength, a.layerStrength)),
+            // ★ notes30: a column whose check refused the load (bare vines) says so in both strength rows, never a number
+            PrintBenefitRow(label: "Strength", old: b.strengthWords ?? x(b.strength), new: a.strengthWords ?? x(a.strength),
+                            tone: b.strengthWords == nil && a.strengthWords == nil ? gate(b.strength, a.strength) : .plain),
+            PrintBenefitRow(label: "Layer strength", old: b.strengthWords ?? x(b.layerStrength),
+                            new: a.strengthWords ?? x(a.layerStrength),
+                            tone: b.strengthWords == nil && a.strengthWords == nil ? gate(b.layerStrength, a.layerStrength) : .plain),
             PrintBenefitRow(label: "Supports", old: supports(b), new: supports(a), tone: less(b.supportMM3, a.supportMM3)),
             PrintBenefitRow(label: "Print height", old: height(b), new: height(a), tone: less(b.heightMM, a.heightMM)),
             PrintBenefitRow(label: "Bed contact", old: bed(b), new: bed(a), tone: more(b.bedMM2, a.bedMM2)),
@@ -85,9 +91,11 @@ public struct PrintBenefitRow: Equatable, Sendable, Identifiable {
     /// ranking's own first candidate), the time its jobs took.
     public static func measured(latticeReport o: [String: Any]) -> PrintMeasured {
         var m = PrintMeasured()
-        m.strength = LatticeStrengthAnswer.decode(report: o)?.governing
+        // ★ notes30: a load on bare vines is no verdict — its words, no number, until the loaded face is covered
+        m.strengthWords = OrganicBareVines.marginWords(report: o)
+        m.strength = m.strengthWords == nil ? LatticeStrengthAnswer.decode(report: o)?.governing : nil
         let facts = LatticeFileFacts.decode(o)
-        m.layerStrength = facts?.solidLayers
+        m.layerStrength = m.strengthWords == nil ? facts?.solidLayers : nil
         if let p = o["painted"] as? [String: Any] {
             let stand = p["stand"] as? [String: Any]
             m.supportMM3 = ((p["est_volume_mm3"] as? NSNumber)?.doubleValue ?? 0) + ((stand?["est_volume_mm3"] as? NSNumber)?.doubleValue ?? 0)
@@ -229,8 +237,11 @@ public enum PrintCheckJobs {
         }
         let v = outcome.variants.indices.contains(variant) ? outcome.variants[variant] : outcome.variants.first
         let ran = outcome.timing.map { $0.queuedSeconds + $0.solveSeconds }
-        let before = PrintBenefitRow.measured(standing: rc.baseline, strength: v?.worstCaseMargin,
+        var before = PrintBenefitRow.measured(standing: rc.baseline, strength: v?.worstCaseMargin,
                                               layers: v.map(\.interlayerMargin), tookS: ran)
+        if let w = OrganicBareVines.marginWords(reportJSON: outcome.reportJSON) {   // ★ notes30: no valid margin to compare
+            before.strengthWords = w; before.strength = nil; before.layerStrength = nil
+        }
         let after = PrintBenefitRow.measured(standing: rc.standing, strength: rc.margin, layers: rc.layerMargin, tookS: r.seconds)
         let block = r.analysis["orientation_recheck"] ?? [:]
         return PrintCheckResult(up: up, outcome: withReport(outcome, adding: ["orientation_recheck": block]),

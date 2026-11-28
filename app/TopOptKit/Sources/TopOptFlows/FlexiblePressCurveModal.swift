@@ -318,7 +318,7 @@ struct FlexiblePressCurveModalView: View {
         self.model = model
         self.draft = draft
         self.strip = strip
-        _camera = StateObject(wrappedValue: OrbitCameraModel(camera: FlexiblePressCurveModal.homeCamera(corner: strip?.kind == .corner)))
+        _camera = StateObject(wrappedValue: OrbitCameraModel(camera: FlexiblePressCurveModal.homeCamera(corner: strip?.kind == .corner), followsViewProjection: true))   // ★ notes29
     }
 
     var body: some View {
