@@ -329,6 +329,40 @@ core/src/cli/run_job.cpp, `ScopedLadderSolverIsolation` (about 4516-4534): NO ch
 ### For #362's gate
 - The app-side FlexibleBatchM* tests run in #362's gate on any change to the solver the bridge calls (app/TopOptKit/Tests/TopOptFlowsTests): FlexibleBatchM2Tests, FlexibleBatchM2VerifyTests, FlexibleBatchMDentTests, FlexibleBatchMGroupTests, FlexibleBatchMLegendTests, FlexibleBatchMStressTests, FlexibleBatchMVerifyTests, FlexibleBatchMXrayTests (the two *Probe files are harnesses). E-01 phase 2 changes the bridge's Posture (through TOReview).
 
+## 6. Side piece: sizing a low-memory solve for the Organic strength check (measured 2026-11-28; awaiting his decision)
+
+His word (02:46 EST, via LatticeReview and TOReview): "Size it out. But right now, just get started on everything. Code. Build." Read as: SIZE it (measure today's solver, prototype the low-memory one in scratch), not build it into the solver; the size goes back to him.
+
+### In plain words (for Nadim)
+Checking an Organic part's strength means solving the printed shape itself, every material voxel, once. Today's solver (with this week's new smoothing) does that on LatticeReview's five Organic pieces in 43 seconds to 3.6 minutes each and needs 1.3 to 2.1 GB of memory. Part of that memory goes on simplified "coarse" copies of the part that the solver stores to speed itself up. A published solver for bone scans keeps those copies light: each coarse block's stiffness is just the average of the eight smaller blocks inside it, worked out on the fly, nothing stored. I built that idea as a test program and ran it on the same five pieces:
+- **Speed: about 3.6 times faster in total** (8.5 minutes for all five today, 2.4 minutes with the test program; each piece 2.5 to 4.2 times faster), because it needs about a third of the rounds (1.7 to 3.3 times fewer).
+- **Memory: about a quarter less** (19 to 31 % less; the biggest piece drops from 2.1 to 1.5 GB). Less than the name "low-memory" promises: the stored coarse copies were only part of the memory; the rest goes on the part's own data, which both solvers need.
+- **The hard piece is where it helps most**: the sparse Grown piece (thin vines) takes 2,396 rounds and 3.6 minutes today, 723 rounds and 52 seconds with the test program. Thin vines were the risk (averaging could lose them); they were not lost.
+- It suits only finished, solid-or-empty shapes (the strength check). It does not suit the optimiser's own in-progress designs, so it would be a second, separate solve used only for checking finished shapes.
+
+**Your decision:** build it (a separate solve for the Organic strength check: about 3.6 times faster checks, a quarter less memory), or not now. My suggestion: yes if the strength check's wait matters to you; the memory saving alone would not justify a second solve path.
+
+### What was measured (2026-11-28 08:23-08:37, 6 threads, solve tolerance 1e-4; "today" = the production solve with the stage-5 smoother, cheb:2)
+| piece (0.2 mm) | material voxels | today: rounds, time, peak memory | test program, V-cycle | test program, W-cycle |
+|---|---|---|---|---|
+| S (straight Traced) | 598,996 | 1,338 rounds, 130.4 s, 1,375 MB | 446 rounds, 36.7 s, 1,007 MB | 310 rounds, 52.5 s, 993 MB |
+| TR (Traced) | 925,251 | 229 rounds, 43.3 s, 2,111 MB | 81 rounds, 10.8 s, 1,538 MB | 70 rounds, 16.8 s, 1,536 MB |
+| W | 1,051,506 | 278 rounds, 55.1 s, 2,045 MB | 161 rounds, 22.2 s, 1,651 MB | 111 rounds, 29.0 s, 1,635 MB |
+| G | 703,471 | 529 rounds, 65.2 s, 1,637 MB | 238 rounds, 22.5 s, 1,141 MB | 208 rounds, 37.6 s, 1,131 MB |
+| SP (sparse Grown; 3,894 rounds with the old smoothing per LatticeReview) | 556,824 | 2,396 rounds, 217.6 s, 1,349 MB | 723 rounds, 51.7 s, 935 MB | 488 rounds, 63.0 s, 935 MB |
+| all five | | 511.6 s | 143.9 s (3.6x) | 198.9 s |
+
+- Memory per material voxel: today 2,040 to 2,540 bytes; the test program 1,650 to 1,760. Of the test program's peak, the solve's own data is 300 to 520 MB (element records 64-121 MB, vectors 132-246 MB, the level transfers 81-154 MB); the rest is outside what the test program changed.
+- V-cycle wins on time on every piece (the W-cycle saves rounds but each costs more); the build would use V.
+- Also: a test strut grid (32^3, 19 % fill): today 113 rounds, test program 24 (V) / 20 (W). His Top Motor Mount (a design mid-optimisation): today 981 rounds 18.3 s, test program 258 rounds 5.4 s (1 thread). His Stand v4 solve 1: the test program does not converge (the nearly-zero "void" material is averaged into the coarse blocks and bridges gaps): the method is for solid-only shapes.
+
+### What it would take to build (if he says yes)
+- A separate entry point in the solver, `fea_solve_material_only` (TOSolver's files: multigrid.cpp or a new fea/mf_rediscretized.cpp, fea.hpp), for solid-only voxel shapes: matrix-free levels made by averaging (8 children, empty = 0), the fine-level element product already in the tree (B3), the Chebyshev smoother (B-05), a direct solve at the coarsest level, W- or V-cycles, optional warm start.
+- Memory levers in order: (1) no stored coarse matrices (the prototype); (2) the transfer between levels applied on the fly instead of stored (the prototype still stores it: 154 MB on the largest piece, W; about 9 % of its peak); (3) the grid-stencil element product (nothing stored per element; measured 55 MB against 74 MB on his parts) for the finest level.
+- Tests: the five pieces as a benchmark (made jobs, LatticeReview's grids), each held to today's answer within the solve tolerance; the made-up shapes test; a same-bytes check that the optimiser's path is untouched (the plain job AND the scenario job).
+- Risks: (a) struts thinner than a coarse block can be lost when averaged (measured: not on SP, the thinnest piece: 723 rounds against 2,396 today); (b) the coarsest direct solve's memory grows with the part; (c) a second solve path to keep in step with the first (the reason it must be small and tested against today's answers).
+- Where it sits: not stage 5 (stage 5 is the optimiser's solves); a new item, his call.
+
 ## The caller side of the connection rule (TOReview, 2026-11-26 15:20)
 
 DONE (syntax-checked, not yet built or run): `TOPOPT_CONNECTION=support` (`to_stage_switch.hpp`; unset = today's bytes). `minimize_plastic.cpp`: `masked_self_weight_voxel_force` (the same voxels `masked_self_weight_loads` weighs, per voxel); the run holds `FeaAnchorBySupportOnly` from the design load on, and in the self-weight mode `FeaBodyLoadScope(force, unit gravity direction)`.
