@@ -204,12 +204,23 @@ Still to come: the rest of the dumps (demo, Pressing, Pillow Blocks, stand at 12
 - STILL RUNNING: the before-and-after table on all your parts (today's solver, then the new default), one part per turn on the shared lock. When it passes, the new default is switched on (ready, tested, 26 solver tests green) and the old smoother is deleted.
 - THE SIDE PROJECT (the switch to a coarse map that follows the part): measured 4-12x fewer steps on your thin-walled parts; round 2 fixed its one slow case; it waits for the timed numbers and your approval.
 
-### Reference table, before and after (Release, his jobs read in place; one part per lock hold)
-| part | today: run time (solve share) | CG cycles per solve (mean, max) | l1 retries (latched) | after (cheb:2): run time | cycles per solve | versions, margins, mass | test K |
-|---|---|---|---|---|---|---|---|
-| Base | 166 s (71 %) | 275, 378 | 5 (2) | queued | | no version (too weak as drawn, as TOReview found) | |
-| Pressing | 360 s (39 %) | 245, 428 | 5 (2) | queued | | no version (the same) | |
-| Pillow Block L / R, stand at res 64 and 128, Top Motor Mount, Stand v4 | running / queued | | | | | | |
+### Reference table, before and after (Release, his jobs read in place; one part per lock hold; finished 2026-11-28 03:23 EST)
+In plain English (for Nadim): the new smoothing needs about half as many rounds per solve on every one of your eight parts, and no run fell back to the slow backup or to the simple solver even once (today: 5 retries per run, 2 of them for good). Seven of eight runs got faster: 2 to 48 % less time, depending on how much of the run is solving. Stand v4 took 11 minutes longer, because it took 160 design steps instead of 140 to reach the same answer; each step costs the same computer time as before (57 against 58 s). Every part that ends in a version ends in the same one: the same volume, and margins equal or 0.01 apart.
+
+| part | run time, today -> new (solve share) | design steps | rounds per solve, mean (max), today -> new | retries (kept for good), today -> new | versions: volume, margin (today -> new) | peak memory |
+|---|---|---|---|---|---|---|
+| Base | 166 -> 87 s (71 -> 60 %) | 40, 40 | 275 (378) -> 146 (200) | 5 (2) -> 0 | no version either way (too weak as drawn) | 0.2 GB |
+| Pressing | 360 -> 302 s (39 -> 31 %) | 40, 40 | 245 (428) -> 138 (244) | 5 (2) -> 0 | no version either way | 0.8 -> 0.7 GB |
+| Pillow Block L | 207 -> 203 s (34 -> 28 %) | 40, 40 | 104 (154) -> 55 (84) | 5 (2) -> 0 | no version either way | 0.4 GB |
+| Pillow Block R | 265 -> 230 s (39 -> 33 %) | 40, 40 | 139 (207) -> 77 (112) | 5 (2) -> 0 | no version either way | 0.4 GB |
+| 6d9b535f (stand, res 64) | 89 -> 60 s (41 -> 31 %) | 40, 40 | 81 (138) -> 42 (93) | 5 (2) -> 0 | 0.773 m4.70 -> 0.774 m4.70 | 0.2 GB |
+| Stand, res 128 | 563 -> 417 s (48 -> 39 %) | 40, 40 | 153 (277) -> 75 (161) | 5 (2) -> 0 | 0.743 m2.40 -> the same | 0.9 -> 1.0 GB |
+| Top Motor Mount | 3155 -> 2868 s (62 -> 60 %) | 180 -> 200 | 1585 (1747) -> 964 (1119) | 5 (2) -> 0 | 0.680/0.520/0.380/0.260 at m1.64/1.65/1.67/1.69 -> the same, 0.520 at m1.66 | 0.8 -> 0.9 GB |
+| Stand v4 | 2882 -> 3535 s (72 -> 70 %) | 140 -> 160 | 496 (2418) -> 304 (1474) | 5 (2) -> 0 | 0.679 m1.89 -> 0.679 m1.90 | 1.3 -> 1.2 GB |
+
+- Totals: 7,687 s today, 7,702 s new; without Stand v4, 4,805 -> 4,167 s (13 % less). Solves off multigrid: 0 in all 16 runs; Jacobi-CG fallbacks: 0 in all 16 runs.
+- Stand v4, read: the time is the 20 extra design steps (the solves differ in the last digits, so the design takes another path to the same volume and margin). Per step: wall 20.6 -> 22.1 s, CPU 58.0 -> 57.3 s; the Mac was shared during the new run (CPU/wall 2.6 against 2.8). Its rounds per solve fell 39 % with no fall in CPU per step, the one part where a round got dearer; not chased (lean ruling, 11-28). The side project's algebraic coarse level is the measured lever for this part (4-12x fewer rounds on the thin-walled parts).
+- The four coarse warm-start runs (base, pressing, Pillow Block L, Top Motor Mount with warm_start.coarse) follow on the lock; their rows go under "Levers".
 
 ### Tests moved from failing to passing
 - New: to_solver_bridge_way (12), to_solver_smoother (74, three settings each of per-level Jacobi and Chebyshev, converge on multigrid without the l1 retry); with b9f53d5b: to_solve_threads (6, S-05: identical bytes at 1/3/6 threads), to_solver_reduced_apply (6, B-06: the reduced product equals the full-length one byte for byte), to_solver_settings (5) and to_solver_run_state (4) (E-01: a passed setting reaches the solve and leaks nowhere; two runs' states stay apart). E-01 phase 2 (6dd4d9ab): the same 24 tests green, test_simp's 198 checks included.
@@ -251,9 +262,9 @@ Still to come: the rest of the dumps (demo, Pressing, Pillow Blocks, stand at 12
 - Trajectory warm start (warm_start.matfree; each solve starts from the previous design step's field): already on in his runs (the dumps carry a guess). Measured on the replays: today's solver gains little from it (Top Motor Mount 1,584 -> 1,495 cycles) because the slow modes dominate; with a coarse space that works it pays (algebraic + Chebyshev 2: 75 -> 51; Stand v4 139 -> 110). It stays on; its value rises with the coarse-grid work.
 - Coarse warm start (warm_start.coarse, the res/2 pre-solve of the design, job.cpp 1291-1305): off, and the app never sends it. NOT DONE YET: to measure as a full-run setting on the reference parts (off / coarse / coarse + matfree) once the solver changes are in, because a cheaper solve changes its trade.
 - Resolution continuation (solve coarse, carry the design up, finish fine): not in the code, and the optimiser loop is not my file. NOT DONE YET: its smallest form needs minimize_plastic / plsm changes; named to TOReview as an optimiser-side item.
-- GenEO settings sweep (block 20, cut 0.05, 8^3 cores, overlap 1): GenEO acts only inside the Jacobi-CG FALLBACK. With the stage-5 smoother the fallback should rarely run (the replays count it). If it never engages on the reference table, GenEO is unused machinery, and the rebuild's rule is to delete it, not tune it; if it engages, sweep cut and block size at three settings each on those solves. To decide from the replay and reference-run counts.
+- GenEO settings sweep (block 20, cut 0.05, 8^3 cores, overlap 1): GenEO acts only inside the Jacobi-CG FALLBACK. With the stage-5 smoother the fallback should rarely run (the replays count it). If it never engages on the reference table, GenEO is unused machinery, and the rebuild's rule is to delete it, not tune it; if it engages, sweep cut and block size at three settings each on those solves. To decide from the replay and reference-run counts. MEASURED (2026-11-28): the fallback ran 0 times in all 16 reference runs (today's smoother and the new one), so GenEO never engaged; by the rebuild's rule it is unused machinery to delete, proposed for the close-out with TOReview's word.
 - Active Domain (band 0, disarmed after PR 209 measured it net-negative in the stagnation regime): the stagnation cause is now known and fixed under the switch, so the old verdict no longer stands. NOT DONE YET: the band is a production.cpp constant with no per-job switch, so measuring it needs a job or observability override (not my file; to TOReview) or a harness run; three bands (0 / auto / auto+2).
-- Multigrid hierarchy dropped part-way through a run (the stagnation latch, "0 levels"): measured per solve on the replays (used_multigrid, levels, l1 retries) and on the reference runs' logs. Today: latched on solve 3 on both test-P parts; with the stage-5 smoother: to fill.
+- Multigrid hierarchy dropped part-way through a run (the stagnation latch, "0 levels"): measured per solve on the replays (used_multigrid, levels, l1 retries) and on the reference runs' logs. Today: latched on solve 3 on both test-P parts; with the stage-5 smoother: 0 retries and 0 latches on all eight reference parts (table above).
 
 ### For the reviewer: E-01 phase 2b (a run's own SolverRunState), a ruling asked because it changes bytes
 What: minimize_plastic owns one SolverRunState per run and hands it to the trajectory's solves; every certification, final-compliance and analysis solve gets a FRESH one.
