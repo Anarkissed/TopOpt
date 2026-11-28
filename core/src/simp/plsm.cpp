@@ -630,8 +630,43 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   // constraint is compared against a target to that precision.
   std::vector<double> vol_partial(
       static_cast<std::size_t>(std::max(1, threads)), 0.0);
+  // Stage 3 (TOReview 11-28): under the switch the partials are FIXED chunks of
+  // kVolChunk cells, not one per thread, so the sum is the same at every thread
+  // count (one chunk per thread made the stand at 64 differ between 1 and 6
+  // threads). A part under one chunk keeps today's serial bytes. Off: unchanged.
+  constexpr std::size_t kVolChunk = 1024;
+  std::vector<double> vol_chunk;
   auto active_volume_at = [&](double offset) {
     double s = 0.0;
+    if (frac && surf.on) {
+      const std::size_t nch = (fcache.ncell + kVolChunk - 1) / kVolChunk;
+      vol_chunk.assign(nch, 0.0);
+      auto sum_chunk = [&](std::size_t c) {
+        const std::size_t lo = c * kVolChunk;
+        const std::size_t hi = std::min(fcache.ncell, lo + kVolChunk);
+        double p = 0.0;
+        for (std::size_t sl = lo; sl < hi; ++sl)
+          p += frac_at(static_cast<std::size_t>(fcache.cell[sl]), offset);
+        vol_chunk[c] = p;
+      };
+      const int t = static_cast<int>(
+          std::min<std::size_t>(static_cast<std::size_t>(std::max(1, threads)), nch));
+      if (t <= 1) {
+        for (std::size_t c = 0; c < nch; ++c) sum_chunk(c);
+      } else {
+        std::vector<std::thread> pool;
+        pool.reserve(static_cast<std::size_t>(t));
+        for (int q = 0; q < t; ++q)
+          pool.emplace_back([&, q] {
+            for (std::size_t c = static_cast<std::size_t>(q); c < nch;
+                 c += static_cast<std::size_t>(t))
+              sum_chunk(c);
+          });
+        for (auto& th : pool) th.join();
+      }
+      for (double p : vol_chunk) s += p;
+      return s;
+    }
     if (frac) {
       std::fill(vol_partial.begin(), vol_partial.end(), 0.0);
       // `plsm_frac_parallel` hands the body its THREAD INDEX and chunks the
@@ -1024,8 +1059,14 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
           wc[v] = raw_vel[v];
           wv[v] = 1.0;
         }
+        // Stage 3 (TOReview 11-28): ONE thread under the switch. The scatter sums
+        // per-thread accumulators, so with one chunk per thread its rounding
+        // followed the thread count (the stand at 64 gave different files at 1
+        // and 6 threads). Serial it is today's 1-thread bytes at any thread
+        // count, for about 0.1 s per whole run at 128. Off: unchanged.
         plsm_frac_scatter(fcache, nx, ny, nz, L, basis, frac_gs, h,
-                          plsm.frac_eps_mult, wc, dc, wv, dv, threads);
+                          plsm.frac_eps_mult, wc, dc, wv, dv,
+                          surf.on ? 1 : threads);
         out.frac_sens_wall_s += steady_s() - t_fs;
       } else {
         std::vector<double> edelta(n, 0.0);
