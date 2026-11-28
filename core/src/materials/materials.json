@@ -39,6 +39,14 @@
     "poisson": 0.37,
     "family": "fdm"
   },
+  "PA6": {
+    "youngs_modulus_mpa": 3760,
+    "yield_strength_mpa": 31,
+    "density_g_cm3": 1.17,
+    "z_knockdown": 0.40,
+    "poisson": 0.39,
+    "family": "fdm"
+  },
   "PA12": {
     "youngs_modulus_mpa": 1600,
     "yield_strength_mpa": 38,
