@@ -572,12 +572,13 @@ void write_boxes(const std::string& path, const std::vector<std::array<double, 6
   }
   f << "endsolid boxes\n";
 }
-BreakResult load_path_case(const std::string& name, const std::vector<std::array<double, 6>>& boxes) {
+BreakResult load_path_case(const std::string& name, const std::vector<std::array<double, 6>>& boxes, double force = 1.0,
+                           bool part_is_print = false) {
   const std::string w = std::string(TMP_DIR) + "/organic_break_check/" + name;
   std::filesystem::remove_all(w);
   std::filesystem::create_directories(w);
   // the part: the plain 10 x 3 x 3 bar (its two end faces are the hold and the load); the print: the boxes
-  write_boxes(w + "/part.stl", {{0, 0, 0, 10, 3, 3}});
+  write_boxes(w + "/part.stl", part_is_print ? boxes : std::vector<std::array<double, 6>>{{0, 0, 0, 10, 3, 3}});
   write_boxes(w + "/print.stl", boxes);
   const StepModel m = import_part_file_resolved(w + "/part.stl");
   const StlMesh print = read_stl_file(w + "/print.stl");
@@ -585,7 +586,7 @@ BreakResult load_path_case(const std::string& name, const std::vector<std::array
   ask.print = &print.mesh;
   ask.part = &m;
   ask.fixed_faces = {face_where(m, {-1, 0, 0}, 0, false)};
-  ask.loads = {{{face_where(m, {1, 0, 0}, 0, true)}, {1, 0, 0}}};   // 1 N: the neck's own reading stays over the pass line
+  ask.loads = {{{face_where(m, {1, 0, 0}, 0, true)}, {force, 0, 0}}};   // small: a thin member's own reading stays over the pass line
   ask.youngs_mpa = 3500;
   ask.poisson = 0.35;
   ask.yield_mpa = 31;
@@ -604,6 +605,13 @@ void load_path() {
   check(a.ok && a.verdict == "not_proven" && a.unresolved_energy_share > kBreakLoadPathShare &&
             std::fabs(a.largest_unresolved_at.x - 5.0) < 0.7,
         "the load-path rule: a thin neck in the load path is named (not_proven, the region at the neck)");
+  // a thin JOINT in the load path (the reviewer's 21:21): two thick blocks, 5 x 3 x 3 each, offset 2.6 mm in y and z so
+  // they touch only along a 0.4 x 0.4 mm patch 0.1 mm long (x 4.9 to 5.0): the joint carries the whole load. A general
+  // joint is measured by the strain-energy share of its not-resolved material (posts by their section force); named.
+  const BreakResult c = load_path_case("JOINT", {{0, 0, 0, 5, 3, 3}, {4.9, 2.6, 2.6, 10, 5.6, 5.6}}, 0.1, true);
+  check(c.ok && c.verdict == "not_proven" && c.unresolved_energy_share > kBreakLoadPathShare &&
+            std::hypot(std::hypot(c.largest_unresolved_at.x - 4.95, c.largest_unresolved_at.y - 2.8), c.largest_unresolved_at.z - 2.8) < 1.5,
+        "the load-path rule: a thin joint in the load path is named (not_proven, the region at the joint)");
   // the same bar whole, with a 0.4 mm fin off the load path (on its +y face): not named
   const BreakResult b = load_path_case("FIN", {{0, 0, 0, 10, 3, 3}, {4, 2.9, 1.3, 6, 5, 1.7}});
   check(b.ok && b.verdict == "pass" && b.unresolved_energy_share <= kBreakLoadPathShare,
