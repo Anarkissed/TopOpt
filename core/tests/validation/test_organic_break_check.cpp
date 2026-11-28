@@ -21,6 +21,7 @@
 #include "topopt/lattice_file_strength.hpp"
 #include "topopt/lattice_layout_break.hpp"
 #include "topopt/lattice_layout_file.hpp"
+#include "topopt/lattice_layout_organic.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/observability.hpp"
 #include "topopt/step.hpp"
@@ -685,9 +686,26 @@ void load_path() {
         "the load-path rule: a thin fin off the load path is not named (pass)");
 }
 
+// C9: the Auto Sweep limits the app's Organic page reads before a lay (Session::sweep_limits_for over the job's weave
+// regions, the line its bead, the gap 1.5 lines: LatticeOrganicLook.Check.gapLines), for laying a piece at the app's defaults.
+void limits(const std::string& job_path) {
+  FileJob job;
+  StepModel model;
+  FileResult r;
+  if (!load_file_job(job_path, 1, job, model, r, nullptr)) { std::printf("LIMITS load failed: %s\n", r.why.c_str()); return; }
+  std::vector<int> ids;
+  for (const auto& g : job.settings.regions)
+    if (g.weave) ids.push_back(g.id);
+  Session s(model);
+  const SweepLimitsUnion u = s.sweep_limits_for(job.settings, ids, job.settings.bead_mm, 1.5);
+  std::printf("LIMITS measured %d strut %.6g %.6g auto %.6g cell %.6g %.6g auto %.6g gap %.6g (bead %.6g)\n", u.measured, u.strut_lower_mm,
+              u.strut_upper_mm, u.strut_auto_mm, u.cell_lower_mm, u.cell_upper_mm, u.cell_auto_mm, u.gap_mm, job.settings.bead_mm);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
+  if (argc >= 3 && std::string(argv[1]) == "limits") { limits(argv[2]); return 0; }   // C9
   gate();
   law();
   bar();
