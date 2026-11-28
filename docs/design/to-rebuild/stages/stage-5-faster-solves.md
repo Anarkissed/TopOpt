@@ -147,7 +147,7 @@ struct FeaBodyLoadScope {
 In minimize_plastic.cpp (TOReview): beside masked_self_weight_loads, ONE helper from the same weighed tags (THE ONE RULE), `std::vector<double> masked_self_weight_voxel_force(const VoxelGrid&, const DesignMask&, double density, double gravity)` = gravity x density x voxel volume on every voxel masked_self_weight_loads weighs, else 0; the run holds `FeaBodyLoadScope body(force, options.gravity_direction)` wherever design_domain_loads returned self-weight (mode (b); external loads register nothing).
 What the solver then does (TOSolver's files, under the rule only): for every loose voxel, its registered force leaves the solve's right-hand side (an eighth off each of its 8 nodes); a piece counts as LOADED loose only where a node's load exceeds its registered weight (an applied load, reported per solve); the removed loads are reported per solve (beside fea_matfree_last_dropped_islands) so to_solve.cpp's compliance and sensitivity use the loads the solve actually carried. Note: in mode (b) the weight covers every weighed voxel of the design envelope, void included (tags, not density), so today every node there is loaded: that is why no floating piece is ever taken out.
 
-## 4. Side hustle: a coarse space that follows the part (outside the brief): PLAN DRAFT, awaiting the maintainer's approval
+## 4. Side hustle: a coarse space that follows the part (outside the brief): round 1 measured 2026-11-28, awaiting his decision on round 2
 
 Process (his, 2026-11-25): read all the code, research beyond the surface, a plan with keep / rewrite / throw out, ship and stop criteria, HIS APPROVAL, then implement and test. Waiting time only; never slows sections 3.1-3.6. Blanks [..] fill from the all-parts sweep and the memory check, both queued.
 
@@ -194,6 +194,36 @@ Every switched solve stayed on multigrid (no l1 retry, no fallback). `auto` swit
 ROUND 1 OF 3 (fix written and tested 11-26, scratch sw/): on Stand v4 solve 2 the algebraic level was REFUSED; round 0 then rebuilt the halved grid and RESTARTED PCG, 258 cycles against 216 (+19 %), so "a refusal is never worse than today" was false as built. Now the algebraic hierarchy is built BESIDE the halved one at the checkpoint (a SwitchProbe in mf_mgpcg); built: the halved one is freed and PCG restarts on the algebraic one; refused: the SAME PCG carries on untouched. Test test_to_solver_switch now 17 checks, green: refused at K = 5 gives identical bytes and cycles to no switch (13 = 13). Cost: peak memory during the attempt is both hierarchies. Still to find: why that solve's algebraic level was refused (its stderr was discarded; replayed again with round 1).
 MEMORY MEASURED (mem.sh under the lock, 11-26 ~22:00; the algebraic level 1 built from solve 1 of each job): Top Motor Mount res 128: used, adds 108.5 MB (323 B/DOF, 352k fine DOFs); res 192: used, adds 335.9 MB (322 B/DOF, 1.09M DOFs). Stand v4 (the largest part) res 128: adds 390.9 MB (243 B/DOF, 1.69M DOFs); res 192: adds 1,295 MB (242 B/DOF, 5.60M DOFs). All UNDER the 2 GB cap: the flat-CSR rewrite is NOT needed and is not written. But Stand v4's algebraic hierarchy is REFUSED at both resolutions by COARSENING CONTROL, not memory: "level 4 (res 128) / level 3 (res 192) rejected: coarsening ratio 1.80 / 1.76 < 2.0", and the WHOLE algebraic hierarchy is thrown away for one deep level (very likely Stand v4 solve 2's refusal in the sweep). ROUND 2 candidate (not written; part of the plan for his approval): keep the levels above the first that fails the ratio test when the last kept level fits the coarsest direct solve, instead of refusing everything.
 Still to come: the rest of the dumps (demo, Pressing, Pillow Blocks, stand at 128), the five test shapes, the timed replays under the lock. Also on the list (TOReview 11-26): the made sample hook at res 64 (26k elements, loaded pieces at the floor), where today's shipped and l1 multigrid diverge (rel res 2.1e3 / 3.9e2) and the Jacobi-CG fallback runs 30k-106k iterations: its solves 1 / 309 / 316 are to be dumped from TOReview's local build source and replayed with cheb:2, the switch and the support-only rule.
+
+### Measured 2026-11-28 under the lock (timed, the Mac to itself): awaiting his decision
+
+**In plain words (for Nadim).** We took 40 real solves from the reference parts (each one solve copied out of a real run) and ran each again with and without the switch, timed. Settings: today's new smoothing (cheb:2), switch `auto`.
+- **About 7 times faster overall**: 938 s for all 40 without the switch, 128 s with it. Top Motor Mount's solves drop from about 8 s to about 1.2 s each. Stand v4's first solve drops from 53 s to 13 s.
+- **It fixes the solves that go badly today.** 6 of the 40 (from the demo part and the made test hook) need today's emergency retry, and 5 of those then fall back to the slow backup solver. They take 38 s to 5 minutes each. With the switch, all 6 finish normally in 1 to 15 s.
+- **Same answers.** Where both finish, the results agree within the solve's own tolerance. On the test shapes the largest difference is 3 parts in 10 million.
+- **But three cases run slower, which breaks the rule we set before measuring** (no case more than 5 % slower):
+  - Stand v4 solve 2 takes 9.0 s without the switch and 10.8 s with it (+19 %). The switch builds the second map, the map is refused (one of its deep layers fails a quality check), and the try is wasted time.
+  - The "dilute" test shape takes 2.6 s without and 3.6 s with (+38 %). The second map barely helps on it (45 rounds where 50 were left), so its set-up cost is not repaid.
+  - One stand solve at res 64 takes 0.59 s without and 0.63 s with (+7 %).
+- The plan allows up to 3 rounds of fixes before the switch is deleted. This was round 1.
+
+**Your decision:** a second round of fixes (two targeted changes, then one more timed run, about 1.5 hours), or stop and delete the switch now. My suggestion: one more round, because the gain on your parts is large. If two or more cases are still slower after it, it gets deleted, as the rule says.
+
+| setting (cheb:2) | total rounds, 40 solves | total time | solves switched | needed the retry or the backup solver | slower than no switch (> 5 %) |
+|---|---|---|---|---|---|
+| no switch (today) | 39,718 | 938 s | 0 | 6 | - |
+| K = 10 | 7,845 | 128 s | 38 | 0 | 2 solves + 2 shapes (hook_c/1, standv4/2; hole, dilute) |
+| K = 20 | 8,150 | 133 s | 37 | 0 | 3 solves + 1 shape |
+| K = 30 | 8,507 | 138 s | 37 | 0 | 5 solves + 1 shape |
+| K = 50 | 9,133 | 146 s | 37 | 0 | 7 solves + 1 shape |
+| auto | 7,845 | 128 s | 37 | 0 | 2 solves + 1 shape (6d9b535f/20 +7 %, standv4/2 +19 %; dilute +38 %) |
+
+The same with jacobi:1.6 (a check that the result is not tied to one smoother): 922 s → 143 s with `auto`, 6 → 0 off multigrid. The five test shapes, `auto`: block 6 = 6 rounds, not switched; hole 19 = 19, not switched; bracket 217 → 30 rounds, 0.9 → 0.3 s; dilute 60 → 55, 2.6 → 3.6 s; loose 285 → 60, 7.8 → 3.7 s. Answers within 3e-7 of no switch on every shape and setting. Raw: agent-scratch/tosolver/diag/switch/all.txt and shapes.txt (summarised by agent-scratch/tosolver/py/switch_table.py).
+
+By the CHOICE RULE written before the data, no setting qualifies (Stand v4 solve 2 is +19 % at every K). By the STOP rule, `auto` has 2 cases clearly slower (Stand v4 solve 2, dilute) plus one at +7 %. Round 2 of 3, if he says yes:
+1. Stand v4 solve 2: keep the algebraic levels above the first one that fails the coarsening-ratio test, when the last kept level fits the coarsest direct solve, instead of refusing the whole hierarchy (the 11-26 candidate). A refused build would then be rare. Its cost (1.2 s here) is the 19 %.
+2. dilute and the res-64 stand solve: switch only when the halved grid is clearly stuck. `auto` now switches below a 10x drop per 10 rounds (about 0.79 per round). Those two converge at about 0.86-0.89 per round, while every solve the switch rescues runs at 0.95 or slower. The candidate is a contraction of about 0.9 (switchwin=10, switchgain=2.9, keys that already exist, so no new code), measured, not assumed.
+Then one timed hold: the 40 solves and the five shapes, the same table. Ship only if nothing is more than 5 % slower. Delete if two or more are.
 
 ## 5. Stage report (filling in as measurements land)
 
