@@ -192,3 +192,10 @@ add_test(NAME to_stage4_pocket COMMAND test_to_stage4_pocket)
 add_executable(test_to_stage4_load_path tests/unit/test_to_stage4_load_path.cpp)
 target_link_libraries(test_to_stage4_load_path PRIVATE topopt)
 add_test(NAME to_stage4_load_path COMMAND test_to_stage4_load_path)
+
+# Stage 4b, overhang: overhang_measure and Langelaar's layer filter
+# (topopt/overhang_rule.hpp) on made 24^3 shapes against today's
+# support_overhang_voxels, plus a 128 x 128 x 64 timing print. Seconds.
+add_executable(test_to_stage4_overhang tests/unit/test_to_stage4_overhang.cpp)
+target_link_libraries(test_to_stage4_overhang PRIVATE topopt)
+add_test(NAME to_stage4_overhang COMMAND test_to_stage4_overhang)
