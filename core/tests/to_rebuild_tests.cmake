@@ -173,3 +173,10 @@ add_executable(test_to_zoom_two_way tests/unit/test_to_zoom_two_way.cpp)
 target_link_libraries(test_to_zoom_two_way PRIVATE topopt)
 add_test(NAME to_zoom_two_way CONFIGURATIONS Long COMMAND test_to_zoom_two_way)
 set_tests_properties(to_zoom_two_way PROPERTIES TIMEOUT 1800)
+
+# Stage 4a: the level-set optimiser's MMA step with m constraints at once
+# (plsm_mma_update_m): m = 1 the same bytes as today, textbook optima, an
+# infeasible start. Header-only, seconds.
+add_executable(test_to_stage4_mma tests/unit/test_to_stage4_mma.cpp)
+target_link_libraries(test_to_stage4_mma PRIVATE topopt)
+add_test(NAME to_stage4_mma COMMAND test_to_stage4_mma)

@@ -61,3 +61,17 @@ For #362: the plain lines the user sees for a sealed pocket and for "too thin fo
 
 With the two-line floor every version is left with one or two thin spots the finish cannot thicken ("would grow outside your part": the spot is 0.31 mm and would have to reach 0.9); with the one-line floor every thin spot is brought to 0.45 mm and NONE is left, and the finish adds a fifth to a tenth of the plastic it added before. Margins are unchanged to the third digit; four versions accepted both ways. UNSET: the four files are the same bytes as today. Test G reads 0.45 mm for a solid part from here. The lattice's two-line rule is not touched (this floor is the solid body's finish).
 
+### 4a piece 2: the optimiser's update holds m constraints (2026-11-28 03:15; `plsm_mma_update_m` in `plsm_mma.hpp`, beside the untouched one-constraint function; new test `to_stage4_mma`; a builder's code, two builds)
+
+Today's update (`plsm_mma_update`): Svanberg's asymptotes and approximation, ONE constraint whose dual is solved by bisection. The new entry point takes m constraint values and gradients. With m = 1 it DELEGATES to today's function (bit-identical: checked on four seeds, n = 50 and 500, five iterations); with more it solves the m-dimensional dual by projected Newton with active sets and a line search, with Svanberg's artificial variables so an infeasible start still has an answer. The optimiser's loop (`plsm.cpp`, the stage 3 helper's file) is NOT changed: nothing calls the new entry point yet.
+
+| check | result |
+|---|---|
+| m = 1 against today's function | the same bits (delegated); the new solver itself at m = 1 is within 5e-9 of the range |
+| Svanberg's cantilever (one constraint; known optimum 1.340) | 1.33996 at iteration 5 |
+| a two-constraint problem with both active (optimum derived in the test) | reached at iteration 3; multipliers 2.0000 and 4.0000 as derived |
+| the same with one constraint made slack | its multiplier exactly 0; the one-constraint optimum |
+| three constraints, infeasible start | violation 0.25 -> 0.126 -> 0.0025 -> 0; feasible from iteration 3 |
+
+Not tested: nearly dependent constraints; constraints not scaled to about 1 (the artificial cost assumes it). The rules of pieces 3 to 8 plug in here; the call from the loop waits for stage 3's release.
+
