@@ -101,6 +101,10 @@ inline bool shown_margin_lower_on() {
 //   wall : a SOLID part's smallest wall is ONE outer line width (his ruling of
 //          2026-11-26; two lines is the lattice's rule), where today's finish
 //          holds two.
+//   pocket : a sealed pocket (an enclosed void nothing can drain from) is
+//          ALLOWED in a solid part and told: a "sealed_pockets" block on the
+//          version's report line and one [pocket] log line; in a lattice it
+//          stays refused, with the plain reason "A sealed pocket has no way out".
 // Unset = today's bytes.
 inline bool stage4_on(const char* piece) {
   const char* v = std::getenv("TOPOPT_STAGE4");

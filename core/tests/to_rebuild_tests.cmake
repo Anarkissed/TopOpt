@@ -180,3 +180,9 @@ set_tests_properties(to_zoom_two_way PROPERTIES TIMEOUT 1800)
 add_executable(test_to_stage4_mma tests/unit/test_to_stage4_mma.cpp)
 target_link_libraries(test_to_stage4_mma PRIVATE topopt)
 add_test(NAME to_stage4_mma COMMAND test_to_stage4_mma)
+
+# Stage 4, test I (detection): sealed pockets on a made 24^3 cube, by both readers
+# of the rule (plsm_void_topology and sealed_pocket_summary). Seconds.
+add_executable(test_to_stage4_pocket tests/unit/test_to_stage4_pocket.cpp)
+target_link_libraries(test_to_stage4_pocket PRIVATE topopt)
+add_test(NAME to_stage4_pocket COMMAND test_to_stage4_pocket)

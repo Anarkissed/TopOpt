@@ -882,6 +882,9 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // the printed grams. No solve reads them.
   options.top_skin_mm = job.loads.top_solid_mm;
   options.bottom_skin_mm = job.loads.bottom_solid_mm;
+  // TO rebuild stage 4, piece "pocket": a latticed job's sealed pockets are the
+  // lattice pass's to refuse (below); only a solid part's are told per version.
+  options.pocket_lattice_posture = job.lattice.present;
   ProductionLoadCase lc = std::move(setup.lc);
   std::string loadcase_receipt = std::move(setup.loadcase_receipt);
   result.fixture_face_ids = std::move(setup.fixture_face_ids);
@@ -1371,6 +1374,12 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // MINs that a rung with no geometry would drag to zero. The other rungs are
     // unaffected; one unlatticeable rung must not destroy the run's output.
     if (R.void_sealed) {
+      // Stage 4 "pocket": the plain reason first, today's detail after it.
+      if (stage4_on("pocket"))
+        std::fprintf(stderr, "[lattice] vf=%.2f NO LATTICE EMITTED — A sealed pocket has no way out\n"
+                             "[lattice] detail: %s\n",
+                     v.requested_volume_fraction, R.void_sealed_reason.c_str());
+      else
       std::fprintf(stderr, "[lattice] vf=%.2f NO LATTICE EMITTED — %s\n",
                    v.requested_volume_fraction, R.void_sealed_reason.c_str());
       std::fflush(stderr);

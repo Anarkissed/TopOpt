@@ -75,3 +75,10 @@ Today's update (`plsm_mma_update`): Svanberg's asymptotes and approximation, ONE
 
 Not tested: nearly dependent constraints; constraints not scaled to about 1 (the artificial cost assumes it). The rules of pieces 3 to 8 plug in here; the call from the loop waits for stage 3's release.
 
+### 4a piece 3, `TOPOPT_STAGE4=pocket`: the sealed-pocket rule (2026-11-28 03:45; a builder's code; one build; unit test `to_stage4_pocket`; NOT yet seen in a real run)
+
+Today: `plsm_void_topology` counts sealed pockets (void walked face to face; the outside is the grid's boundary); only the FIRST version's count reaches the report; a solid version with a sealed pocket is accepted silently; a lattice is refused only when lattice cells sit inside the sealed pocket, with a long technical line.
+Under the switch: every SOLID version with pockets carries `"sealed_pockets": {"count", "volume_mm3", "largest_mm3"}` in the report and one stderr line (`[pocket] version vf 0.xx: N sealed pocket(s), V mm3 in all (allowed in a solid part)`); the lattice refusal leads with the plain line "A sealed pocket has no way out", the old text kept as detail. The on-screen wording is #362's.
+Detection checked on a made 24^3 cube: no cavity 0; one 4^3 cavity 1 (8.000 mm3); the same with a one-voxel channel out 0; two cavities 2, largest reported; a cavity that meets the way out only at an EDGE or a CORNER of voxels still counts as sealed (face-to-face is the rule in the code's own comments; a printed diagonal contact is not a drain).
+OPEN: (1) a sealed pocket in a lattice job with NO lattice cell inside it is accepted today and still is: his decision says a lattice refuses; for the reviewer / LatticeReview; (2) the `lattice_variant` job type throws the old text from `run_job.cpp` (#362's file); (3) multiscale and frozen-lattice jobs: nothing told, not checked; (4) to run once in a real job with the switch off (the same report bytes) and on.
+

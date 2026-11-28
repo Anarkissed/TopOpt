@@ -419,6 +419,63 @@ FragileJoints fragile_joints(const VoxelGrid& g, const std::vector<double>& rho,
 
 }  // namespace
 
+// TO rebuild stage 4, piece "pocket" (pipeline.hpp). The SAME rule as
+// plsm_void_topology (plsm_topology.hpp, which is not changed): the void inside
+// the part, 6-connected; the escape set is everything not printed, Empty voxels
+// included; a void component is sealed when its escape component touches none of
+// the grid's six boundary planes. Per pocket, so the largest can be told.
+SealedPocketSummary sealed_pocket_summary(int nx, int ny, int nz, double h,
+                                          const std::vector<double>& occ, double iso,
+                                          const std::vector<char>& in_part) {
+  SealedPocketSummary out;
+  const std::size_t n = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
+                        static_cast<std::size_t>(nz);
+  if (n == 0 || occ.size() != n || in_part.size() != n) return out;
+  auto at = [&](int i, int j, int k) { return plsm_at(nx, ny, i, j, k); };
+  std::vector<char> isvoid(n, 0), escape(n, 0);
+  for (std::size_t v = 0; v < n; ++v) {
+    const bool printed = occ[v] > iso;
+    escape[v] = printed ? 0 : 1;
+    isvoid[v] = (in_part[v] && !printed) ? 1 : 0;
+  }
+  PlsmDisjointSet dv(n), de(n);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t v = at(i, j, k);
+        if (!escape[v]) continue;
+        const std::size_t nb[3] = {i > 0 ? at(i - 1, j, k) : v, j > 0 ? at(i, j - 1, k) : v,
+                                   k > 0 ? at(i, j, k - 1) : v};
+        for (const std::size_t w : nb) {
+          if (w == v || !escape[w]) continue;
+          de.join(static_cast<int>(v), static_cast<int>(w));
+          if (isvoid[v] && isvoid[w]) dv.join(static_cast<int>(v), static_cast<int>(w));
+        }
+      }
+  std::vector<char> reaches(n, 0);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        if (i != 0 && j != 0 && k != 0 && i != nx - 1 && j != ny - 1 && k != nz - 1)
+          continue;
+        const std::size_t v = at(i, j, k);
+        if (escape[v]) reaches[static_cast<std::size_t>(de.find(static_cast<int>(v)))] = 1;
+      }
+  std::vector<long long> size(n, 0);
+  for (std::size_t v = 0; v < n; ++v) {
+    if (!isvoid[v]) continue;
+    if (reaches[static_cast<std::size_t>(de.find(static_cast<int>(v)))]) continue;
+    const std::size_t r = static_cast<std::size_t>(dv.find(static_cast<int>(v)));
+    if (size[r] == 0) ++out.count;
+    ++size[r];
+    ++out.voxels;
+    out.largest_voxels = std::max(out.largest_voxels, size[r]);
+  }
+  out.volume_mm3 = static_cast<double>(out.voxels) * h * h * h;
+  out.largest_mm3 = static_cast<double>(out.largest_voxels) * h * h * h;
+  return out;
+}
+
 std::string scenario_unheld_reason(const std::string& name) {
   return "Scenario \u201C" + name + "\u201D's load has no path to its anchors";
 }
@@ -3358,6 +3415,29 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       FragileJoints fj = fragile_joints(G, variant.optimization.physical_density, kIso);
       vr.fragile_joints = fj.count;
       vr.fragile_joint_positions_mm = std::move(fj.positions_mm);
+    }
+    // TO rebuild stage 4, piece "pocket": a SOLID part's sealed pockets are
+    // allowed and told (report line + one log line). A latticed job's are the
+    // lattice pass's to refuse (to_run.inc), so nothing is written here for it.
+    // Read on the field this line describes, at this run's printed threshold.
+    if (stage4_on("pocket") && !options.pocket_lattice_posture &&
+        !options.multiscale_lattice && !options.frozen_lattice) {
+      std::vector<char> in_part(G.voxel_count(), 0);
+      for (std::size_t q = 0; q < in_part.size(); ++q)
+        in_part[q] = G.tags[q] != VoxelTag::Empty ? 1 : 0;
+      const SealedPocketSummary sp =
+          sealed_pocket_summary(G.nx, G.ny, G.nz, G.spacing,
+                                variant.optimization.physical_density, kIso, in_part);
+      if (sp.count > 0) {
+        vr.sealed_pockets = sp.count;
+        vr.sealed_pockets_volume_mm3 = sp.volume_mm3;
+        vr.sealed_pockets_largest_mm3 = sp.largest_mm3;
+        std::fprintf(stderr,
+                     "[pocket] version vf %.2f: %lld sealed pocket(s), %.1f mm3 in all "
+                     "(allowed in a solid part)\n",
+                     variant.requested_volume_fraction, sp.count, sp.volume_mm3);
+        std::fflush(stderr);
+      }
     }
 
     // ── WHY (handoff 2026-08-02-gate-diagnosis-recommendations) ───────────────

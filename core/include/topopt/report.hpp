@@ -357,6 +357,14 @@ struct VariantReport {
   // fragile when printed; reported, never fixed. report.json "fragile_joints"
   // only when > 0, so every other line keeps its exact bytes.
   int fragile_joints = 0;
+  // TO rebuild stage 4, piece "pocket" (TOPOPT_STAGE4 contains pocket): a SOLID
+  // part's sealed pockets (enclosed voids nothing can drain from), allowed and
+  // told. report.json "sealed_pockets" {count, volume_mm3, largest_mm3} only when
+  // sealed_pockets > 0, which only the switch sets, so every other line keeps its
+  // exact bytes.
+  long long sealed_pockets = 0;
+  double sealed_pockets_volume_mm3 = 0.0;
+  double sealed_pockets_largest_mm3 = 0.0;
   // E1: the finished shape (ran == false: none, an older report).
   FinishBlock finish;
   // Where (mm, the solve grid's model frame): the midpoint of each joint's first

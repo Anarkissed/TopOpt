@@ -1037,7 +1037,32 @@ struct MinimizePlasticOptions {
   // ~1% on the harness grids). 1 = a single OC step per reseed. Ignored unless the
   // design trigger is armed.
   int draft_probe_iters = 1;
+
+  // TO rebuild stage 4, piece "pocket" (TOPOPT_STAGE4 contains pocket; read only
+  // then): the job will be LATTICED afterwards (a "lattice" block), so a sealed
+  // pocket is the lattice pass's to refuse and the solid part's report line and
+  // [pocket] log line are not written. run_job sets it; the multiscale and frozen
+  // lattice options count as latticed too.
+  bool pocket_lattice_posture = false;
 };
+
+// TO rebuild stage 4, piece "pocket": the sealed pockets of a printed field, by
+// plsm_void_topology's rule (plsm_topology.hpp): the void inside the part
+// (in_part and occ <= iso) is walked 6-CONNECTED; a pocket is sealed when the
+// whole not-printed set (Empty voxels outside the part included) gives it no
+// face-connected route to one of the grid's six boundary planes. Edge- or
+// corner-only contact is NOT a way out. Read-only, deterministic, O(voxels).
+// Adds what the topology counters lack: the largest pocket.
+struct SealedPocketSummary {
+  long long count = 0;
+  long long voxels = 0;
+  long long largest_voxels = 0;
+  double volume_mm3 = 0.0;
+  double largest_mm3 = 0.0;
+};
+SealedPocketSummary sealed_pocket_summary(int nx, int ny, int nz, double h,
+                                          const std::vector<double>& occ, double iso,
+                                          const std::vector<char>& in_part);
 
 // Handoff 131 — the VariantReport::rejection_reason a rung ended on the
 // rung-infeasibility signature carries. One definition, shared by the driver, the
