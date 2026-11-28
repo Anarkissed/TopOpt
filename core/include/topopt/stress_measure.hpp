@@ -129,6 +129,7 @@ struct SurfaceCarry {
   std::size_t tight_points = 0;      // shape 1: concave cut-face points with R < kSurfaceResolvedRadiusVoxels (a stress raiser too tight for the grid)
   std::size_t capped_points = 0;     // shape 1: curved readings capped at 1.5 x the straight line
   std::size_t loaded_points = 0;     // shape 1: cut-face points kept on the line because the surface voxel or the first full voxel is tagged Load
+  std::size_t three_point_points = 0;  // shapes 2 and 3: curved points read through a third full voxel
 };
 // `shape` 0: the straight line above. 1: CURVATURE-SHAPED at CONCAVE cut-face points only
 // (flat faces and convex points keep the line): the surface's curvature fitted from the
@@ -141,6 +142,13 @@ struct SurfaceCarry {
 // `only` (per voxel, optional): read a surface point only where its surface voxel has
 // only[v] != 0, and the full-voxel peak only over those voxels (the curvature still comes
 // from every cut-face point). Absent = every voxel, as before.
+// `shape` 2 (measured, print-only, 2026-11-27): as 1, but where 1 uses the curved form a
+// THIRD full voxel c (half a voxel further in than b) is found and A + B / (R + d)^2 + C d
+// (d = depth below the true surface; C the bending gradient) is fitted exactly through
+// a, b, c and read at d = 0; no c, or an ill-conditioned fit, keeps shape 1's form.
+// `shape` 3: shape 1's two-voxel fit, plus its residual at c carried back linearly to the
+// surface through zero at the middle of a and b (a damped form of 2). Floor 0 and the
+// 1.5 x cap as in shape 1; `three_point_points` counts where c was used.
 SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<double>& field,
                                        const std::vector<double>& density, int shape = 0,
                                        const std::vector<char>* only = nullptr);

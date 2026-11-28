@@ -54,6 +54,7 @@ struct Out {
   double patch25 = 0.0, patch35 = 0.0;
   double quad35 = 0.0, quad45 = 0.0;  // the quadratic patch (order 2) at radius 3.5 and 4.5
   double carry2 = 0.0;  // the curvature-shaped carry (shape 1)
+  double carry_s2 = 0.0, carry_s3 = 0.0;  // shapes 2 and 3 (flat: must equal the straight line)
   // The one judge under TOPOPT_STRENGTH=surface (E x fill rows only): its max_von_mises
   // / true surface stress (the loaded ends included: the judge cannot mask them), its
   // tight and unresolved counts, and the same solve's material field read at the
@@ -226,6 +227,8 @@ Out bend(int core, double fill, double skin_density, double penalty, bool tensio
     o.engine_carry = sc.peak / surface;
     o.engine_unresolved = sc.unresolved;
     o.carry2 = topopt::stress_carried_to_surface(g, mid_field, density, 1).peak / surface;
+    o.carry_s2 = topopt::stress_carried_to_surface(g, mid_field, density, 2).peak / surface;
+    o.carry_s3 = topopt::stress_carried_to_surface(g, mid_field, density, 3).peak / surface;
   }
   if (penalty == 1.0 && skin_density >= 0.0) {
     setenv("TOPOPT_STRENGTH", "surface", 1);
@@ -293,6 +296,10 @@ int main() {
                       o.judge, o.judge_tight, o.judge_unresolved, o.judge_mid);
         std::printf("   SECTION %.3f (M measured / applied %.4f)", o.section, o.section_ratio);
         std::printf("\n");
+        std::printf("[cut skin s2/s3]   %s  s2 %.6f, s3 %.6f; straight line (engine carry) %.6f, carry2 %.6f: %s\n",
+                    md.name, o.carry_s2, o.carry_s3, o.engine_carry, o.carry2,
+                    o.carry_s2 == o.engine_carry && o.carry_s3 == o.engine_carry ? "s2 = s3 = the straight line"
+                                                                                   : "DIFFERENT from the straight line");
         std::fflush(stdout);
       }
     }

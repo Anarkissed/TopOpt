@@ -61,6 +61,9 @@ std::size_t g_engine_unresolved = 0;
 double g_carry2 = 0.0;
 std::size_t g_carry2_curved = 0, g_carry2_concave = 0, g_carry2_tight = 0, g_carry2_capped = 0,
             g_carry2_unresolved = 0;
+// Shapes 2 (three-point, the bending gradient) and 3 (damped), the same masked field.
+double g_s[2] = {0.0, 0.0};
+std::size_t g_s_three[2] = {0, 0}, g_s_capped[2] = {0, 0};
 // The patch recovery (stress_recovered_at_surface) over the far stress, the loaded
 // edges masked the same way, at patch radius 2.5 and 3.5 voxels, and its unresolved counts.
 double g_patch[2] = {0.0, 0.0};
@@ -202,6 +205,8 @@ double peak_ratio(int radius_voxels, bool exact_fill, double penalty, bool* ok,
   g_engine_unresolved = 0;
   g_carry2 = 0.0;
   g_carry2_tight = g_carry2_unresolved = 0;
+  g_s[0] = g_s[1] = 0.0;
+  g_s_three[0] = g_s_three[1] = g_s_capped[0] = g_s_capped[1] = 0;
   if (res.von_mises_material_field.size() == density.size()) {
     std::vector<double> f = res.von_mises_material_field;  // the loaded edges masked
     for (int k = 0; k < g.nz; ++k)
@@ -218,6 +223,12 @@ double peak_ratio(int radius_voxels, bool exact_fill, double penalty, bool* ok,
     g_carry2_tight = sc2.tight_points;
     g_carry2_capped = sc2.capped_points;
     g_carry2_unresolved = sc2.unresolved;
+    for (int q = 0; q < 2; ++q) {
+      const topopt::SurfaceCarry scq = topopt::stress_carried_to_surface(g, f, density, 2 + q);
+      g_s[q] = scq.peak / kFarStress;
+      g_s_three[q] = scq.three_point_points;
+      g_s_capped[q] = scq.capped_points;
+    }
   }
   g_patch[0] = g_patch[1] = 0.0;
   g_patch_unresolved[0] = g_patch_unresolved[1] = 0;
@@ -268,6 +279,8 @@ struct FilletReading {
   bool ok = false, non_convergent = false;
   double carry = 0.0;      // stress_carried_to_surface shape 1 on the boxed field, MPa
   double per_voxel = 0.0;  // the largest von_mises_field voxel in the box, MPa
+  double s[2] = {0.0, 0.0};  // shapes 2 and 3, the same box, MPa
+  std::size_t s_three[2] = {0, 0}, s_capped[2] = {0, 0};
   std::size_t tight = 0, unresolved = 0;
   double seconds = 0.0;
   int nx = 0, nz = 0;
@@ -395,6 +408,12 @@ FilletReading fillet_reading(double R, int scale, int arm = 8, int length = 28) 
   out.carry = sc.peak;
   out.tight = sc.tight_points;
   out.unresolved = sc.unresolved;
+  for (int q = 0; q < 2; ++q) {
+    const topopt::SurfaceCarry scq = topopt::stress_carried_to_surface(g, f, density, 2 + q, &in_box);
+    out.s[q] = scq.peak;
+    out.s_three[q] = scq.three_point_points;
+    out.s_capped[q] = scq.capped_points;
+  }
   return out;
 }
 
@@ -405,6 +424,7 @@ int main(int argc, char** argv) {
   int failures = 0;
   std::vector<Row> rows;
   double thin_carry2[4] = {0.0, 0.0, 0.0, 0.0};
+  double thin_s[4][2] = {};
   std::size_t thin_tight[4] = {0, 0, 0, 0}, thin_unresolved[4] = {0, 0, 0, 0};
   std::printf("[test E] plate with a hole, pulled at %.0f deg to the grid; peak / far "
               "stress, textbook %.2f\n",
@@ -423,6 +443,8 @@ int main(int argc, char** argv) {
     const std::size_t engine_unresolved = g_engine_unresolved;
     const double carry2 = g_carry2;
     thin_carry2[r - 3] = g_carry2;
+    thin_s[r - 3][0] = g_s[0];
+    thin_s[r - 3][1] = g_s[1];
     thin_tight[r - 3] = g_carry2_tight;
     thin_unresolved[r - 3] = g_carry2_unresolved;
     const std::size_t carry2_curved = g_carry2_curved, carry2_concave = g_carry2_concave,
@@ -442,6 +464,10 @@ int main(int argc, char** argv) {
                 "(straight line %+.1f), curved points %zu, of them concave %zu, tight %zu, capped %zu\n",
                 r, 100.0 * (carry2 / kTextbook - 1.0), 100.0 * (engine_carry / kTextbook - 1.0),
                 carry2_curved, carry2_concave, carry2_tight, carry2_capped);
+    std::printf("[carry2 s2/s3] hole radius %d voxels: s2 (three-point) %+.1f %% (three-point %zu, capped %zu); "
+                "s3 (damped) %+.1f %% (three-point %zu, capped %zu)\n",
+                r, 100.0 * (thin_s[r - 3][0] / kTextbook - 1.0), g_s_three[0], g_s_capped[0],
+                100.0 * (thin_s[r - 3][1] / kTextbook - 1.0), g_s_three[1], g_s_capped[1]);
     std::printf("[patch] hole radius %d voxels: tensor patch recovery (E x fill), percent against the textbook: "
                 "radius 2.5: %+.1f %%, unresolved %zu; radius 3.5: %+.1f %%, unresolved %zu\n",
                 r, 100.0 * (patch[0] / kTextbook - 1.0), patch_unresolved[0],
@@ -602,6 +628,11 @@ int main(int argc, char** argv) {
         std::printf("[thick6] hole radius %d voxels: 6 thick %+.1f %%, tight %zu, unresolved %zu;  2 thick %+.1f %%, tight %zu, unresolved %zu\n",
                     r, 100.0 * (g_carry2 / kTextbook - 1.0), g_carry2_tight, g_carry2_unresolved,
                     100.0 * (thin_carry2[r - 3] / kTextbook - 1.0), thin_tight[r - 3], thin_unresolved[r - 3]);
+        std::printf("[thick6 s2/s3] hole radius %d voxels: 6 thick s2 %+.1f %%, s3 %+.1f %% (three-point %zu / %zu, capped %zu / %zu);  "
+                    "2 thick s2 %+.1f %%, s3 %+.1f %%\n",
+                    r, 100.0 * (g_s[0] / kTextbook - 1.0), 100.0 * (g_s[1] / kTextbook - 1.0), g_s_three[0],
+                    g_s_three[1], g_s_capped[0], g_s_capped[1], 100.0 * (thin_s[r - 3][0] / kTextbook - 1.0),
+                    100.0 * (thin_s[r - 3][1] / kTextbook - 1.0));
       }
       std::printf("[thick6] (timing) hole radius %d voxels: %.1f s\n", r, last_seconds);
       std::fflush(stdout);
@@ -679,6 +710,22 @@ int main(int argc, char** argv) {
                     R, scales[2], 100.0 * (fr[0].carry / f - 1.0), 100.0 * (fr[0].carry / lin - 1.0),
                     100.0 * (fr[0].carry / sq - 1.0), 100.0 * (f2 / f - 1.0), 100.0 * (f2 / lin - 1.0),
                     100.0 * (f2 / sq - 1.0));
+        std::fflush(stdout);
+      }
+      // SHAPES 2 AND 3 (the bending gradient; print-only): each grid against the finest
+      // grid's SHAPE-1 carry and against the same shape's own finest value.
+      if (ref == 2) {
+        for (int sh = 0; sh < 2; ++sh) {
+          std::printf("[fillet s%d] R = %.0f:", sh + 2, R);
+          for (int q = 0; q < 3; ++q)
+            if (fr[q].ok)
+              std::printf(" %dx %.3f MPa (vs %dx s1 %+.1f %%, vs own %dx %+.1f %%; three-point %zu, capped %zu);", scales[q],
+                          fr[q].s[sh], scales[2], 100.0 * (fr[q].s[sh] / fr[2].carry - 1.0), scales[2],
+                          100.0 * (fr[q].s[sh] / fr[2].s[sh] - 1.0), fr[q].s_three[sh], fr[q].s_capped[sh]);
+          if (fr[1].ok)
+            std::printf(" 2x to %dx change %+.1f %%", scales[2], 100.0 * (fr[2].s[sh] / fr[1].s[sh] - 1.0));
+          std::printf("\n");
+        }
         std::fflush(stdout);
       }
     }

@@ -271,8 +271,8 @@ SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<
   if (field.size() != n || density.size() != n || (only != nullptr && only->size() != n))
     throw std::invalid_argument("stress_carried_to_surface: field / density / only size != voxel_count");
   auto read_here = [&](std::size_t v) { return only == nullptr || (*only)[v] != 0; };
-  if (shape != 0 && shape != 1)
-    throw std::invalid_argument("stress_carried_to_surface: shape must be 0 or 1");
+  if (shape < 0 || shape > 3)
+    throw std::invalid_argument("stress_carried_to_surface: shape must be 0, 1, 2 or 3");
   // SHAPE 1: the true-surface positions of every CUT-face point, bucketed in cells of
   // three voxels, for the curvature fit below.
   struct CutPoint {
@@ -285,7 +285,7 @@ SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<
   auto bucket_key = [](long long a, long long b, long long c) {
     return (a + 100000) * 400000000LL + (b + 100000) * 200000LL + (c + 100000);
   };
-  if (shape == 1)
+  if (shape >= 1)
     for_each_surface_point(
         grid, density, [](std::size_t) {},
         [&](int i, int j, int k, std::size_t v, const double* nv, double t_surf) {
@@ -399,7 +399,7 @@ SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<
   // The curvature of every cut-face point, then each replaced by the MEDIAN of the
   // values within 2 voxels of it (itself included): one point's fit is too noisy.
   std::vector<double> smoothed_k;
-  if (shape == 1) {
+  if (shape >= 1) {
     std::vector<double> raw_k(cut_points.size(), 0.0);
     for (std::size_t q = 0; q < cut_points.size(); ++q)
       raw_k[q] = curvature_at(cut_points[q].x, cut_points[q].n);
@@ -450,9 +450,9 @@ SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<
     // smaller R is a stress raiser too tight for the grid (counted, straight line).
     double R_curved = 0.0;
     double kc = 0.0;
-    if (shape == 1 && is_cut) kc = smoothed_k[cut_counter++];  // every cut point, read or not
+    if (shape >= 1 && is_cut) kc = smoothed_k[cut_counter++];  // every cut point, read or not
     if (!read_here(v)) return;  // `only`: this surface voxel is not read
-    if (shape == 1 && is_cut) {
+    if (shape >= 1 && is_cut) {
       // A LOADED face (the surface voxel tagged Load) keeps the line: the solve's stress
       // behind a loaded cut face is too steep for the curved form. A tight radius is
       // counted tight whether or not the face is loaded (a point may count in both).
@@ -463,10 +463,13 @@ SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<
         else if (!loaded_here) R_curved = 1.0 / kc;
       }
     }
-    bool have_a = false, have_b = false;
-    std::size_t va = 0, vb = 0;
-    double s_a = 0.0, s_b = 0.0;
-    for (int step = 0; step <= 25 && !have_b; ++step) {
+    bool have_a = false, have_b = false, have_c = false;
+    std::size_t va = 0, vb = 0, vc = 0;
+    double s_a = 0.0, s_b = 0.0, s_c = 0.0;
+    // Shapes 2 and 3 walk on for a third full voxel c where the curved form is used; a
+    // and b are found exactly as before (the walk only goes further).
+    const bool want_c = shape >= 2 && R_curved > 0.0;
+    for (int step = 0; step <= 25 && !(want_c ? have_c : have_b); ++step) {
       const double s = -0.2 * step;
       const int a = static_cast<int>(std::floor(c[0] + s * nv[0]));
       const int b = static_cast<int>(std::floor(c[1] + s * nv[1]));
@@ -475,7 +478,13 @@ SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<
       const std::size_t u = grid.index(a, b, d);
       const double su = (a + 0.5 - c[0]) * nv[0] + (b + 0.5 - c[1]) * nv[1] +
                         (d + 0.5 - c[2]) * nv[2];
-      if (!have_a) {
+      if (have_b) {
+        if (u != vb && su < s_b - 0.5) {  // c: half a voxel further in than b
+          have_c = true;
+          vc = u;
+          s_c = su;
+        }
+      } else if (!have_a) {
         have_a = true;
         va = u;
         s_a = su;
@@ -501,6 +510,53 @@ SurfaceCarry stress_carried_to_surface(const VoxelGrid& grid, const std::vector<
         const double B = (field[va] - field[vb]) / (ia - ib);
         const double A = field[va] - B * ia;
         double curved = A + B / (R * R);
+        if (shape >= 2 && have_c) {
+          const double da = t_surf - s_a, db = t_surf - s_b, dc = t_surf - s_c;
+          if (shape == 2) {
+            // THE BENDING GRADIENT: A + B / (R + d)^2 + C d exactly through a, b, c (d the
+            // depth below the true surface); 1/r^2 scaled by R^2 so the three columns are
+            // alike in size for the conditioning test.
+            const double m[3][3] = {{1.0, R * R * ia, da}, {1.0, R * R * ib, db},
+                                    {1.0, R * R / ((R + dc) * (R + dc)), dc}};
+            const double f3[3] = {field[va], field[vb], field[vc]};
+            auto det3 = [](const double (&q)[3][3]) {
+              return q[0][0] * (q[1][1] * q[2][2] - q[1][2] * q[2][1]) -
+                     q[0][1] * (q[1][0] * q[2][2] - q[1][2] * q[2][0]) +
+                     q[0][2] * (q[1][0] * q[2][1] - q[1][1] * q[2][0]);
+            };
+            double scale = 1.0;
+            for (int r = 0; r < 3; ++r)
+              scale *= std::max({std::fabs(m[r][0]), std::fabs(m[r][1]), std::fabs(m[r][2])});
+            const double D = det3(m);
+            if (std::isfinite(D) && std::fabs(D) > 1e-6 * scale) {
+              double m0[3][3], m1[3][3];  // Cramer for A and B' (B = B' R^2)
+              for (int r = 0; r < 3; ++r) {
+                m0[r][0] = f3[r];
+                m0[r][1] = m[r][1];
+                m0[r][2] = m[r][2];
+                m1[r][0] = m[r][0];
+                m1[r][1] = f3[r];
+                m1[r][2] = m[r][2];
+              }
+              const double A3 = det3(m0) / D, Bs = det3(m1) / D;
+              const double v3 = A3 + Bs;  // at d = 0: R^2 / R^2 = 1
+              if (std::isfinite(v3)) {
+                curved = v3;
+                ++out.three_point_points;
+              }
+            }
+          } else {
+            // DAMPED: shape 1's fit through a and b, its residual at c carried back to
+            // the surface linearly, through zero at the middle of a and b.
+            const double fit_c = A + B / ((R + dc) * (R + dc));
+            const double res_c = field[vc] - fit_c;
+            const double dmid = 0.5 * (da + db);
+            if (dc - dmid > 0.25 && std::isfinite(res_c)) {
+              curved -= res_c * dmid / (dc - dmid);
+              ++out.three_point_points;
+            }
+          }
+        }
         if (curved < 0.0) curved = 0.0;
         if (std::isfinite(curved)) {
           if (curved > 1.5 * carried) {  // at most +50 % on the straight line

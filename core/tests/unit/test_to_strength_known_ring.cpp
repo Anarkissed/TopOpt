@@ -96,6 +96,9 @@ double g_carry2 = 0.0;
 std::size_t g_carry2_curved = 0, g_carry2_concave = 0, g_carry2_tight = 0, g_carry2_capped = 0,
             g_carry2_loaded = 0, g_carry2_unresolved = 0;
 bool g_non_convergent = false;
+// Shapes 2 (three-point, the bending gradient) and 3 (damped), the bore tagged Load.
+double g_s[2] = {0.0, 0.0};
+std::size_t g_s_three[2] = {0, 0}, g_s_capped[2] = {0, 0};
 // The patch recovery (stress_recovered_at_surface, the bore marked loaded) over the
 // pressure at patch radius 2.5 and 3.5 voxels, and its unresolved counts.
 double g_patch[2] = {0.0, 0.0};
@@ -248,6 +251,8 @@ double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* are
   g_engine_unresolved = 0;
   g_carry2 = 0.0;
   g_carry2_tight = g_carry2_unresolved = g_carry2_loaded = 0;
+  g_s[0] = g_s[1] = 0.0;
+  g_s_three[0] = g_s_three[1] = g_s_capped[0] = g_s_capped[1] = 0;
   if (res.von_mises_material_field.size() == density.size()) {
     const topopt::SurfaceCarry sc =
         topopt::stress_carried_to_surface(g, res.von_mises_material_field, density);
@@ -275,6 +280,13 @@ double peak_ratio(int rv, bool exact_fill, double penalty, bool* ok, double* are
     g_carry2_capped = sc2.capped_points;
     g_carry2_loaded = sc2.loaded_points;
     g_carry2_unresolved = sc2.unresolved;
+    for (int q = 0; q < 2; ++q) {
+      const topopt::SurfaceCarry scq =
+          topopt::stress_carried_to_surface(g_loaded, res.von_mises_material_field, density, 2 + q);
+      g_s[q] = scq.peak / kPressure;
+      g_s_three[q] = scq.three_point_points;
+      g_s_capped[q] = scq.capped_points;
+    }
   }
   g_patch[0] = g_patch[1] = 0.0;
   g_patch_unresolved[0] = g_patch_unresolved[1] = 0;
@@ -318,6 +330,7 @@ int main(int argc, char** argv) {
   int failures = 0;
   std::vector<Row> rows;
   double thin_carry2[4] = {0.0, 0.0, 0.0, 0.0};
+  double thin_s[4][2] = {};
   std::size_t thin_tight[4] = {0, 0, 0, 0}, thin_unresolved[4] = {0, 0, 0, 0}, thin_loaded[4] = {0, 0, 0, 0};
   std::printf("[test E, ring] thick ring, pressure on the inner face; peak von Mises / "
               "pressure, textbook %.3f\n",
@@ -336,6 +349,8 @@ int main(int argc, char** argv) {
     const double cc_line = g_carry_line, cc_curve = g_carry_curve;
     row.fill_linear = peak_ratio(r, true, 1.0, &ok3, &e3, row.over_size);
     thin_carry2[r - 3] = g_carry2;
+    thin_s[r - 3][0] = g_s[0];
+    thin_s[r - 3][1] = g_s[1];
     thin_tight[r - 3] = g_carry2_tight;
     thin_unresolved[r - 3] = g_carry2_unresolved;
     thin_loaded[r - 3] = g_carry2_loaded;
@@ -350,6 +365,10 @@ int main(int argc, char** argv) {
                 "(straight line %+.1f), curved points %zu, of them concave %zu, tight %zu, capped %zu, loaded %zu\n",
                 r, 100.0 * (g_carry2 / kTextbook - 1.0), 100.0 * (g_engine_carry / kTextbook - 1.0),
                 g_carry2_curved, g_carry2_concave, g_carry2_tight, g_carry2_capped, g_carry2_loaded);
+    std::printf("[carry2 s2/s3] inner radius %d voxels: s2 (three-point) %+.1f %% (three-point %zu, capped %zu); "
+                "s3 (damped) %+.1f %% (three-point %zu, capped %zu)\n",
+                r, 100.0 * (g_s[0] / kTextbook - 1.0), g_s_three[0], g_s_capped[0],
+                100.0 * (g_s[1] / kTextbook - 1.0), g_s_three[1], g_s_capped[1]);
     // THE LOADED FACE, PINNED (the reviewer, 2026-11-27: "pin it with the ring as a
     // test"): with the bore tagged Load the surface reading keeps the straight line
     // there, measured -4.9 / -4.3 / +1.3 % at bores 4 / 5 / 6. Gated: -6 % .. +3 %.
@@ -515,6 +534,11 @@ int main(int argc, char** argv) {
                     r, 100.0 * (g_carry2 / kTextbook - 1.0), g_carry2_tight, g_carry2_unresolved, g_carry2_loaded,
                     100.0 * (thin_carry2[r - 3] / kTextbook - 1.0), thin_tight[r - 3], thin_unresolved[r - 3],
                     thin_loaded[r - 3]);
+        std::printf("[thick6 s2/s3] inner radius %d voxels: 6 thick s2 %+.1f %%, s3 %+.1f %% (three-point %zu / %zu, capped %zu / %zu);  "
+                    "2 thick s2 %+.1f %%, s3 %+.1f %%\n",
+                    r, 100.0 * (g_s[0] / kTextbook - 1.0), 100.0 * (g_s[1] / kTextbook - 1.0), g_s_three[0],
+                    g_s_three[1], g_s_capped[0], g_s_capped[1], 100.0 * (thin_s[r - 3][0] / kTextbook - 1.0),
+                    100.0 * (thin_s[r - 3][1] / kTextbook - 1.0));
       }
       std::printf("[thick6] (timing) inner radius %d voxels: %.1f s\n", r, last_seconds);
       std::fflush(stdout);

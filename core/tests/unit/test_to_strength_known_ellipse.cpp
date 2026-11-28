@@ -89,6 +89,9 @@ double g_carry2 = 0.0;
 std::size_t g_carry2_curved = 0, g_carry2_concave = 0, g_carry2_tight = 0, g_carry2_capped = 0,
             g_carry2_unresolved = 0;
 bool g_non_convergent = false;
+// Shapes 2 (three-point, the bending gradient) and 3 (damped), the same masked field.
+double g_s[2] = {0.0, 0.0};
+std::size_t g_s_three[2] = {0, 0}, g_s_capped[2] = {0, 0};
 // The patch recovery (stress_recovered_at_surface) over the far stress, the loaded
 // edges masked the same way, at patch radius 2.5 and 3.5 voxels, and its unresolved counts.
 double g_patch[2] = {0.0, 0.0};
@@ -209,6 +212,8 @@ double peak_ratio(int b_voxels, double penalty, bool* ok, int thickness = kThick
   g_engine_unresolved = 0;
   g_carry2 = 0.0;
   g_carry2_tight = g_carry2_unresolved = 0;
+  g_s[0] = g_s[1] = 0.0;
+  g_s_three[0] = g_s_three[1] = g_s_capped[0] = g_s_capped[1] = 0;
   if (res.von_mises_material_field.size() == density.size()) {
     std::vector<double> f = res.von_mises_material_field;  // the loaded edges masked
     for (int k = 0; k < g.nz; ++k)
@@ -225,6 +230,12 @@ double peak_ratio(int b_voxels, double penalty, bool* ok, int thickness = kThick
     g_carry2_tight = sc2.tight_points;
     g_carry2_capped = sc2.capped_points;
     g_carry2_unresolved = sc2.unresolved;
+    for (int q = 0; q < 2; ++q) {
+      const topopt::SurfaceCarry scq = topopt::stress_carried_to_surface(g, f, density, 2 + q);
+      g_s[q] = scq.peak / kFarStress;
+      g_s_three[q] = scq.three_point_points;
+      g_s_capped[q] = scq.capped_points;
+    }
   }
   g_patch[0] = g_patch[1] = 0.0;
   g_patch_unresolved[0] = g_patch_unresolved[1] = 0;
@@ -280,6 +291,8 @@ int main(int argc, char** argv) {
               carry2_capped[3][4] = {};
   std::size_t quad_unresolved[2][3][4] = {}, quad_dropped[2][3][4] = {};
   std::size_t carry2_unresolved[3][4] = {};
+  double carry_s[2][3][4] = {};
+  std::size_t carry_s_three[2][3][4] = {}, carry_s_capped[2][3][4] = {};
   for (int p = 0; p < 3; ++p) {
     std::printf("%-20s", kName[p]);
     int bi = 0;
@@ -302,6 +315,11 @@ int main(int argc, char** argv) {
       carry2_tight[p][bi] = g_carry2_tight;
       carry2_capped[p][bi] = g_carry2_capped;
       carry2_unresolved[p][bi] = g_carry2_unresolved;
+      for (int q = 0; q < 2; ++q) {
+        carry_s[q][p][bi] = g_s[q];
+        carry_s_three[q][p][bi] = g_s_three[q];
+        carry_s_capped[q][p][bi] = g_s_capped[q];
+      }
       for (int q = 0; q < 2; ++q) {
         patch[q][p][bi] = g_patch[q];
         patch_unresolved[q][p][bi] = g_patch_unresolved[q];
@@ -331,6 +349,14 @@ int main(int argc, char** argv) {
                   100.0 * (carry2[p][q] / kReference - 1.0), carry2_curved[p][q],
                   carry2_concave[p][q], carry2_tight[p][q], carry2_capped[p][q]);
     std::printf("\n");
+    for (int sh = 0; sh < 2; ++sh) {
+      std::printf("[carry2 s%d] %-20s %s, percent against the reference, b = 3, 4, 5, 6:", sh + 2, kName[p],
+                  sh == 0 ? "three-point (bending gradient)" : "damped");
+      for (int q = 0; q < 4; ++q)
+        std::printf("  %+.1f (three-point %zu, capped %zu)", 100.0 * (carry_s[sh][p][q] / kReference - 1.0),
+                    carry_s_three[sh][p][q], carry_s_capped[sh][p][q]);
+      std::printf("\n");
+    }
     for (int pr = 0; pr < 2; ++pr) {
       std::printf("[patch] %-20s tensor patch recovery, radius %.1f, percent against the reference, b = 3, 4, 5, 6:",
                   kName[p], pr == 0 ? 2.5 : 3.5);
@@ -374,6 +400,11 @@ int main(int argc, char** argv) {
         std::printf("[thick6] b = %d voxels: 6 thick %+.1f %%, tight %zu, unresolved %zu;  2 thick %+.1f %%, tight %zu, unresolved %zu\n",
                     b, 100.0 * (g_carry2 / kReference - 1.0), g_carry2_tight, g_carry2_unresolved,
                     100.0 * (carry2[0][bi] / kReference - 1.0), carry2_tight[0][bi], carry2_unresolved[0][bi]);
+        std::printf("[thick6 s2/s3] b = %d voxels: 6 thick s2 %+.1f %%, s3 %+.1f %% (three-point %zu / %zu, capped %zu / %zu);  "
+                    "2 thick s2 %+.1f %%, s3 %+.1f %%\n",
+                    b, 100.0 * (g_s[0] / kReference - 1.0), 100.0 * (g_s[1] / kReference - 1.0), g_s_three[0],
+                    g_s_three[1], g_s_capped[0], g_s_capped[1], 100.0 * (carry_s[0][0][bi] / kReference - 1.0),
+                    100.0 * (carry_s[1][0][bi] / kReference - 1.0));
       }
       std::printf("[thick6] (timing) b = %d voxels: %.1f s\n", b, last_seconds);
       std::fflush(stdout);
