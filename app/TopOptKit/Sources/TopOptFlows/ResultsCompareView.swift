@@ -21,7 +21,7 @@ struct ResultsCompareView: View {
     var settle = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
     var onBed = false
 
-    @StateObject private var camera = OrbitCameraModel()
+    @StateObject private var camera = OrbitCameraModel(followsViewProjection: true)   // ★ notes29: the app's one projection
     /// ★ 10-28: the same layers as Results — Stress or Solid, with X-ray on top of either (no motion here).
     @State private var layers = ResultsLayers(stress: false)
     @State private var detailsOpen = false
@@ -179,9 +179,17 @@ struct ResultsCompareView: View {
             Rectangle().fill(DS.Color.strokePanel.color).frame(width: 1, height: 34)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
-                    Text(r?.margin.map { ResultsVersions.x($0) } ?? "—").font(.system(size: 21, weight: .bold))
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(DS.Color.okGreen.color)
+                    // ★ notes30 (362's review): a load on bare vines — its words in the margin's place, a warning, no tick
+                    if let words = r?.marginWords {
+                        Text(words).font(.system(size: 17, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
+                            .lineLimit(1).minimumScaleFactor(0.7)
+                            .accessibilityIdentifier("compare-margin-words-\(tab)")
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(DS.Color.warning.color)
+                    } else {
+                        Text(r?.margin.map { ResultsVersions.x($0) } ?? "—").font(.system(size: 21, weight: .bold))
+                            .foregroundStyle(DS.Color.textPrimary.color)
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(DS.Color.okGreen.color)
+                    }
                 }
                 Text(worst(tab)).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
                 // ★ his ruling 2026-10-28: a version in pieces carries its flag here too

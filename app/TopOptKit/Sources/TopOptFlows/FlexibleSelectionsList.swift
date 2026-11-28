@@ -407,36 +407,26 @@ struct FlexibleRoleGlyphs: View {
     }
 }
 
-/// The (i): it opens the face's four numbers beside itself (drawn by the on-model layer, over everything).
+/// The (i) of a face (the list's line, "l-", and the chip's, "c-"): ★ notes30 (his rule, notes29: ONE (i) app-wide, the centred
+/// notification) — the one (i), `AppInfoButton`, its words in the centred notification ("Tap anywhere to continue"): the face's
+/// name, the caption, and his four numbers under them (`FlexibleFaceStatsRows`, read live). It opened a card of its own beside
+/// itself (the on-model layer's, with its own ✕), which went.
 struct FlexibleInfoButton: View {
     @ObservedObject var main: FlexibleMainStage
-    @ObservedObject private var ui: FlexibleFaceChipState
     let key: String
     let group: UUID
     let ref: LatticeSelectableRef
     init(main: FlexibleMainStage, key: String, group: UUID, ref: LatticeSelectableRef) {
-        self.main = main; self._ui = ObservedObject(wrappedValue: main.faceUI); self.key = key; self.group = group; self.ref = ref
+        self.main = main; self.key = key; self.group = group; self.ref = ref
     }
-    @State private var frame: CGRect = .zero
     var body: some View {
-        let on = ui.info?.key == key
-        Button {
-            ui.roleOpen = nil
-            ui.info = on ? nil : FlexibleFaceChipState.Info(key: key, group: group, ref: ref, anchor: frame)
-        } label: {
-            Image(systemName: on ? "info.circle.fill" : "info.circle").font(.system(size: 17, weight: .regular))
-                .foregroundStyle((on ? DS.Color.accent : DS.Color.textSecondary).color)
-                .frame(width: 44, height: 44).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background(GeometryReader { g in
-            Color.clear
-                .preference(key: FlexibleKeepOutKey.self, value: ["info-\(key)": g.frame(in: .global)])
-                .onAppear { frame = g.frame(in: .global) }
-                .onChange(of: g.frame(in: .global)) { frame = $0 }
-        }.allowsHitTesting(false))
-        .accessibilityLabel("\(main.model?.project.flexibleName(ref) ?? "This face"): its lattice numbers")
-        .accessibilityIdentifier("flexible-face-info-\(ref.key)")
+        let name = main.model?.project.flexibleName(ref) ?? "This face"
+        AppInfoButton(title: FlexibleFaceStatsRows.title(name), text: FlexibleSelectionsCopy.statsCaption,
+                      label: "\(name): its lattice numbers", id: "flexible-face-info-\(ref.key)",
+                      extra: { AnyView(FlexibleFaceStatsRows(main: main, group: group, ref: ref)) })
+            .background(GeometryReader { g in
+                Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["info-\(key)": g.frame(in: .global)])
+            }.allowsHitTesting(false))
     }
 }
 

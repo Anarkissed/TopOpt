@@ -61,6 +61,12 @@ public struct LatticeStrengthAnswer: Equatable, Sendable {
     public var loadShare: Double?
     /// The solid's weakest voxel (the smallest of fields.bin block 2), when the result carries it.
     public var solidWeakest: SIMD3<Double>?
+    /// ★ notes30 (core OS19, the interim guard): a load lands on bare vines, so the check refused to judge it (its margins are
+    /// not a verdict until the loaded face is covered); nil: it did not.
+    public var bareVines: OrganicBareVines.Found? = nil
+    /// ★ 362 (11-26): the printer's wall (the cover a Solid finish lays), when the page knows it — the Checks line then names
+    /// only the fixes the wizard offers (LatticeReview's depth rule); nil: unknown (no Solid named when core gave the depth).
+    public var solidWallMM: Double? = nil
 
     /// ★ THE "how strong" number: the smaller of the two.
     public var governing: Double? {
@@ -85,7 +91,7 @@ public struct LatticeStrengthAnswer: Equatable, Sendable {
         case nil: return nil
         }
     }
-    public var holds: Bool { (governing ?? 0) >= required - 1e-9 }
+    public var holds: Bool { bareVines == nil && (governing ?? 0) >= required - 1e-9 }
 
     /// A print file's report (`lattice_file.json`: `layout`, `mesh` and a `strength` block with a margin), else nil.
     public static func decode(report r: [String: Any]) -> LatticeStrengthAnswer? {
@@ -114,7 +120,7 @@ public struct LatticeStrengthAnswer: Equatable, Sendable {
             weakest: weakest, strutsShort: (struts["under_safety"] as? NSNumber)?.intValue,
             strutsJudged: (struts["judged"] as? NSNumber)?.intValue,
             solidPassesAtInfill: (solid["passes_at_infill_percent"] as? NSNumber)?.intValue,
-            loadShare: n(frame["load_share"]), solidWeakest: p(app?["weakest_at"]))
+            loadShare: n(frame["load_share"]), solidWeakest: p(app?["weakest_at"]), bareVines: OrganicBareVines.found(strength: s))
     }
 
     // MARK: the words (one set, every place)
@@ -126,7 +132,16 @@ public struct LatticeStrengthAnswer: Equatable, Sendable {
 
     /// The Checks panel's ONE strength line (★ C3 (4): it replaces both the solid's and the struts' lines).
     public func check() -> ResultsCheck {
-        ResultsCheck(kind: holds ? .ok : .warn, title: holds ? "Strong enough" : "Not strong enough", detail: checkLine,
+        // ★ notes30: a load on bare vines — what lands where and the fix (no margin: the check refused to judge it), the place
+        // lit on the part, core's sentence behind the (i)
+        if let b = bareVines {
+            // ★ 362 (11-26): only the fixes offered ("Fix: Protect skin 4.5 mm" when Solid is not)
+            let detail = OrganicBareVines.checkDetailLine(OrganicBareVines.offers(b, wallMM: solidWallMM))
+            return ResultsCheck(kind: .warn, title: OrganicBareVines.title, detail: detail,
+                                places: b.at.map { [$0] } ?? [], more: b.at == nil ? nil : OrganicBareVines.checkMore,
+                                tab: .strength, info: b.text)
+        }
+        return ResultsCheck(kind: holds ? .ok : .warn, title: holds ? "Strong enough" : "Not strong enough", detail: checkLine,
                      places: place.map { [$0] } ?? [], more: place == nil ? nil : "Where it gives way first is lit on the part",
                      tab: .strength)
     }
@@ -139,16 +154,21 @@ public struct LatticeStrengthAnswer: Equatable, Sendable {
         func add(_ l: String, _ v: String?, info: String? = nil) {
             if let v, !v.isEmpty { r.append(ResultsDetailRow(label: l, value: v, info: info)) }
         }
-        if let g = governing {
+        if let b = bareVines {
+            // ★ notes30: the check refused to judge it — no "Holds" number; what lands where, core's sentence behind the (i)
+            add(OrganicBareVines.rowLabel, OrganicBareVines.rowValue, info: b.text)
+        } else if let g = governing {
             add("Holds", StrengthWords.x(g) + " your load" + (loadKg > 0 ? " (" + StrengthWords.load(g * loadKg, unit) + ")" : ""))
         }
         add("Needs", StrengthWords.need(required) + " your load"
             + (loadKg > 0 ? " (" + StrengthWords.load(required * loadKg, unit) + ")" : ""))
-        add("Weakest spot", weakestSpot, info: weakestSpotInfo)   // ★ notes27 F2: was "Gives first at: A strut · bends · …"
-        if let short = strutsShort, let judged = strutsJudged, judged > 0 {
+        // ★ notes30 (362's review): a load on bare vines has no valid margin — no weakest spot, struts short or solid margin
+        let checked = bareVines == nil
+        if checked { add("Weakest spot", weakestSpot, info: weakestSpotInfo) }   // ★ notes27 F2: was "Gives first at: A strut · …"
+        if checked, let short = strutsShort, let judged = strutsJudged, judged > 0 {
             add("Struts short", "\(LatticeFileFacts.number(short)) of \(LatticeFileFacts.number(judged)) checked")
         }
-        if let d = solidMargin {
+        if checked, let d = solidMargin {
             add("Solid part", StrengthWords.x(d) + (infillPercent < 100 ? " at \(infillPercent)% infill" : "")
                 + (solidPassesAtInfill.map { " \u{00B7} OK at \($0)%" } ?? ""))
         }

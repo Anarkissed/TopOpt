@@ -26,6 +26,16 @@ StrutReport set_struts(Layout& layout, const StrutSpec& spec, const AreaOwnMap* 
     touch = bounds.touch;
   }
   const double ceiling = spec.allow_quilt ? touch : open_look;   // Allow quilt is the part's only (R19)
+  // ★ notes29b (his notes on release 20, 2026-11-25: "limit both when 'Allow quilt' is turned off", at the EXACT point each
+  // type becomes a quilt): `ceiling` is what the lattice lays on its own (the dial's 1, the band's aim): the open look with
+  // Allow quilt off, as before. The LIMIT is the quilt's: with Allow quilt off no strut is at or past the touch, it stops
+  // one printed line short of it (lattice_quilt_off_strut_mm: a line of air between the closest struts); with it on, the
+  // touch itself. Only an ask past the open look (a dial past 1, a typed strut, the ends in mm, the thinnest strut in a
+  // thin wall's small cell) reaches it. The open look itself always stands (it is under every type's touch): with a
+  // one-line strut on the smallest open cells it is the wider of the two, and is kept, as before.
+  const double gap = spec.allow_quilt ? 0.0 : kQuiltOffGapLines * line;
+  const auto widest = [&](double cell) { return std::max({bead, touch * cell - gap, ceiling * cell}); };
+  const bool sheet = sheet_kind_of(layout.topology);
 
   // The dial is read on the largest cell: of the part (Uniform), or of each region.
   double part_ref = 0.0;
@@ -35,16 +45,19 @@ StrutReport set_struts(Layout& layout, const StrutSpec& spec, const AreaOwnMap* 
     double& r = region_ref[c.region];
     r = std::max(r, c.size);
   }
-  // R10: 1% is one line, 100% is the widest allowed, even steps of width between.
+  // R10: 1% is one line, 100% is the widest allowed, even steps of width between. ★ notes29b: with Allow quilt off 1 is the
+  // open look, as before, and a dial past 1 goes on in the same steps of width past it, up to the limit (the app's Density
+  // percent past the open look); with it on, 1 is the touch and nothing is past it.
   const auto ratio_at = [&](double dial, double ref) {
-    const double t = std::clamp((dial - 0.01) / 0.99, 0.0, 1.0);
+    const double t = std::max(0.0, (dial - 0.01) / 0.99);
     const double lo = bead, hi = std::max(bead, ceiling * ref);
-    return (lo + t * (hi - lo)) / ref;
+    return std::min(lo + t * (hi - lo), std::max(hi, widest(ref))) / ref;
   };
 
   // What one region's cells are set by (R19): the part's settings, with the region's stated values over them.
   struct Rule {
     bool by_stress = false, in_mm = false, graded = false;
+    bool auto_cell = false;                 // SHEETS, SPEC 1.3: Auto's wall by the cell (sheet_auto_wall_mm)
     double ratio = 0.0;                     // not by stress: strut / cell
     double width_mm = 0.0;                  // R11
     double r_light = 0.0, r_heavy = 0.0, w_light = 0.0, w_heavy = 0.0;
@@ -69,6 +82,9 @@ StrutReport set_struts(Layout& layout, const StrutSpec& spec, const AreaOwnMap* 
     u.width_mm = pick(o ? o->width_mm : std::nullopt, spec.width_mm);
     u.amount = std::pow(2.0, std::clamp(pick(o ? o->strength : std::nullopt, spec.strength), -1.0, 1.0));
     u.by_stress = o && o->by_stress ? *o->by_stress : spec.mode == Density::ByStress;
+    // SHEETS (SPEC 1.3): Auto's wall depends on the cell, for a sheet in Uniform with no hand-set dial or width.
+    u.auto_cell = spec.auto_by_cell && sheet && spec.mode == Density::Uniform && !u.by_stress && !(u.width_mm > 0.0) &&
+                  !(o && o->dial);
     if (u.by_stress) {
       // By stress (R7, R8, R12, R16, R18): the two ends, and whether there is a stress to grade by at all.
       const double wl = pick(o ? o->width_light_mm : std::nullopt, spec.width_light_mm);
@@ -151,7 +167,23 @@ StrutReport set_struts(Layout& layout, const StrutSpec& spec, const AreaOwnMap* 
       const double ratio = u.by_stress ? stress_ratio : u.ratio;
       const double own_cell = c.own > 0.0 ? c.own : c.size;
       const double q = std::max(bead, ceiling * c.size);
-      double w = std::clamp(u.by_stress && u.in_mm ? stress_mm : ratio * own_cell, bead, q);
+      const bool in_mm = u.by_stress && u.in_mm;
+      const double asked = in_mm ? stress_mm : ratio * own_cell;
+      // ★ notes29b: asked past the open look on purpose (a dial past 1: its ratio is past it; the ends in mm: past it on
+      // this cell, as out of the band): the strut keeps that width while the cell shrinks, to whole lines, never past the
+      // limit, and the band does not raise it further. At or under the open look: as before (the band's own thickening of
+      // a strut kept while its cell shrinks still stops at the open look).
+      const bool past = !spec.allow_quilt && (in_mm ? stress_mm > std::max(bead, ceiling * c.size) * (1.0 + 1e-12)
+                                                    : ratio > ceiling * (1.0 + 1e-12));
+      if (past) {
+        const double most = widest(c.size);
+        double w = std::clamp(asked, bead, most);
+        w = std::min(most, std::ceil(w / line - 1e-9) * line);
+        if (asked > most * (1.0 + 1e-12)) ++rep.at_ceiling;
+        c.strut = std::max(bead, w);
+        continue;
+      }
+      double w = std::clamp(asked, bead, q);
       const double share = c.finest ? 1.0 : kCoarseCellBandRaise;
       w = std::max(w, std::min(q, w + (q - w) * (1.0 - c.band) * share * u.amount));
       w = std::min(q, std::ceil(w / line - 1e-9) * line);   // to whole lines
@@ -161,9 +193,11 @@ StrutReport set_struts(Layout& layout, const StrutSpec& spec, const AreaOwnMap* 
     double want = 0.0;
     if (u.by_stress) want = u.in_mm ? stress_mm : stress_ratio * c.size;   // R12, R16
     else if (u.width_mm > 0.0) want = u.width_mm;                         // R11
+    else if (u.auto_cell) want = sheet_auto_wall_mm(layout.topology, c.size, bead);   // SHEETS, SPEC 1.3
     else want = u.ratio * c.size;                                         // R6
-    // R2: the widest strut allowed, in a band as anywhere else.
-    const double top = std::max(bead, ceiling * c.size);
+    // R2: the widest strut allowed, in a band as anywhere else. ★ notes29b: with Allow quilt off, one printed line short of
+    // the touch (it was the open look: an ask past it was held there); with it on, the touch, as before.
+    const double top = widest(c.size);
     double w = want;
     if (w < bead * (1.0 - 1e-12)) { w = bead; ++rep.at_bead; }           // R5
     else if (w > top * (1.0 + 1e-12)) { w = top; ++rep.at_ceiling; }     // R2, R9

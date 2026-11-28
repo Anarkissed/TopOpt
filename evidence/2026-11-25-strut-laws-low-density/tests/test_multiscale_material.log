@@ -1,0 +1,54 @@
+rows_from_core
+  [PASS] every certifiable topology hands out resolved rows
+    worst row-vs-library rel err = 0
+  [PASS] lattice_resolved_rows reproduces lattice_cubic_tensor at every row
+  [PASS] first/last row rho equal lattice_rho_min / lattice_rho_max
+  [PASS] library basis modulus is the PLA 3500 MPa the rows are measured at
+reaches_ends
+  [PASS] C(0) is the zero tensor
+    worst solid-corner rel err = 0
+  [PASS] C(1) is the exact isotropic solid triplet
+    worst Ke(solid triplet) vs hex8_stiffness rel err = 0
+  [PASS] the solid corner reproduces the isotropic element
+joint_continuity
+    worst C0 jump = 2.68e-07, worst C1 jump = 1.47e-07
+  [PASS] value is continuous at both joints
+  [PASS] slope is continuous at both joints
+sensitivity_fd
+    worst interior FD rel err = 3.14e-08 over 41979 samples
+    worst at-joint FD rel err = 0 (expected O(h*|dC''|))
+  [PASS] analytic dC/drho matches central differences away from the joints
+fit_accuracy
+    worst row error = 3.282% (octet)
+  [PASS] every resolved row is reproduced within 5%
+admissibility
+    worst normalized admissibility margin = 0.0014
+  [PASS] the tensor is cubic-admissible at every point of (0, 1]
+  [PASS] hex8_stiffness_cubic ACCEPTS the whole curve
+  [PASS] dC/drho is PSD at every point of (0, 1]
+refusals
+  [PASS] a tetragonal topology is REFUSED, not silently defaulted
+  [PASS] octet is trustworthy to steer a design loop on
+    6 of the 6 non-octet certifiable topologies refused
+  [PASS] only octet may steer a design loop today (the others need rows above ~0.6)
+  [PASS] a non-certifiable topology is never trustworthy
+three_block_decomposition
+    worst recomposition rel err = 5.4e-14
+  [PASS] C11*K_A + C12*K_B + C44*K_C recomposes hex8_stiffness_cubic (the identity the multiscale sensitivity leans on)
+projection
+  [PASS] a low lower-gap density snaps to void
+  [PASS] a high lower-gap density snaps to the band floor
+  [PASS] a low upper-gap density snaps to the band ceiling
+  [PASS] a high upper-gap density snaps to solid
+  [PASS] an exact lower-gap tie resolves downward
+  [PASS] an exact upper-gap tie resolves downward
+  [PASS] an in-band density is returned unchanged
+  [PASS] the projection charge accounts exactly (before + delta == after)
+  [PASS] every voxel was considered when no mask is supplied
+  [PASS] the sweep really did cross both gaps
+    projected 48 lower + 98 upper; dV = -0.0218; violation = -0.0043%
+  [PASS] projecting a feasible field is the identity (idempotent)
+  [PASS] no voxel survives inside a forbidden interval
+  [PASS] a mask confines the projection to the lattice region
+  [PASS] no target supplied => no violation claimed
+ALL PASS

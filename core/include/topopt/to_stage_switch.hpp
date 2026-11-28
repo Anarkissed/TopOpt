@@ -105,6 +105,9 @@ inline bool shown_margin_lower_on() {
 //          ALLOWED in a solid part and told: a "sealed_pockets" block on the
 //          version's report line and one [pocket] log line; in a lattice it
 //          stays refused, with the plain reason "A sealed pocket has no way out".
+//   member : a NOTICE only: an accepted version whose thinnest member is under 8
+//          voxels through (ledger A-06) gets a "thin_member" block and one
+//          [member] log line with the resolution that would resolve it.
 // Unset = today's bytes.
 inline bool stage4_on(const char* piece) {
   const char* v = std::getenv("TOPOPT_STAGE4");

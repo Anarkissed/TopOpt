@@ -36,6 +36,8 @@
 #include "topopt/mesh.hpp"
 #include "topopt/mesh_distance.hpp"
 #include "topopt/step.hpp"
+#include "topopt/strut_cell.hpp"
+#include "topopt/tpms.hpp"
 
 namespace topopt::lattice_layout {
 
@@ -201,6 +203,10 @@ struct Region {
   bool cover_open_face = false;
   // OG2f (leg S): a region made from a zone (D21), not from faces or pieces.
   bool from_zone = false;
+  // SHEETS (SPEC 1.2 item 3): this region's own D8 floor (a wall narrower than this cannot hold its lattice and is
+  // solid, WallTooThin), in place of DomainSpec::min_wall_mm; unset: the part's. The session sets it for a sheet in
+  // Structural (sheet_structural_floor_cells x the region's cell); nothing else does.
+  std::optional<double> min_wall_mm;
 };
 
 // The region under one or more faces of the model, from the faces themselves (rule D10:
@@ -627,6 +633,16 @@ struct CellSpec {
   //                floor above. Held at that floor when it asks for less.
   bool allow_quilt = false;
   double band_cell_mm = 0.0;
+  // ★ notes29b "SMALL CELLS IN THIN WALLS" (his per-part choice of 2026-11-12, Settings::small_cells_in_thin_walls; his
+  // notes on release 20, 2026-11-25: "I don't think these two things are mutually tied together"), read with allow_quilt
+  // OFF only (on, every cell may already go that small). A wall of a flat region too thin for the cells it must hold at
+  // the smallest cell the open look lays (floor_cell_mm) is laid with its OWN one cell (the cell that divides it, C15)
+  // when that cell is at least Layout::thin_floor_cell_mm, the smallest in which the thinnest strut stays a printed line
+  // short of touching (lattice_quilt_off_cell_mm): small, denser cells, never fused. ONLY there: no other wall, no band, no
+  // stress and no size step takes a cell under floor_cell_mm for it, and a thin wall is not graded inside. A wall too thin
+  // even for that stays solid (WallNarrow, TooFewAcross, RegionShallow), as before. Off: the layout is the one laid
+  // without it, byte for byte. (With Let walls cut cells, one_grid, there are no walls: it does nothing.)
+  bool small_in_thin_walls = false;
   // "LET WALLS CUT CELLS" (his name for the option, 2026-11-14), off by default. On: walls and pockets may cut the
   // cells. Off: today's whole cells fitted to walls. Aesthetic only; Structural never shows it.
   // (His words, 2026-11-12: "Why can't the pocket just cut the lattices wherever they are positioned and then a
@@ -712,6 +728,46 @@ bool stress_sizes_cells(const CellSpec& spec);
 // C24: the limit a layout laid with `spec` keeps: 0 when none is asked (max_step <= 0); else max_step held at the
 // ladder's smallest step (2 on Default Grade) and never under 1.
 double step_held(const CellSpec& spec);
+
+// ── PER TYPE (the owner, 2026-11-24: every strut type on this engine; bccz, fccz and reentrant Aesthetic only) ────
+// Print rule (e)'s bridge reach (LayerSpec::reach_limit_mm's default): no bridge reaches more than this past what
+// holds it.
+inline constexpr double kBridgeReachLimitMm = 5.0;
+// The longest LEVEL strut of the type's cell (both ends at one height, the cell standing on its own axes with its z
+// up), over the cell: sc 1 (its edges), octet, fcc and fccz 1/sqrt 2 (face diagonals), kelvin 1/(2 sqrt 2) (its square
+// windows); 0 for a type with none (bcc, diamond, rhombic, bccz, reentrant). Read off the canonical cell.
+double level_strut_per_cell(LatticeTopology topo);
+// SHEETS (notes28 sheets SPEC section 2): a sheet has no level strut, but near-level PATCHES of its wall. Both sheets are
+// minimal surfaces (every point a saddle), so a patch is held from two sides and reaches half its width as a bridge.
+// The desk estimate on tpms.hpp's field (overhang_probe.py beside the SPEC, four orientations), over the cell:
+//                 within 10 degrees of level          within 30 degrees of level
+//   gyroid        1 to 6 % of the area, patch 0.09    9 to 17 % of the area, patch 0.32
+//   Schwarz-D     1 to 6 % of the area, patch 0.09    9 to 17 % of the area, patch 0.24
+// test_lattice_sheets_matrix measures them on the field in three orientations and holds them (its "overhang" row).
+struct SheetOverhang {
+  double share10_lo = 0.0, share10_hi = 0.0, patch10 = 0.0;   // area share within 10 degrees; widest patch / cell
+  double share30_lo = 0.0, share30_hi = 0.0, patch30 = 0.0;   // within 30 degrees
+};
+// The type's numbers above; all 0 for a strut type.
+SheetOverhang sheet_overhang(LatticeTopology topo);
+// Auto's largest cell for the type: a level strut spans its share of the cell and, held at both ends, reaches half of
+// that as a bridge, so the cell at which it would reach kBridgeReachLimitMm: 2 x 5 mm / share (sc 10 mm, fcc and fccz
+// 14.1 mm, kelvin 28.3 mm). Infinity for a type with no level strut, and for the octet (its 14.1 mm is not applied: its
+// layouts stay what they were, R9). lay_cells holds Max cell (CellSpec::cell_max_mm, the part's and each region's own)
+// under it when the cell is Auto; a typed cell is laid as typed (the print check props a bridge that reaches too far).
+// A SHEET: the same rule on its widest near-level patch (within 30 degrees, SheetOverhang::patch30): gyroid 31.3 mm,
+// Schwarz-D 41.7 mm (provisional, SPEC 1.3: it does not bind at any Max cell he uses).
+double auto_cell_cap_mm(LatticeTopology topo);
+// Structural (a strength check asked for) with the type: "" when its strength can be checked; else ONE plain line why
+// not, for the maker. The file job refuses a job with a strength job and such a type (type_not_supported) in that line;
+// the app offers the type in Aesthetic only and says the same. Refused: the tetragonal three (bccz, fccz, reentrant:
+// their tensors need a tetragonal certification, PR 246, not built).
+std::string structural_refusal(LatticeTopology topo);
+// Structural is allowed but its struts get no strength credit at the widest the open look allows: "" when they do; else
+// ONE plain line for the maker. Read from the type's own measured law (lattice_density_from_strut at the open look
+// against lattice_rho_min; the laws are never extrapolated, ruling 11-09), so it clears by itself when the law is
+// measured down to the struts the engine lays. Today: bcc, diamond and sc (builder F, 2026-11-24, re-measures them).
+std::string structural_note(LatticeTopology topo);
 
 // C23, R19 (the app's area tabs; Manual: "each can be set for the part or per zone or region"): a Lattice region's
 // own cell and strut settings. Each value stated here is the region's own; what is not stated, it takes from the
@@ -821,6 +877,9 @@ struct WallMap {
     double start = 0, width = 0, cell = 0;
     int layers = 0;
     double lo[2] = {0, 0}, hi[2] = {0, 0};   // its extent on the face
+    // ★ notes29b: a THIN wall (CellSpec::small_in_thin_walls): too thin for the cells it must hold at the smallest cell
+    // the open look lays, so laid with its own one cell, under that floor, never under Layout::thin_floor_cell_mm.
+    bool thin = false;
   };
   std::vector<Wall> walls;
 
@@ -863,6 +922,10 @@ struct Layout {
   bool absorb = false;
   std::shared_ptr<const CellIndex> index;
   double floor_cell_mm = 0.0;        // the smallest cell allowed (C14; the quilt's with Allow quilt)
+  // ★ notes29b: the smallest cell a THIN wall is laid with under Small cells in thin walls (CellSpec::small_in_thin_walls):
+  // the one the thinnest strut stays a printed line short of touching in, lattice_quilt_off_cell_mm (octet 3.82 mm at two
+  // 0.45 mm lines). Without it, or with Allow quilt on: floor_cell_mm. No cell is ever under it.
+  double thin_floor_cell_mm = 0.0;
   double bead_mm = 0.0;              // the line width it was laid for
   double min_strut_mm = 0.0;         // the thinnest strut allowed (R5): lines x line width
   // The type's own two limits, as strut width over cell size (core's lattice_width_bounds):
@@ -932,6 +995,15 @@ struct Layout {
       if (w.region == region) return true;
     return false;
   }
+  // SHEETS (notes28 sheets SPEC 1.5, the Solid wall seam): pairs of Lattice region ids whose meeting gets the solid
+  // membrane, and the membrane's half thickness (one line width, so two lines in all). A point of either region within
+  // `membrane_mm` of the other one's lattice space is not lattice of a cell (cell_holds: sheet_membrane_at), so the
+  // file, the strength check and the map all read it solid. Empty for every strut layout (nothing changes for them).
+  // The session fills it after the cells are final; `membrane_near` is its own index (cubes of the pairs' cells grown
+  // by the membrane), read to skip the exact test far from any seam.
+  std::vector<std::array<int, 2>> membrane;
+  double membrane_mm = 0.0;
+  std::shared_ptr<const void> membrane_near;
 };
 
 // `threads`: 0 = all of this machine's; the layout is the same for any number (D18).
@@ -1005,7 +1077,10 @@ double stress_reference(const Domain& domain, const DemandField& field, double p
 
 // ── STRUT WIDTH ───────────────────────────────────────────────────────────────
 // What a lattice looks like is one number, strut width over cell size (R9). Octet's
-// neighbouring struts touch at 1/(2*sqrt 2): the quilt, the top of every range.
+// neighbouring struts touch at 1/(2*sqrt 2): the quilt, the top of every range. That is the
+// OCTET's number (its tests read it); the layout reads each type's own, Layout::touch
+// (lattice_width_bounds: sc 1, bcc and bccz 1/sqrt 2, fcc 1/sqrt 3, fccz 1/2, reentrant 1/3,
+// diamond, kelvin and rhombic 1/(2 sqrt 2)), never this.
 inline constexpr double kQuiltStrutPerCell = 0.35355339059327373;
 
 enum class Density : std::uint8_t {
@@ -1050,6 +1125,12 @@ struct StrutSpec {
   std::shared_ptr<const DemandField> demand;
   double reference_mpa = 0.0;   // the RESOLVED reference (Session::lay fills it from Settings::stress)
   double response = 1.0;
+  // SHEETS, Auto's wall (notes28 sheets SPEC 1.3, his answer 1: "If the size is smaller, then the lightest walls
+  // possible, allowing the cells to be open"). Read for a SHEET type only, and only in Uniform / Per region (not By
+  // stress, not with a typed width_mm, not for a region whose own dial is stated): each cell's wall is
+  // sheet_auto_wall_mm(type, its cell, the thinnest strut) in place of the dial's. The app's Auto sends it for a sheet;
+  // a hand-set dial does not (R10 as it is). Ignored for every strut type (their layouts are unchanged).
+  bool auto_by_cell = false;
 };
 
 struct StrutReport {
@@ -1094,9 +1175,11 @@ struct Bar {
   bool piece = false;    // part of a strut of a cut cell, not a whole strut
   bool skin = false;     // a skin bar (S3): it lies on the part's surface, between cut ends
   bool net = false;      // O16: a strut of the Organic net skin over a weave region's open face
-  // The plane of its cell's own grid that the strut lies in, as that plane's unit normal
-  // (an octet strut lies in exactly one: a cell face, or the plane half way between two).
-  // Zero for a strut that lies in none, or in two. The skin follows these planes.
+  // The plane of its cell's own grid that the strut lies in, as that plane's unit normal: square to the one axis along
+  // which the strut does not run (an octet strut lies in exactly one: a cell face, or the plane half way between two;
+  // fcc's legs and kelvin's edges too, kelvin's planes a quarter cell apart). Zero for a strut that lies in none (bcc,
+  // diamond, rhombic, reentrant's waist struts: they cross the cell on a slant) or in two (sc's edges, the tetragonal
+  // columns). The skin follows these planes.
   Vec3 flat{};
   // For a Joined end: the bar it ends in (its place in Bars::bars), -1 otherwise. If that
   // bar is removed, this end lands on nothing again (drop_loose_bars follows it).
@@ -1239,6 +1322,14 @@ struct SteppedEdge {
 std::vector<SteppedEdge> stepped_edges(const Bars& bars);
 
 Bars lay_bars(const Layout& layout, const Domain& domain, int threads = 0);
+
+// The type's struts as a cell of `frame` lays them (strut_cell_closed_struts, in the cell's integer units). A cubic type
+// looks the same along each of its axes and is laid as it is (the very list, in its order). A tetragonal one (bccz,
+// fccz, reentrant) has one special axis, its cell's z (the columns; the waist's axis): it is laid along the frame's axis
+// nearest the print's up (+Z of the layout's own coordinates, the print frame's when the part is turned), so its columns
+// stand up whichever face the region is on; ties go to the frame's third axis, then its first. lay_bars and the K8
+// stretch read the struts here.
+std::vector<StrutCellStrut> cell_struts(LatticeTopology topo, const Frame& frame);
 
 // ── ORGANIC: A WEAVE (O1, O2) ─────────────────────────────────────────────────
 // Rule O2: a strut list that belongs to no cell. One strand is a polyline in the part's own coordinates, one width per
@@ -1436,11 +1527,15 @@ class SolidAt {
 // S3, Finish Skin: bars across the part's surface joining the cut strut ends, "a flat
 // lattice over the lattice". It is open and does not seal (that is Protect skin, D5).
 // A REGULAR pattern (his answer, 2026-11-12): the skin is the lattice's own grid drawn on
-// the surface. Every strut lies in one plane of its cells' grid (a cell face, or the
-// plane half way between two), so its cut end lies on the line where that plane meets
-// the surface; the skin joins neighbouring cut ends ALONG that line, and nothing else.
+// the surface. An octet strut lies in one plane of its cells' grid (a cell face, or the
+// plane half way between two: Bar::flat), so its cut end lies on the line where that plane
+// meets the surface; the skin joins neighbouring cut ends ALONG that line, and nothing else.
 // On a flat face that gives straight rows, one per plane, a half cell apart, in each of
-// the grid's directions that cross the face; round a boss, rings and uprights.
+// the grid's directions that cross the face; round a boss, rings and uprights. (Every
+// strut type, 2026-11-24: fcc and kelvin lie in such planes too, kelvin's a quarter cell
+// apart; the struts of bcc, diamond, rhombic and sc lie in no single one, and their cut
+// ends are joined among themselves by the rule below. Measured on core's fixtures in
+// test_lattice_types_matrix: no type leaves more of its cut ends open than the octet does.)
 // Two cut ends of one plane are joined when no other cut end of that plane lies in or on
 // the ball between them, when they are no farther apart than `reach_cells` of the larger
 // of their two cells, and when the bar between them lies on the surface (not across a
@@ -1503,9 +1598,260 @@ struct Pieces {
 // `layout`, when given: a bar standing on lattice space that no cell holds stands on solid (D14).
 Pieces count_pieces(const Bars& bars, const Domain& domain, std::vector<char>* adrift_bar = nullptr,
                     std::vector<int>* piece_of = nullptr, const Layout* layout = nullptr);
+// S-1 (notes30, the maintainer's yes 2026-11-26: "count pieces once"): what count_pieces found on a set of bars and
+// each bar's adrift flag, handed from join_cut_off_pieces to the drop that follows it. count_pieces reads the bars, the
+// domain and the layout and nothing else (its probe and its SolidAt are its own, made fresh, and it never reads the
+// stop flag), so on the same three it gives the same answer, flag for flag.
+struct PiecesCount {
+  Pieces found;
+  std::vector<char> adrift;   // count_pieces' `adrift_bar`: one flag per bar
+};
 // Finish None, completed: a piece that is not joined to the part cannot be printed and is
 // removed. Counted in `dropped`. Returns what count_pieces found before removing.
-Pieces drop_adrift_bars(Bars& bars, const Domain& domain, const Layout* layout = nullptr);
+// `counted`, when given: count_pieces' answer on exactly these bars, with this domain and this layout (S-1: the
+// `unchanged` of the join_cut_off_pieces just before, which changed no bar); it is used as it is, not counted again.
+// One whose flags are not one per bar is not of these bars: they are counted again.
+Pieces drop_adrift_bars(Bars& bars, const Domain& domain, const Layout* layout = nullptr,
+                        const PiecesCount* counted = nullptr);
+// ★ notes29 (his notes on release 20, 2026-11-25: "There were even *holes* in the lattice -- which should NEVER
+// happen"). Where the cells grade from one size to the next, a type whose nodes lie on its cube's faces but not at its
+// corners (kelvin, rhombic) meets none of the next size's nodes: a patch of one size is then a piece of its own, held
+// by nothing, and drop_adrift_bars removes every strut of it, leaving its cells opened in the file with nothing in them.
+// Before that drop: each Node end of a bar of a piece adrift (count_pieces) is run on as S5 runs a Loose end: straight
+// on in its own direction, at most one cell of its own, through open lattice, until it first reaches another bar's
+// middle line within half that bar's width (the bars that meet at the node itself are not read). Into a bar of ANOTHER
+// piece it is joined there (Joined, into that bar); into solid first it runs on into it by its own width (Solid, S11).
+// Into a bar of its own piece, out of the part, or nothing within the cell: it is the node it was, where it was.
+// Returns the ends joined. Nothing adrift: the bars are left exactly as they were. Session::lay runs it for cube
+// lattices, after drop_loose_bars.
+// `unchanged`, when given (S-1): when no end was joined (nothing adrift, or no end of a piece adrift reached anything)
+// the bars are exactly as they were, and it receives the count this call made of them, for drop_adrift_bars; when an
+// end was joined (the bars changed) it is left empty, and the drop must count again.
+std::size_t join_cut_off_pieces(Bars& bars, const Domain& domain, int threads = 0, const Layout* layout = nullptr,
+                                std::optional<PiecesCount>* unchanged = nullptr);
+// ★ notes29 (his notes on release 20: "the solid outline isn't even, there is a chunk cut out of it on either side").
+// A cell of a Lattice region (not a K8 sliver) left with no strut of its own (no bar laid for a cell of its size whose
+// middle lies in its cube) holds no lattice: the file would open its space and print nothing there, a hole inside the
+// lattice or a notch in the part's solid round it. (The whole part's own lattice, region 0, has no solid round it: an
+// empty cut cell at its open surface is the lattice running out to the surface, D14b, and is left as it was.) It leaves the cells and joins the solid list (D14), its SolidWhy Sliver for a cut cell (have 0,
+// need its strut), Other for a whole one. Returns how many. None: the layout is left exactly as it was.
+// Session::lay runs it for cube lattices, after the bars are dropped.
+std::size_t solidify_empty_cells(Layout& layout, const Bars& bars);
+
+// ── SHEETS: GYROID AND SCHWARZ-D ON THIS ENGINE (notes28 sheets SPEC, revision 3) ─────────────────────────────
+// THE CONTRACT for builders A (core engine), B (strength check and data out), C (app) and E (blend). Changed only in a
+// commit whose message starts "SHEETS CONTRACT CHANGE:".
+//
+// A sheet is NOT a new layout. The cells are laid as for struts (one grid per region, Uniform, cut by everything:
+// SPEC 1.2); each laid sheet region carries ONE field (tpms.hpp, the wall the strength laws were measured on) on its
+// cell grid, with a wall-thickness field over it (its cells' walls, Cell::strut, read at the cell centres and blended
+// trilinearly: no step anywhere, SPEC 1.4). What the file, the strength check and the iPad read of a sheet is THESE
+// functions (and the blend's), nothing else.
+//
+// What a sheet lay does differently (Session::lay, SPEC 1.2, 1.3, 1.5): Algorithm Uniform and one grid (`one_grid`)
+// whatever is asked; Grade to shape, cell size by stress, Stepped, max_step, cell_search, stretch_edges not applied; no
+// bars (Outcome::bars empty: lay_bars, the skin, the drops and the K3 quilt fallback are skipped); in Structural
+// (`CellSpec::min_cells_across` >= 3, the count Structural sends) each Lattice region's wall floor is
+// sheet_structural_floor_cells x its cell (Region::min_wall_mm: a thinner member is solid, WallTooThin);
+// `StrutSpec::auto_by_cell` gives Auto's wall (sheet_auto_wall_mm); then Outcome::sheets and Outcome::sheet_seams.
+
+// Is the type a sheet, and which field? False for every strut type (`kind` untouched).
+bool sheet_kind_of(LatticeTopology topo, TpmsKind* kind = nullptr);
+inline LatticeTopology sheet_topology(TpmsKind kind) {
+  return kind == TpmsKind::Gyroid ? LatticeTopology::Gyroid : LatticeTopology::SchwarzD;
+}
+// "strut" or "sheet" (the bridge's type facts: `family`).
+const char* lattice_family(LatticeTopology topo);
+// SPEC 1.3: Auto's middle share of the dial, (0.45 - 0.01) / 0.99.
+inline constexpr double kSheetAutoShare = 0.44 / 0.99;
+// SPEC 1.3 (Auto only, StrutSpec::auto_by_cell): the wall of a sheet cell of `cell_mm`, mm: the larger of the thinnest
+// strut (`min_strut_mm`, two lines) and kSheetAutoShare x the open look x the cell. Gyroid: two lines up to a 9.8 mm
+// cell at a 0.45 mm line, then 0.0918 of the cell (about 28 % solid); Schwarz-D: up to 12.2 mm, then 0.0740. Throws
+// std::invalid_argument for a strut type.
+double sheet_auto_wall_mm(LatticeTopology topo, double cell_mm, double min_strut_mm);
+// SPEC 1.2 item 3, 3.1: the cells a member must hold across for a sheet's strength law (the bending study's 2.4 %): 10
+// gyroid, 9 Schwarz-D, until builder D's re-measured tables land (then the floor drops by itself, here). 0 for a strut
+// type (its count is CellSpec::min_cells_across, C5).
+double sheet_structural_floor_cells(LatticeTopology topo);
+// SPEC 1.3: the open look and the floor cell (the thinnest strut over the open look): 4.36 mm gyroid, 5.41 mm
+// Schwarz-D at a 0.45 mm line, two lines.
+double sheet_floor_cell_mm(LatticeTopology topo, double min_strut_mm);
+
+// ONE per laid sheet region (region 0 = the whole part), in the layout's region order (Layout::regions).
+struct SheetField {
+  int region = 0;
+  int frame = 0;                // Layout::frames[frame]
+  TpmsKind kind = TpmsKind::Gyroid;
+  // The frame itself (a copy of Layout::frames[frame]: its axes are unit and at right angles), so the field reads a
+  // point of the part with no layout at hand. Frame coordinates (a, b, c) of a part point p: (p - origin) . ax[k].
+  Frame axes;
+  double anchor[3] = {0, 0, 0}; // a cell corner of the region, frame coordinates: phase 0 there
+  double cell_mm = 0.0;         // the period L (one cell size per region, R5 of core)
+  // The TRUE wall, mm, at the cell centres of the region's grid (frame coordinates): n[0] x n[1] x n[2] values from
+  // `lo` (the first centre), `cell_mm` apart, x fastest: wall_mm[(k * n[1] + j) * n[0] + i] is the centre
+  // lo + cell_mm * (i, j, k). A grid place with no laid cell takes its nearest laid cell's wall (nearest by grid steps,
+  // a breadth-first fill from the laid places in index order: the same for any run). One value (n = 1, 1, 1) when every
+  // cell of the region has one wall. Never empty for a laid region; every value at least the layout's thinnest strut.
+  int n[3] = {1, 1, 1};
+  double lo[3] = {0, 0, 0};
+  std::vector<float> wall_mm;
+  double wall_min_mm = 0.0, wall_max_mm = 0.0;   // over wall_mm
+  std::size_t cells = 0;                          // the region's laid cells
+};
+// Frame coordinates (a, b, c) of a point of the part, in the field's frame.
+Vec3 sheet_local(const SheetField& s, const Vec3& p);
+// THE WALL at a point (part coordinates), mm: trilinear between the cell centres, clamped at the grid's edge (a point
+// beyond the last centre reads the edge's value). On the GPU this is a 3D texture of n[0] x n[1] x n[2] texels, linear
+// filter, clamp to edge, read at ((local - lo) / cell_mm + 0.5) / n. `_local` takes frame coordinates.
+double sheet_wall_at(const SheetField& s, const Vec3& p);
+double sheet_wall_at_local(const SheetField& s, const Vec3& q);
+// THE FIELD the file is contoured from and the preview draws (mm, negative inside the wall): tpms_wall_distance at
+// (local - anchor), period cell_mm, with the field parameter lattice_sheet_wall_param_mm(type, sheet_wall_at, cell_mm).
+// (The file's mesh lies within kSheetMaxDeviationMm of it, bulging outward only near the bead: tpms_gen.hpp.)
+double sheet_distance_at(const SheetField& s, const Vec3& p);
+double sheet_distance_at_local(const SheetField& s, const Vec3& q);
+// The SIGNED distance estimate to the sheet's mid-surface (f / |grad f|, mm; its sign is f's): the blend's Fi
+// (SPEC 1.5). |sheet_mid_distance_at| - field parameter / 2 is sheet_distance_at. Where the gradient vanishes: +L.
+double sheet_mid_distance_at(const SheetField& s, const Vec3& p);
+// The field parameter at a point (lattice_sheet_wall_param_mm of the wall there): what the blend thickens.
+double sheet_param_at(const SheetField& s, const Vec3& p);
+// THE WALL THE FILE IS CONTOURED AT, for a true wall `wall_mm` (sheet_wall_at) over the floor `floor_mm` (two lines),
+// the mesh simplified to `deviation_mm` (0: as contoured, and the wall is returned as it is). The file never prints a
+// wall under the floor: the field's own wall is uniform only to 1 to 3 % (core's wall law, kSheetWallUnevenness) and
+// the simplified mesh may sit up to the bound inside it, so near the floor the wall is contoured thicker: by 0.052 mm at
+// a two-line wall (0.952 for 0.9), tapering to nothing at (floor + 2 x bound) / (1 - 3 %) (0.969 for 0.9) and above
+// (measured on a graded plate before this: a sample 0.882 mm thick under a 0.9 mm wall). The preview may draw it to
+// follow the file exactly there; the strength check credits the true wall (the lighter one).
+inline constexpr double kSheetWallUnevenness = 0.03;
+double sheet_print_wall_mm(double wall_mm, double floor_mm, double deviation_mm);
+
+// SPEC 1.5, "Where regions meet: Blend / Solid wall" (Settings::sheet_seam). Default here: SolidWall (the app sends
+// Blend in Aesthetic and Solid wall in Structural; core does not know the stage).
+enum class SheetSeam : std::uint8_t { SolidWall = 0, Blend = 1 };
+// E (SHEETS CONTRACT CHANGE (E)): WHERE TWO SHEET REGIONS MEET, as a grid: the signed distance across their meeting,
+// mm, + toward b, at nodes `h` apart from `origin` (n[0] x n[1] x n[2], x fastest), read as their cubic B-spline
+// (sheet_seam_mm). Made from the DOMAIN's own answer (whose lattice each node is: Domain::Probe::where), so the band
+// sits where the two regions' spaces actually meet, whatever their shape (a face region's floor over the whole part's
+// lattice, two faces side by side, two faces at an angle), and never along an outline that meets only the part's
+// surface: at a node of a, -(distance to b's space - h/2); at one of b, distance to a's space - h/2; at a node of
+// neither, the difference of the two (exact Euclidean distance transforms, then one [1 2 1] smoothing per axis, which
+// leaves a flat meeting exactly as it is). Only the nodes near both regions' cells are read (the cells of each within
+// half a band and two nodes of a cell of the other). `label` per node: 1 a, 2 b, 0 neither, 255 not read.
+struct SheetSeamAcross {
+  Vec3 origin{0.0, 0.0, 0.0};
+  double h = 0.0;
+  int n[3] = {0, 0, 0};
+  std::vector<float> mm;
+  std::vector<std::uint8_t> label;
+  std::size_t nodes_read = 0;
+  double ms = 0.0;
+  bool ok = false;               // false: the two never meet on the grid (no node of a beside one of b): no blend
+};
+// One per pair of laid sheet regions that touch (a cell of one within one line width of a cell of the other), in
+// order of (a, b); a < b, both indices into Outcome::sheets.
+struct SheetSeamBand {
+  int a = -1, b = -1;            // indices into Outcome::sheets
+  int region_a = 0, region_b = 0;
+  double band_mm = 0.0;          // the blend band's width: one cell, the larger of the two
+  // E (the blend): how much the blended wall is raised in the band so its TRUE wall is two lines everywhere (up to the
+  // touch); 0 = not raised. Set by the band's own loop (mesh_sheet_seam_band).
+  double raise_mm = 0.0;
+  // Made and drawn as the solid wall (the membrane, Layout::membrane): asked (SolidWall), or a Blend that fell back.
+  bool solid_wall = true;
+  bool fell_back = false;        // Blend was asked and the solid wall was used (the band could not be made printable)
+  std::string why;               // fell_back: ONE plain line for the pop-up (which regions, and that a wall was used)
+  // E: where the two meet (sheet_seams_across fills it for a seam that is not a solid wall; shared by every copy of
+  // the seam, never changed once made). Null: sheet_seam_mm reads +infinity (no blend anywhere).
+  std::shared_ptr<const SheetSeamAcross> across;
+};
+// The blend's weight across a seam: smoothstep from 0 at seam_mm = -band/2 (a's side) to 1 at +band/2 (b's side);
+// 0 / 1 beyond. band <= 0: a step at 0.
+double sheet_seam_weight(double seam_mm, double band_mm);
+// E: how much of the band's raise a point gets: (4 x (1 - x))^2, x = (seam_mm + band/2) / band clamped to [0, 1]: 1 in
+// the middle of the band, 0 with no slope at both its edges (where the blend is each region's own sheet, so the band
+// meets them with no step and no crease).
+double sheet_seam_bump(double seam_mm, double band_mm);
+// THE BLENDED FIELD (SPEC 1.5; E's form, SHEETS CONTRACT CHANGE (E)): the two fields' own functions mixed by the
+// weight, phi = (1 - s) g_a + s g_b (g_i = f_i x L_i / 2 pi: tpms_eval's f in mm; the hybrid-TPMS literature's sigmoid
+// transition mixes the level-set functions), and F = phi / |grad phi|, grad phi = (1 - s) grad g_a + s grad g_b +
+// (g_b - g_a) s'(seam_mm) `seam_grad` (a distance to first order: the band's wall is its parameter thick, as each
+// region's is; at s = 0 F is sheet_mid_distance_at(a), at s = 1 b's); s = sheet_seam_weight(seam_mm, band). The wall is
+// where |F| is under half the blended field parameter, (1 - s) t_a + s t_b + raise_mm x sheet_seam_bump(seam_mm, band):
+// returns |F| - that half (mm, negative inside the wall). `seam_mm` is the signed distance across the seam at p, + toward
+// b, and `seam_grad` its gradient (sheet_seam_mm and its `grad`; the preview's map channel and its differences).
+// (t_i: sheet_param_at, the TRUE wall's parameter, as sheet_distance_at reads it; the file contours the band at the
+// print wall, sheet_print_wall_mm, as it contours each region's own sheet.)
+double sheet_blend_distance_at(const SheetField& a, const SheetField& b, const SheetSeamBand& seam, double seam_mm,
+                               const Vec3& seam_grad, const Vec3& p);
+// Its F alone: the signed distance to the band's blended mid-surface (mm; what the wall is measured across).
+double sheet_blend_mid_at(const SheetField& a, const SheetField& b, const SheetSeamBand& seam, double seam_mm,
+                          const Vec3& seam_grad, const Vec3& p);
+// The signed distance across the seam at p, mm, + toward b's side: seam.across read at p (the cubic B-spline over its
+// nodes: smooth to the second derivative, a flat meeting exact), and its gradient (`grad`, when given). +infinity (and
+// no gradient) where it was not made (a solid wall, a seam made by hand) or p is off its grid (farther from the meeting
+// than half a band and three nodes): no blend there. `domain` is not read (the grid was made from it).
+double sheet_seam_mm(const Domain& domain, const SheetSeamBand& seam, const Vec3& p, Vec3* grad = nullptr);
+// E: fills SheetSeamBand::across for every seam of `seams` that is not a solid wall (Session::lay for a Blend lay; the
+// strength check for its own blend seams). Deterministic for any `threads` (0: all of this machine's).
+void sheet_seams_across(const Domain& domain, const Layout& layout, const std::vector<SheetField>& sheets,
+                        std::vector<SheetSeamBand>& seams, int threads = 0);
+
+// The SOLID WALL between two sheet regions (Layout::membrane): is p, lattice of region `region` (< 0: the domain's
+// own answer at p), within the membrane of a region it is paired with? (Some point within Layout::membrane_mm of p,
+// read in 26 directions, is lattice of the partner by the domain; a weave partner is read at one and two
+// membrane_mm: set_sheet_weave_membrane.) False when the layout has no membrane. cell_holds
+// and cell_holds_at read it, so everything carved, mapped or credited from the cells sees the membrane solid.
+bool sheet_membrane_at(const Layout& layout, const Domain::Probe& probe, int region, const Vec3& p);
+// Fills Layout::membrane / membrane_mm / membrane_near for the seams that are solid walls (`seams` with solid_wall),
+// with half thickness `half_mm` (one line). Call after the cells are final (after solidify_thin_cuts).
+void set_sheet_membrane(Layout& layout, const std::vector<SheetSeamBand>& seams, const std::vector<SheetField>& sheets,
+                        double half_mm);
+// E (the lead's note, 2026-11-25): a sheet region beside an ORGANIC region (a weave, Layout::weave) meets it at the
+// solid wall too: there is no blend with Organic, and its tubes fuse to the wall as they fuse to any solid. Each pair
+// (sheet region, weave region) joins Layout::membrane (after set_sheet_membrane, whose pairs it keeps; membrane_mm one
+// line, `half_mm`). The weave's own space is open (it has no cells to give its half), so the sheet's side is the whole
+// two lines: sheet_membrane_at reads a weave partner at one and two membrane_mm. The index's boxes for a weave: its
+// region's prism (Domain), grown by the two lines; a curved one, the sheet's own cells. No sheets or no weave: nothing.
+void set_sheet_weave_membrane(Layout& layout, const Domain& domain, const std::vector<SheetField>& sheets,
+                              double half_mm);
+
+// The fields of a laid sheet layout: one per region with laid cells (its walls from Cell::strut). Empty for a strut
+// type. The session calls it; exposed for tests.
+std::vector<SheetField> sheet_fields(const Layout& layout);
+// The touching pairs of `sheets` (cells of two regions whose cubes come within `touch_mm` of each other), each with
+// its band and asked seam (`seam`: SolidWall makes every pair a solid wall; Blend leaves solid_wall false for E's loop).
+std::vector<SheetSeamBand> sheet_seams(const Layout& layout, const std::vector<SheetField>& sheets, SheetSeam seam,
+                                       double touch_mm);
+
+// THE BRIDGE'S FORM (builder B: LatticeLayoutResult gains these under the same names prefixed "sheet_", e.g.
+// `sheet_region`, `sheet_wall_mm`, `sheet_seam_ab`; the Swift importer reads flat vectors only). One entry per
+// SheetField, in order, unless said.
+struct SheetsFlat {
+  std::vector<std::int32_t> region, frame;
+  std::vector<std::uint8_t> kind;        // 0 gyroid, 1 schwarz_d
+  std::vector<float> axes;               // 12 per field: origin xyz, ax[0] xyz, ax[1] xyz, ax[2] xyz (part coordinates)
+  std::vector<float> anchor;             // 3 per field, frame mm
+  std::vector<float> cell_mm;
+  std::vector<std::int32_t> n;           // 3 per field
+  std::vector<float> lo;                 // 3 per field, frame mm (the first centre)
+  std::vector<std::int32_t> wall_count;  // n0 * n1 * n2 per field
+  std::vector<float> wall_mm;            // every field's walls, one field after another, x fastest (the 3D textures)
+  std::vector<float> wall_range;         // 2 per field: wall_min_mm, wall_max_mm
+  // Seams, one entry per SheetSeamBand: its two field indices, band, raise, solid wall (1/0), fell back (1/0).
+  std::vector<std::int32_t> seam_ab;     // 2 per seam
+  std::vector<float> seam_band_mm, seam_raise_mm;
+  std::vector<std::uint8_t> seam_solid, seam_fell_back;
+  std::vector<std::string> seam_why;
+};
+SheetsFlat flatten_sheets(const std::vector<SheetField>& sheets, const std::vector<SheetSeamBand>& seams);
+// The bridge's other additions (B and C; listed here so the three agree):
+//   LatticeLayoutSettings: `std::string sheet_seam = "solid_wall"` ("blend" | "solid_wall"; the job's layout key of the
+//     same name), `bool auto_by_cell = false` (StrutSpec::auto_by_cell; job key "auto_by_cell").
+//     E: `std::vector<int32_t> sheet_walls` (Settings::sheet_walls, two region ids a seam; the preview only).
+//   LatticeLayoutTypeFacts: `lays` true for a sheet; `family` (lattice_family); `open_look`, `touch` (core's bounds);
+//     `structural_floor_cells` (sheet_structural_floor_cells); `floor_cell_mm` (sheet_floor_cell_mm at two lines);
+//     `auto_cell_cap_mm` (auto_cell_cap_mm); no struts or nodes (s = 0).
+//   The map (LatticeLayoutGrid): a region channel and a seam-distance channel (sheet_seam_mm), B's.
 
 // ── SESSION (stage E) ─────────────────────────────────────────────────────────
 // What the app holds for one part while its Lattice page is open. It measures the part
@@ -1577,6 +1923,14 @@ struct Settings {
   // thicker for it: a cell too small for the open look carries the THINNEST strut and nothing more, and every other
   // cell keeps the open look. Denser than the open look in those small cells, never touching. (His v2 stand, printed
   // with two-line struts: its wing edges, socket walls and spotface walls.) Allow quilt on makes this moot.
+  // ★ notes29 (his notes on release 20, 2026-11-25: "No matter what I did, the quilting kept on happening -- even with
+  // quilting off"): it lowered the smallest cell of the WHOLE layout to the quilt's, not of the thin walls alone, so
+  // every place the band or the stress shrank the cells got the thinnest strut up to touching: the quilt.
+  // ★ notes29b (his question the same day: "Are you saying that no matter what happens, all Small cells in thin walls are
+  // going to be quilted?" -- no): it is read again with Allow quilt off, and acts in THIN WALLS ONLY
+  // (CellSpec::small_in_thin_walls): a wall too thin for the open look's smallest cell takes its own small cell, down to
+  // the one the thinnest strut stays a printed line short of touching in (lattice_quilt_off_cell_mm), never fused. Every
+  // other place keeps the layout laid without it, byte for byte. With Allow quilt on it is moot.
   bool small_cells_in_thin_walls = false;
   // "Let walls cut cells" (his ruling 2026-11-14): per part, OFF unless the user turns it on. The session
   // hands it to the cells as CellSpec::one_grid (see there): on, every wall, pocket, hole, Protect skin and the
@@ -1594,6 +1948,13 @@ struct Settings {
   int skin_density = 3;
   double skin_sink = 0.0;
   bool drop_loose = true;        // S4, Finish None's rule; then pieces adrift go too
+  // SHEETS (SPEC 1.5): "Where regions meet" for two sheet regions that touch. Read for a sheet type only. A seam
+  // between a sheet region and a weave region is always the solid wall.
+  SheetSeam sheet_seam = SheetSeam::SolidWall;
+  // E (SPEC 1.5, "a fallen-back seam draws as the solid wall"): seams made the solid wall whatever `sheet_seam` asks, as
+  // region id pairs (either order): the app's, for the seams its last print file fell back on, so its preview draws the
+  // wall the file printed. Such a seam is laid fell_back (SheetSeamBand::fell_back, its why). Empty: none.
+  std::vector<std::array<int, 2>> sheet_walls;
 };
 
 // ── PLACES (rule D23) ─────────────────────────────────────────────────────────
@@ -1619,9 +1980,12 @@ inline constexpr double kPlaceMinMm2 = 100.0;
 // `without_chips`: the domain with the protect_chip entries left out (null when there are none).
 // `chip_ids`: those entries' ids. `asks`: the settings' regions (their faces / pieces / zones). Same input, same
 // bytes: ordered by region id, then by the lowest raw face id of the place.
+// ★ notes30 Q1 (S-2, his yes 11-26: a setting changed right after a lattice lands waited ~3 s behind this search):
+// `stop`, when given, is read once per triangle; once it is true the search gives up and the answer is NONE (never part
+// of a list). Not given, or never set: the same bytes as before. The flag must outlive the call; it is never written.
 std::vector<Place> find_places(const StepModel& model, const Domain& domain, const Domain* without_chips,
                                const std::vector<int>& chip_ids, const std::vector<Settings::RegionAsk>& asks,
-                               const Layout& layout, double fallback_cell_mm);
+                               const Layout& layout, double fallback_cell_mm, const std::atomic<bool>* stop = nullptr);
 
 // OP7 (brief C2, E1): one refusal of an Organic ask (validate_organic, lattice_layout_organic.hpp). `setting` is a
 // stable name the app maps to its control: the OrganicAsk field's own name (spacing_min_mm, width_heavy_mm, ...), or
@@ -1670,6 +2034,10 @@ struct Outcome {
   Layout layout;
   StrutReport struts;
   Bars bars;
+  // SHEETS (the contract above): one field per laid sheet region, in region order, and the pairs that touch. Both
+  // empty for a strut type; `bars` is empty for a sheet.
+  std::vector<SheetField> sheets;
+  std::vector<SheetSeamBand> sheet_seams;
   Pieces pieces;                 // as found before any piece adrift was removed
   std::vector<SteppedEdge> stepped_edges;   // what Finish None left ragged (S4)
   bool read_again = false;       // the part was read for this layout (a "where" setting changed)
@@ -1680,9 +2048,14 @@ struct Outcome {
   std::vector<int> empty_regions;
   double ms_read = 0.0, ms_cells = 0.0, ms_bars = 0.0;
   std::size_t thin_solid = 0;    // cut cells print rule P8 (f) made solid (solidify_thin_cuts)
+  // ★ notes29 (his notes on release 20, the holes and the chunk cut out of the outline), cube lattices: the free node
+  // ends of pieces cut off at a size step that were run on into the lattice beside them (join_cut_off_pieces), and the
+  // cells left with no strut of their own that were made solid (solidify_empty_cells).
+  std::size_t cut_off_joined = 0, empty_solid = 0;
   // K3 (his 11-23 notes): with the quilt off, the Lattice regions (their ids) that laid no cell at all and were laid
-  // again with the quilt's smallest cell (Session::lay_with). Empty: none (the quilt was off everywhere, or on).
-  std::vector<int> quilt_regions;   // K3 (only where the cell is Auto: a typed cell that fits nowhere stays solid)
+  // again with the quilt's smallest cell. ★ notes29 (his notes on release 20, 2026-11-25): WITHDRAWN, with Allow quilt
+  // off nothing is laid with the quilt; such a region stays solid and says why (Layout::solid_why). Always empty.
+  std::vector<int> quilt_regions;
   bool cells_by_stress = false;  // C22 was applied to this layout (stress_sizes_cells)
   bool cells_no_stress = false;  // C22 was asked for and there was no stress result, or no reference
   // The one stress reference resolved for this lay (the stated one or the part's own), read by the cells and the
@@ -1827,7 +2200,8 @@ class Session {
   // D23: the places of the last lay() (find_places on its domain, its regions' own cells). A separate call: it reads
   // every face the regions' prisms come near, which costs about as much as a layout, so a slider move need not pay
   // for it. Asked with settings that are not the last lay()'s "where" settings, or before any lay(): none.
-  std::vector<Place> places(const Settings& settings) const;
+  // ★ notes30 Q1: `stop` as find_places reads it (set: none, at once — the next lay need not wait for it).
+  std::vector<Place> places(const Settings& settings, const std::atomic<bool>* stop = nullptr) const;
   // The domain the last lay() was laid in: null before the first, REPLACED when a "where" setting changes. Read it after a
   // lay() and never hold it across the next one (362's bridge, the 4th call: a batch of points -> lattice / rim / solid).
   const Domain* domain() const { return domain_.get(); }
@@ -1835,6 +2209,12 @@ class Session {
   // next lay() would make it (and keeps it: the same "where"), so its map can be read before that lay. Changes nothing the
   // lay then does.
   void prepare_domain(const Settings& settings) { ready_domain(settings); }
+  // S-1 (notes30), for tests and A/B timing only: on (the default), a cube lay's adrift drop uses the cut-off join's own
+  // count of the pieces when that join changed no bar (join_cut_off_pieces' `unchanged`); off, it counts them again,
+  // as before. The lay is the same either way, byte for byte. counted_once(): how many of this session's lays used the
+  // join's count (an end joined, or off: the lay counted twice, and this does not move).
+  void count_pieces_once(bool on) { pieces_once_ = on; }
+  std::size_t counted_once() const { return counted_once_; }
 
  private:
   // O16: what lay_organic adds with Finish Skin on: per weave region, the net skin's reach.
@@ -1894,6 +2274,8 @@ class Session {
   std::shared_ptr<const DemandField> ref_field_;
   double ref_percentile_ = 0.0;
   double ref_mpa_ = 0.0;
+  bool pieces_once_ = true;          // S-1: count_pieces_once
+  std::size_t counted_once_ = 0;     // S-1: counted_once
 };
 
 // In the plane of a flat region's face: how far `p` is inside the region's edge (its

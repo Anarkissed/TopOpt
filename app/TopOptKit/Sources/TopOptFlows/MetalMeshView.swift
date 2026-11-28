@@ -673,7 +673,10 @@ fragment ViewerFragOut viewer_fragment(VOut in [[stage_in]], constant float4& re
         coverage = 0u;
         for (uint k = 0; k < 4; ++k) {
             float3 q = in.mpos + mdx * (at4[k].x - 0.5) + mdy * (at4[k].y - 0.5);
-            if (!shell_is_latticed(q, in.mnormal, shellClip, shellDecls, clipRegionTex)) { coverage |= (1u << k); }
+            // (★ notes29: a sample whose wall still stands — the timelapse's walls coming off — is drawn as the body)
+            if (!shell_is_latticed(q, in.mnormal, shellClip, shellDecls, clipRegionTex) || shell_standing(q, shellClip)) {
+                coverage |= (1u << k);
+            }
         }
         latticed = coverage == 0u;   // open at every sample: none of the body here
     }
@@ -1908,8 +1911,20 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private var latticeLayer: LatticeSDFRenderer?
     var flexibleLattice: FlexibleLatticePass?   // Flexible (PR #362): a third G-buffer writer (FlexibleLatticePass.swift); nil = #354's frame
     var layoutBars: LatticeLayoutBarsPass?   // the new engine's bars (#362, LatticeLayoutBarsPass.swift); nil = today's frame
+    var scaffoldBars: LatticeLayoutBarsPass? // ★ notes30: a slow lay's scaffold and its rough cut-open (LatticeBuildScaffold.swift)
     var growth: LatticeGrowth?               // ★ his 11-22 (watch it grow): an Organic lay's vines so far (LatticeGrowthPass.swift)
     var growthPass: LatticeGrowthPass?
+    /// ★ notes29 (his "timelapse of a building being made"): the regular lay's timelapse the bars are drawn by
+    /// (LatticeBuildTimelapse.swift); nil = the bars whole, as before.
+    var buildShow: LatticeBuildShow?
+    /// ★ notes29: what the timelapse let the bars draw in the last frame (tests): nil — whole; 0 — none; else the snaps.
+    var lastBuildSnaps: Int?
+    /// ★ notes29: the floors and bays the timelapse put the bars on in the last frame (tests).
+    var lastBuildFrame: LatticeBuildTimelapse.Frame?
+    /// ★ notes29 (his review, img 98): how much of the walls stood in the last frame (tests); nil: open as the map says.
+    var lastBuildStanding: Float?
+    /// ★ notes30: the scaffold's lifts drawn in the last frame (tests): risen and struck snaps; nil — none drawn.
+    var lastScaffold: (lifts: Int, struck: Int)?
     /// ★ notes24: what the growth does this frame (drawn, its replay, how the part opens), decided once a frame
     /// (`prepareGrowth`, LatticeGrowthPass.swift).
     var growthFrame = LatticeGrowthFrame()
@@ -3430,6 +3445,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// when a design-box face snaps to that part face. Re-triggering (a fresh snap) restarts the
     /// envelope. The caller (`apply`) flips the view to continuous redraw; the pulse ends itself.
     func beginDetentPulse(faceID: FaceID) {
+        guard !AppSettings.skipAllAnimations else { return }   // ★ notes29: Skip all animations — no pulse
         pulseFaceID = faceID
         pulseStart = CACurrentMediaTime()
         isPulsing = true
@@ -3904,6 +3920,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
               let fbuf = flexBuffer else { return }
         var uniforms = makeUniforms(aspect: aspect)
         prepareGrowth(cmd.device)   // ★ notes24: whether the growing vines draw this frame (LatticeGrowthPass.swift)
+        prepareBuild(cmd.device, model: uniforms.model)   // ★ notes30: the scaffold, the walls floor by floor (LatticeBuildTimelapse.swift)
 
         // DEPTH PREPASS (items 7+8, parts b+c): when a translucent volume is present, capture the
         // opaque part's eye-space depth into a texture FIRST (its own render pass — you cannot read
@@ -4854,8 +4871,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // ★ THE NEW ENGINE's SOLID VIEW (his ask 11-13): its own map cuts the body open where the lattice is (mode 2)
         // (★ notes24: not while the growing vines stand in the part's X-ray: that map is not this lay's — growthXraysBody)
         if let own = growthShellClip { return (own.clip, openEverywhere) }   // ★ notes24: the walls dissolving (LatticeGrowthPass)
-        if layoutBarsInFrame, !growthXraysBody, var solid = layoutBars?.shellClip {
+        if layoutBarsInFrame, !growthXraysBody, var solid = drawnLayoutBars?.shellClip {   // ★ notes30: the scaffold's rough cut-open too
             if sampleCount == 4, !Self.controlAliasedCut { solid.gate.z = 4 }   // ★ notes28: the cut asked per MSAA sample
+            // ★ notes29 (his review, img 98: "None of the parts' walls open up"): the timelapse's walls — closed while the
+            // engine lays, then taken off in hard snaps (the map's own dissolve, held at each step), then open
+            if let standing = buildStanding { solid.eye.w = standing }
             return (solid, openEverywhere)
         }
         guard latticeInFrame, let layer = latticeLayer else { return (u, openEverywhere) }
@@ -5049,7 +5069,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// declarations, the neutral "inside everywhere" volume otherwise.
     private var shellClipTexture: MTLTexture? {
         if let own = growthShellClip { return own.texture }   // ★ notes24: the growth's own map, its walls dissolving
-        if layoutBarsInFrame, layoutBars?.shellClip != nil, let t = layoutBars?.gridTexture { return t }   // the new engine's map
+        if layoutBarsInFrame, drawnLayoutBars?.shellClip != nil, let t = drawnLayoutBars?.gridTexture { return t }   // the new engine's map (★ notes30: or the scaffold's rough one)
         guard latticeInFrame, let layer = latticeLayer else { return neutralShellClipTexture() }
         // Declared ⇒ the region field. Undeclared (the sample block) ⇒ the CELL field,
         // which is what `gate.y == 2` reads. Both are bound here so the uniform and the
@@ -5340,16 +5360,29 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             frameDrawCalls += 1; frameVertices += 3 }
         // the new engine's bars (#362): the fourth writer — same encoder, attachments and .less + write depth state
         // (★ notes24: the landed lattice waits, at most a second, while the replay shows what was left of its growth)
-        if layoutBarsInFrame, !growthFrame.holdsLanded, let bars = layoutBars,
+        // (★ notes29: and the regular lay's timelapse — nothing while the site is cleared, then floor by floor)
+        // (★ notes30: or, while a slow lay's scaffold stands before its landing, the scaffold — its lifts so far)
+        let build = buildReveal(model: uniforms.model)
+        let scaffoldDrawn = scaffoldBars != nil && drawnLayoutBars === scaffoldBars
+        let scaffoldRun = scaffoldDrawn ? buildShow.flatMap { scaffoldRange($0, at: LatticeBuildShow.now) } : nil   // ★ notes30
+        lastBuildSnaps = !layoutBarsInFrame || !build.draw || scaffoldDrawn ? 0 : build.reveal.map { Int($0.build.x) }
+        lastScaffold = scaffoldRun.map { (lifts: $0.upperBound, struck: $0.lowerBound) }
+        if layoutBarsInFrame, !growthFrame.holdsLanded, build.draw, let bars = drawnLayoutBars,
            bars.encodeGBuffer(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
-                              eyeNormalBasis: uniforms.normalMatrix, turning: turning) {
-            frameDrawCalls += 1; frameVertices += 36 * bars.count }
+                              eyeNormalBasis: uniforms.normalMatrix, turning: turning, build: build.reveal, range: scaffoldRun) {
+            frameDrawCalls += 1; frameVertices += 36 * (scaffoldRun?.count ?? bars.count) }
+        // ★ notes30: the scaffold over the landed lattice, struck piece by piece as the real floors replace it
+        if layoutBarsInFrame, let over = scaffoldOverLanded(),
+           over.pass.encodeGBuffer(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
+                                   eyeNormalBasis: uniforms.normalMatrix, turning: turning, range: over.range) {
+            lastScaffold = (lifts: over.range.upperBound, struck: over.range.lowerBound)
+            frameDrawCalls += 1; frameVertices += 36 * over.range.count }
         // ★ the solid view's cut walls (his ask 11-13): after the bars, the same encoder and depth state (★ notes24: none while
         // the growing vines stand in the part's X-ray; the growth's own map's while its walls dissolve)
         if encodeGrowthWalls(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
                              eyeNormalBasis: uniforms.normalMatrix) {
             frameDrawCalls += 1; frameVertices += 36
-        } else if layoutBarsInFrame, !growthXraysBody, let bars = layoutBars,
+        } else if layoutBarsInFrame, !growthXraysBody, let bars = drawnLayoutBars,   // ★ notes30: or the scaffold's rough cut
            bars.encodeWalls(penc, depthState: depthState, clipFromModel: uniforms.mvp, eyeFromModel: uniforms.modelView,
                             eyeNormalBasis: uniforms.normalMatrix) {
             frameDrawCalls += 1; frameVertices += 36 }
@@ -6257,6 +6290,13 @@ struct VertexTintKey: Equatable {
         for f in rgba { h.combine(f) }
         hash = h.finalize()
     }
+
+    /// ★ notes30 FF1 (approved by 362): the same array storage (or both nil) — O(1), no element read.
+    static func sameStorage(_ a: [Float]?, _ b: [Float]?) -> Bool {
+        guard let a, let b else { return a == nil && b == nil }
+        guard a.count == b.count else { return false }
+        return a.withUnsafeBufferPointer { pa in b.withUnsafeBufferPointer { pb in pa.baseAddress == pb.baseAddress } }
+    }
 }
 
 struct MeshViewInputs {
@@ -6455,6 +6495,8 @@ struct MeshViewInputs {
     var layoutBars: LatticeLayoutBarsInputs? = nil
     /// ★ his 11-22 (watch it grow): the Organic lay's vines so far; the view redraws itself on each of its changes. nil = none.
     var growth: LatticeGrowth? = nil
+    /// ★ notes29: the regular lay's timelapse (LatticeBuildShow); the view redraws itself at each of its snaps. nil = none.
+    var build: LatticeBuildShow? = nil
     /// ★ his 11-16/17 (Install 3): the Outlines view's whole line set, the faces as the app sends them (`PieceOutline`);
     /// drawn in place of the part's edges + `extraLines` when it was made on this mesh. nil = the part's own edges.
     var pieceOutline: PieceOutline.Drawing? = nil
@@ -6938,10 +6980,13 @@ extension MetalMeshView {
         private(set) var cameraModel: OrbitCameraModel?
         private var cameraCancellable: AnyCancellable?
         private var growthCancellable: AnyCancellable?   // ★ his 11-22: the growing vines redraw the view (no page pass)
+        private var buildCancellable: AnyCancellable?   // ★ notes29: the timelapse's snaps redraw the view (no page pass)
         private weak var boundView: MTKView?
         private var appliedSignature: ViewerMeshSignature?
         private var appliedTint: TintKey?
         private var appliedVertexTint: VertexTintKey?
+        /// ★ notes30 FF1 (approved by 362 with the Flexible freeze plan): the last vertex-tint array, kept — see `apply`.
+        private var appliedVertexTintArray: [Float]?
         private var appliedExtraLineCount = -1
         private var appliedCutPlane: SIMD4<Float>??
         private var appliedRibbonCount = -1
@@ -7172,7 +7217,7 @@ extension MetalMeshView {
             if sv != lastSettleVector {
                 lastSettleVector = sv
                 renderer.beginSettle(to: inputs.settleRotation,
-                                     duration: inputs.settleAnimated ? 0.8 : 0)
+                                     duration: inputs.settleAnimated && !AppSettings.skipAllAnimations ? 0.8 : 0)   // ★ notes29
                 if renderer.isSettling {     // run continuous frames until it lands
                     view.isPaused = false
                     view.enableSetNeedsDisplay = false
@@ -7288,7 +7333,11 @@ extension MetalMeshView {
                 // four floats per vertex, and a full compare on every body
                 // evaluation is the "viewer lag = selectedMesh rebuild" mistake in
                 // a new place.
-                let vkey = inputs.vertexTints.map { VertexTintKey($0) }
+                // ★ notes30 FF1 (approved by 362): an array sharing the kept one's storage IS the applied tints — while it is
+                // kept, an edit in place would have copied it (copy-on-write) — so the full hash runs only for another array
+                let vkey = VertexTintKey.sameStorage(inputs.vertexTints, appliedVertexTintArray)
+                    ? appliedVertexTint : inputs.vertexTints.map { VertexTintKey($0) }
+                appliedVertexTintArray = inputs.vertexTints
                 if vkey != appliedVertexTint {
                     appliedVertexTint = vkey
                     renderer.setVertexTints(inputs.vertexTints ?? [])
@@ -7653,6 +7702,7 @@ extension MetalMeshView {
             if renderer.applyFlexibleLattice(inputs.flexibleLattice, device: view.device, baseScale: appliedFlexScale) { dirty = true }   // token-keyed upload in FlexibleLatticePass.swift; squish frames already dirty via flexScale; baseScale: the view's own squish, back when a loop lets go
             if renderer.applyLayoutBars(inputs.layoutBars, device: view.device) { dirty = true }   // the new engine's bars (#362): token-keyed upload
             if attachGrowth(inputs.growth, to: view, renderer: renderer) { dirty = true }   // ★ his 11-22: watch it grow
+            if attachBuild(inputs.build, to: view, renderer: renderer) { dirty = true }   // ★ notes29: the timelapse
             if dirty { redraw(view) }
             // Publish the camera projection (deduped) on the NEXT runloop, never inline:
             // `onProjection` writes the host view's `@State projection`, and `apply` runs
@@ -7678,6 +7728,18 @@ extension MetalMeshView {
         private func attachGrowth(_ g: LatticeGrowth?, to view: MTKView, renderer: MeshRenderer) -> Bool {
             guard renderer.applyGrowth(g) else { return false }
             growthCancellable = g?.changed.sink { [weak self, weak view] in
+                MainActor.assumeIsolated {
+                    guard let self, let view else { return }
+                    self.redraw(view)
+                }
+            }
+            return true
+        }
+
+        /// ★ notes29: the timelapse this view draws its bars by; each snap redraws the view directly (never the page).
+        private func attachBuild(_ b: LatticeBuildShow?, to view: MTKView, renderer: MeshRenderer) -> Bool {
+            guard renderer.applyBuildShow(b) else { return false }
+            buildCancellable = b?.changed.sink { [weak self, weak view] in
                 MainActor.assumeIsolated {
                     guard let self, let view else { return }
                     self.redraw(view)
@@ -8328,6 +8390,18 @@ extension MetalMeshView {
 #if canImport(MetalKit)
         var copy = self
         copy.inputs.growth = growth
+        return copy
+#else
+        self
+#endif
+    }
+
+    /// ★ notes29 (his "timelapse of a building being made"): the regular lay's timelapse — the bars of a lay drawn only once it
+    /// has landed with its map, then floor by floor (LatticeBuildTimelapse). nil = the bars whole, as before.
+    public func latticeBuild(_ build: LatticeBuildShow?) -> MetalMeshView {
+#if canImport(MetalKit)
+        var copy = self
+        copy.inputs.build = build
         return copy
 #else
         self

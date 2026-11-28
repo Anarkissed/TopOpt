@@ -412,3 +412,6 @@ Until these land, with the switch on, the app's previews count voxels the old wa
    - WANTED IN THE JOB from the app's print settings (his word: they are entered at every import and must travel with the job and into the exported file): top and bottom solid layers (count or mm). The printed-grams figure assumes 1.0 mm top and 0.6 mm bottom until the job carries them. Key names are #362's.
 
 When the switch flips and the old path is deleted, `tag_face_by_stage` / `mask_face_by_stage` keep their names and lose the old branch, so these lines do not change again.
+
+### The manual pad from the job (2026-11-28): `loads.pad_mm` (#362's field, release 25) is read: >= 0 is the fixed pad in mm exactly as `TOPOPT_PAD_MM=<number>`; negative or absent is today's behaviour; if both are given the job's value wins and a line says so. `ProductionLoadCase::pad_mm`, set in `to_setup.inc` and `to_analyze.inc`. Checked on the 15 mm bracket: as it is, the four files are the same bytes as before the merge of organic-1 7b558588; `pad_mm` 3.0 in the job and `TOPOPT_PAD_MM=3.0` give the same four files byte for byte. `run_job.cpp`'s own two calls (#362's file) still take the environment's value only.
+

@@ -49,7 +49,8 @@ struct LatticeOrganicControls: View {
                 }
                 .accessibilityIdentifier("organic-Gradient")
                 if !look.followStressValue {   // OP6 (sheet H8): no heavy end acts; the small cells only where the shape tightens
-                    say("Shape only: no heavy ends; small cells only where the shape tightens")
+                    say(LatticeCaptions.organicShapeOnlyBrief, info: ("Shape only",   // ★ notes29: five words + (i)
+                        "Shape only: no heavy ends; small cells only where the shape tightens."))
                 }
             }
             swept("Cell size", "mm", \.cell, auto: limits.map { ($0.cellAutoMM, $0.cellLowerMM, $0.cellUpperMM) },
@@ -61,8 +62,11 @@ struct LatticeOrganicControls: View {
                   pair: { a, b in LatticeOrganicLook.Check.strut(thin: a, thick: b, thinnestMM: thinnestMM) },
                   one: { v in LatticeOrganicLook.Check.strut(thin: v, thick: nil, thinnestMM: thinnestMM) })
             if limits?.measured == false || limits == nil && look.four(look.cell, offered: LatticeOrganicLook.cellModes).isAuto {
-                say(limits == nil ? "Measuring this part's areas for Auto" : "This part could not be measured: type the range",
-                    warning: limits != nil)
+                // ★ notes29 (his 11-25): five words; the rest in the (i)
+                say(limits == nil ? LatticeCaptions.organicMeasuringBrief : LatticeCaptions.organicUnmeasuredBrief,
+                    warning: limits != nil,
+                    info: limits == nil ? nil : ("Auto's numbers", "This part could not be measured, so Auto has no numbers "
+                                                 + "for it: type the range yourself."))
             }
             if grown {
                 if on(.seeds) { number("Seeds (feet apart) (0 = off)", "spacings", \.seeds, auto: 2.5, check: { LatticeOrganicLook.Check.seeds($0) }) }
@@ -74,7 +78,8 @@ struct LatticeOrganicControls: View {
                     if on(.crossingVinesOff) { toggle("Crossing vines", \.crossingVines) }
                     if look.crossingVines ?? true { gap("Crossing gap", \.crossGap, LatticeOrganicLook.crossGapAuto) }
                 } else if on(.crossingVinesOff) {
-                    say("Crossing vines are off: they grow from wall seeds")   // ★ rule g
+                    say(LatticeCaptions.organicCrossingNeedsSeedsBrief, info: ("Crossing vines",   // ★ rule g; notes29
+                        "Crossing vines are off: they grow from wall seeds, so they need Wall seeds on."))
                 }
                 if on(.roots) {
                     number("Roots (0 = off)", "spacings", \.roots, auto: 0) { LatticeOrganicLook.Check.run("Roots", $0) }
@@ -98,7 +103,10 @@ struct LatticeOrganicControls: View {
                         .labelsHidden().toggleStyle(.switch)
                 }
                 .accessibilityIdentifier("organic-Simulate stresses on unstressed walls")
-                if look.syntheticStresses ?? false { say("Number of foci: per wall, in Selections") }
+                if look.syntheticStresses ?? false {   // ★ notes29: five words + (i)
+                    say(LatticeCaptions.organicFociBrief, info: ("Number of foci",
+                        "Each wall's number of foci (the made-up load points) is set on its row in Selections."))
+                }
             }
             if LatticeOrganicLook.cut2Wired {   // ★ cut 2 (his 11-19): depth variation and extra spacing, each one switch
                 row("Depth variation") {
@@ -153,16 +161,23 @@ struct LatticeOrganicControls: View {
         .layoutPriority(1)
     }
 
-    private func say(_ text: String, warning: Bool = false) -> some View {
-        Text(text).font(.system(size: 12, weight: warning ? .semibold : .regular))
-            .foregroundStyle(warning ? DS.Color.warning.color : DS.Color.textTertiary.color)
-            .lineLimit(1).minimumScaleFactor(0.75)
+    /// ★ notes29 (his 11-25): a line under a setting — at most five words (LatticeCaptionsNotes29Tests), the rest in its (i).
+    private func say(_ text: String, warning: Bool = false, info: (title: String, text: String)? = nil) -> some View {
+        LatticeCaptions.record(text)
+        return HStack(spacing: DS.Space.xs) {
+            Text(text).font(.system(size: 12, weight: warning ? .semibold : .regular))
+                .foregroundStyle(warning ? DS.Color.warning.color : DS.Color.textTertiary.color)
+                .lineLimit(1).minimumScaleFactor(0.75)
+            if let info { AppInfoButton(title: info.title, text: info.text) }
+        }
     }
 
-    /// The refusal under this setting, when the last typed number was refused.
+    /// The refusal under this setting, when the last typed number was refused (the centred pop-up says it too).
+    /// ★ notes29 (his 11-25): five words; the reason in the (i).
     @ViewBuilder private func refused(_ label: String) -> some View {
         if let r = refusal, r.label == label {
-            say(r.text, warning: true).accessibilityIdentifier("organic-refusal")
+            say(LatticeCaptions.numberNotApplied, warning: true, info: (Self.bare(label), r.text))
+                .accessibilityIdentifier("organic-refusal")
         }
     }
 

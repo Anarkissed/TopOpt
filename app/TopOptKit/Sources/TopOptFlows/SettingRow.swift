@@ -2,46 +2,24 @@
 //
 // The setting row: a bold 3–5 word label · its value in accent with ⌄ (a tap opens its menu) · its (i). "Safety margin  Light
 // use · 150 % ⌄ (i)", "Start from  Solid · + Lattice faces ⌄ (i)". 44 pt tall (U3).
-// The (i) (`InfoTip`): a 22 pt circle with a 13 pt "i" in textTertiary, a 44 pt target; its popover holds 1–3 sentences,
-// 300 pt wide at most, the dialog surface, anchored to it, closed by a tap anywhere.
+// The (i) (`InfoTip`): ★ notes29 (his 11-25) the one (i), `AppInfoButton` — its glyph in a 44 pt target, its words in the
+// centred notification (AppPopups.help: "Tap anywhere to continue"). It was a 22 pt circle opening a popover beside it.
 
 import SwiftUI
 import TopOptDesign
 
-/// The one (i).
+/// The (i) of a setting row and of the pages that use it: the one (i) (AppInfoButton), its frame published as "info-<key>".
 struct InfoTip: View {
     /// Its published frame ("info-<key>") and accessibility id.
     let key: String
     let text: String
     var label = "About this"
-    @State private var open = false
-
-    static let circle: CGFloat = 22
+    /// The notification's title (default: `label`).
+    var title: String? = nil
 
     var body: some View {
-        Button { open.toggle() } label: {
-            Text("i")
-                .font(.system(size: 13, weight: .bold, design: .serif))
-                .foregroundStyle(DS.Color.textTertiary.color)
-                .frame(width: Self.circle, height: Self.circle)
-                .overlay(Circle().strokeBorder(DS.Color.textTertiary.color, lineWidth: 1.2))
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .popover(isPresented: $open, arrowEdge: .bottom) {
-            Text(text)
-                .font(.system(size: 13))
-                .foregroundStyle(DS.Color.textPrimary.color)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 300 - 2 * DS.Space.l, alignment: .leading)
-                .padding(DS.Space.l)
-                .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall, style: .continuous).fill(DS.Surface.dialog.color))
-                .accessibilityIdentifier("info-\(key)-text")
-        }
-        .background(NumberPad.published("info-\(key)"))
-        .accessibilityLabel(label)
-        .accessibilityIdentifier("info-\(key)")
+        AppInfoButton(title: title ?? label, text: text, label: label, id: "info-\(key)")
+            .background(NumberPad.published("info-\(key)"))
     }
 }
 

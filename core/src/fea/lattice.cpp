@@ -9,6 +9,7 @@
 #include "topopt/strut_cell.hpp"
 #include "topopt/tpms.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -88,7 +89,23 @@ constexpr std::array<Row, 18> kOctet = {{
 // was found to be legs-only. kOctet is the full octet's since ruling 2026-11-02 (c).
 
 // sc: cubic, extreme LOW shear (Zener 0.045-0.60). Worst in-band drift 0.71%.
-constexpr std::array<Row, 8> kSimpleCubic = {{
+// ★ LOW BAND (2026-11-25), as bcc's above: the rows under 0.08659 down to strut/cell 0.085 at
+// 0.01606 (two 0.45 mm lines on a 10.6 mm cell; sc's Auto cap is 10 mm), plus a floor block at
+// vpc 96 against vpc 144. At these densities sc's shear is nearly gone (Zener 0.006 at the
+// floor): C44 is measured, small, and kept as measured. Left out: 0.01364 and 0.02083 (vpc 96:
+// outside their reference curve), and targets that voxelized onto a lower target's solid.
+constexpr std::array<Row, 19> kSimpleCubic = {{
+    {0.01606, 20.3069, 0.4656, 0.0629, true},        // floor vpc96 vs 144, drift +0.16 %, 8.6 vox/strut
+    {0.01945, 24.8549, 0.6324, 0.0978, true},        // low vpc80 vs 120, drift +0.24 %, 7.1 vox/strut
+    {0.02630, 33.9768, 1.0029, 0.1791, true},        // low vpc80 vs 120, drift -0.12 %, 8.6 vox/strut
+    {0.02962, 38.6830, 1.2401, 0.2382, true},        // low vpc80 vs 120, drift +0.25 %, 9.1 vox/strut
+    {0.03295, 43.3132, 1.4842, 0.2988, true},        // low vpc80 vs 120, drift +0.25 %, 9.9 vox/strut
+    {0.03516, 46.3850, 1.6368, 0.3427, true},        // high vpc64 vs 96, drift +0.30 %, 7.6 vox/strut
+    {0.03798, 50.2188, 1.8355, 0.3959, true},        // low vpc80 vs 120, drift +0.01 %, 11.0 vox/strut
+    {0.04541, 61.0980, 2.4928, 0.6118, true},        // high vpc64 vs 96, drift +0.48 %, 9.1 vox/strut
+    {0.05045, 68.4511, 2.9883, 0.7696, true},        // high vpc64 vs 96, drift +0.52 %, 9.5 vox/strut
+    {0.05807, 79.4010, 3.7006, 1.0179, true},        // high vpc64 vs 96, drift +0.05 %, 11.0 vox/strut
+    {0.06293, 87.1130, 4.3234, 1.2717, true},        // high vpc64 vs 96, drift +0.56 %, 11.4 vox/strut
     {0.08659, 124.1566, 7.4660, 2.6536, true},
     {0.10749, 158.5235, 10.8871, 4.4241, true},
     {0.15184, 234.9730, 19.8418, 9.6988, true},
@@ -99,10 +116,27 @@ constexpr std::array<Row, 8> kSimpleCubic = {{
     {0.60171, 1567.5924, 404.5519, 346.1360, false},
 }};
 // bcc: cubic, extreme HIGH Zener (1.56-34.7, bending). Worst in-band drift 1.75%.
-constexpr std::array<Row, 8> kBcc = {{
-    {0.06684, 33.4693, 31.7886, 29.1699, false},
-    {0.09288, 52.1153, 48.2770, 43.9143, false},
-    {0.15755, 102.6131, 88.9380, 79.5135, false},
+// ★ LOW BAND (2026-11-25, the maintainer's "STRENGTH: YES, MEASURE"): the rows under 0.21050 are
+// measured down to the struts the new lattice engine lays (two 0.45 mm lines on a cell past its
+// 8 mm default: strut/cell 0.080 at 0.03194), by the same probe and rule as octet's LOW/HIGH
+// blocks (ruling 2026-11-02 (c)): rows at vpc 80 against a vpc 120 curve, and at vpc 64 against
+// vpc 96, |drift| < 2.4 % at the row's own rho, >= 6 voxels across the strut, CG converged, and
+// inside its reference curve. evidence/2026-11-25-strut-laws-low-density/tensor (assemble.py
+// prints these rows). They replace the three vpc48 rows that sat here unresolved (0.06684,
+// 0.09288, 0.15755: under 6 voxels across). Two rows were left out: vpc 64 read 0.10736 +4.7 %
+// stiff against vpc 96 (vpc 80's 0.10750 is landed instead), and one target voxelized onto
+// another's solid.
+constexpr std::array<Row, 15> kBcc = {{
+    {0.03194, 14.6110, 14.2986, 13.4458, true},      // low vpc80 vs 120, drift -2.32 %, 6.5 vox/strut
+    {0.04188, 19.7353, 19.1640, 17.8915, true},      // low vpc80 vs 120, drift -1.69 %, 7.1 vox/strut
+    {0.05172, 25.8070, 24.8464, 23.0606, true},      // low vpc80 vs 120, drift +1.89 %, 8.5 vox/strut
+    {0.06128, 30.9157, 29.5497, 27.2711, true},      // low vpc80 vs 120, drift -0.55 %, 9.1 vox/strut
+    {0.07703, 40.8102, 38.4647, 35.2447, true},      // low vpc80 vs 120, drift +0.01 %, 9.9 vox/strut
+    {0.09241, 50.8734, 47.2895, 43.0364, true},      // low vpc80 vs 120, drift -0.67 %, 11.3 vox/strut
+    {0.10750, 61.8554, 56.6840, 51.3972, true},      // low vpc80 vs 120, drift +0.31 %, 12.3 vox/strut
+    {0.13483, 83.5325, 74.3349, 66.8701, true},      // high vpc64 vs 96, drift +0.97 %, 10.7 vox/strut
+    {0.15259, 98.3891, 85.9168, 77.0317, true},      // high vpc64 vs 96, drift +0.48 %, 11.8 vox/strut
+    {0.19141, 135.6652, 113.3341, 101.1242, true},   // high vpc64 vs 96, drift +1.48 %, 13.1 vox/strut
     {0.21050, 156.4198, 127.3111, 113.1794, true},
     {0.30729, 288.2758, 205.7559, 182.7549, true},
     {0.38932, 447.0414, 281.7155, 252.5690, true},
@@ -121,9 +155,21 @@ constexpr std::array<Row, 8> kFcc = {{
     {0.59093, 1344.7034, 443.6894, 392.1883, true},
 }};
 // diamond: cubic (Zener 1.57-2.92). Worst in-band drift 2.02%.
-constexpr std::array<Row, 8> kDiamond = {{
-    {0.06655, 36.4377, 30.8178, 8.2156, false},
-    {0.09259, 57.5708, 46.1752, 16.5792, false},
+// ★ LOW BAND (2026-11-25), as bcc's above: the rows under 0.15712 down to strut/cell 0.088 at
+// 0.03874 (two 0.45 mm lines on a 10.2 mm cell), plus a floor block at vpc 96 against vpc 144.
+// They replace the two unresolved vpc48 rows (0.06655, 0.09259). Left out: 0.02948 (vpc 96,
+// -4.0 %), 0.03188 (vpc 80, -2.7 %), 0.05162 (vpc 80, +2.6 %; 0.04181 and 0.06119 are
+// interpolated across, as octet's 0.18522 was) and vpc 64's 0.10718 (+3.2 %; vpc 80's 0.10737
+// is landed).
+constexpr std::array<Row, 14> kDiamond = {{
+    {0.03874, 19.1014, 17.4482, 2.5441, true},       // floor vpc96 vs 144, drift -0.88 %, 8.5 vox/strut
+    {0.04181, 20.8483, 18.8603, 3.0280, true},       // low vpc80 vs 120, drift +1.55 %, 7.1 vox/strut
+    {0.06119, 33.3190, 28.8219, 6.7763, true},       // low vpc80 vs 120, drift +1.56 %, 9.1 vox/strut
+    {0.07694, 44.4660, 37.2050, 10.8946, true},      // low vpc80 vs 120, drift -0.11 %, 9.9 vox/strut
+    {0.09231, 56.2264, 45.5035, 15.8704, true},      // low vpc80 vs 120, drift -0.72 %, 11.3 vox/strut
+    {0.10737, 69.4153, 54.3057, 21.8853, true},      // low vpc80 vs 120, drift +0.67 %, 12.3 vox/strut
+    {0.13464, 94.8006, 70.2950, 34.5390, true},      // high vpc64 vs 96, drift -0.40 %, 10.7 vox/strut
+    {0.15234, 113.0178, 80.8603, 44.2009, true},     // high vpc64 vs 96, drift -0.09 %, 11.8 vox/strut
     {0.15712, 119.1238, 83.4693, 47.9097, true},
     {0.21007, 185.0863, 118.3592, 84.1557, true},
     {0.30671, 339.7180, 190.8679, 167.0811, true},
@@ -446,7 +492,12 @@ constexpr TypeMeasurements kRhombicMeasured = {
 // same harness and conditions as FCC's block above.
 // DIAMETER (`law diamond`): bisected on the converged solid fraction; within the band
 // the vpc48 B3 table differs by at most 4.9 % (diamond_law.txt, "B3 gap").
+// ★ 2026-11-25: the rows under 0.05, the same probe and method (`law diamond`,
+// evidence/2026-11-25-strut-laws-low-density/diameter/diamond_law.csv), since the band now runs to
+// 0.03874; under its first row the table clamps, so without them a low density read the 0.05 strut.
 constexpr TypeDiaRow kDiamondDia[] = {
+    {0.015, 0.2158}, {0.020, 0.2498}, {0.025, 0.2804}, {0.030, 0.3076}, {0.035, 0.3332},
+    {0.040, 0.3577}, {0.045, 0.3804},
     {0.05, 0.4021}, {0.08, 0.5158}, {0.10, 0.5819}, {0.15, 0.7261}, {0.20, 0.8533},
     {0.30, 1.0796}, {0.40, 1.2866}, {0.60, 1.6864},
 };
@@ -465,13 +516,16 @@ constexpr TypeCpmPoint kDiamondCurve[] = {
 // 0.75 cells -> 0.75.
 // AESTHETIC HARD FLOOR: 2 cells is +98.17 % in bending and percolates -> 2.
 constexpr TypeMeasurements kDiamondMeasured = {
-    kDiamondDia, 8, 10.0, 0.75, 2.0, kDiamondCurve, 10};
+    kDiamondDia, 15, 10.0, 0.75, 2.0, kDiamondCurve, 10};
 
 // BCC -- docs/handoffs/evidence/2026-11-01-lattice-types-k1/bcc_*.{csv,txt}, the same
 // harness and conditions as FCC's block above.
 // DIAMETER (`law bcc`): bisected on the converged solid fraction; within the band the
 // vpc48 B3 table differs by at most 4.9 % (bcc_law.txt, "B3 gap").
+// ★ 2026-11-25: the rows under 0.05, as diamond's above (bcc_law.csv; the band now runs to 0.03194).
 constexpr TypeDiaRow kBccDia[] = {
+    {0.015, 0.2156}, {0.020, 0.2499}, {0.025, 0.2799}, {0.030, 0.3078}, {0.035, 0.3334},
+    {0.040, 0.3578}, {0.045, 0.3803},
     {0.05, 0.4018}, {0.08, 0.5157}, {0.10, 0.5817}, {0.15, 0.7262}, {0.20, 0.8531},
     {0.30, 1.0795}, {0.40, 1.2869}, {0.60, 1.6864},
 };
@@ -489,13 +543,16 @@ constexpr TypeCpmPoint kBccCurve[] = {
 // cells -> 0.75.
 // AESTHETIC HARD FLOOR: 2 cells is +49.68 % in bending and percolates -> 2.
 constexpr TypeMeasurements kBccMeasured = {
-    kBccDia, 8, 10.0, 0.75, 2.0, kBccCurve, 10};
+    kBccDia, 15, 10.0, 0.75, 2.0, kBccCurve, 10};
 
 // SIMPLE CUBIC -- docs/handoffs/evidence/2026-11-01-lattice-types-k1/sc_*.{csv,txt}, the
 // same harness and conditions as FCC's block above.
 // DIAMETER (`law sc`): bisected on the converged solid fraction; within the band the
 // vpc48 B3 table differs by at most 4.0 % (sc_law.txt, "B3 gap").
+// ★ 2026-11-25: the rows under 0.05, as diamond's above (sc_law.csv; the band now runs to 0.01606).
 constexpr TypeDiaRow kScDia[] = {
+    {0.015, 0.3272}, {0.020, 0.3793}, {0.025, 0.4259}, {0.030, 0.4682}, {0.035, 0.5073},
+    {0.040, 0.5438}, {0.045, 0.5785},
     {0.05, 0.6113}, {0.08, 0.7847}, {0.10, 0.8849}, {0.15, 1.1051}, {0.20, 1.2988},
     {0.30, 1.6445}, {0.40, 1.9620}, {0.60, 2.5777},
 };
@@ -513,7 +570,7 @@ constexpr TypeCpmPoint kScCurve[] = {
 // -> 0.75.
 // AESTHETIC HARD FLOOR: 2 cells is +12.49 % in bending and percolates -> 2.
 constexpr TypeMeasurements kScMeasured = {
-    kScDia, 8, 4.0, 0.75, 2.0, kScCurve, 4};
+    kScDia, 15, 4.0, 0.75, 2.0, kScCurve, 4};
 
 // THE SHEETS (K2) -- docs/handoffs/evidence/2026-11-01-lattice-types-k1/<sheet>_*.{csv,txt},
 // from core/tests/harness/tpms_probe.cpp on the production wall (tpms.hpp).
@@ -1200,15 +1257,66 @@ LatticeWidthBounds lattice_width_bounds(LatticeTopology topo) {
       b.touch = topo == LatticeTopology::Gyroid ? 0.43301270189221932   // sqrt 3 / 4
                                                 : 0.3507;
       return b;
-    case LatticeTopology::Bccz:
-    case LatticeTopology::Fccz:
-    case LatticeTopology::Reentrant:
-      break;
+    // The tetragonal three (2026-11-24: on the new engine, Aesthetic only), from their own canonical cells
+    // (strut_cell.hpp), recomputed there by test_lattice_width_bounds: the open look is the one strut geometry; touch
+    // the smaller of the two gaps (lattice.hpp's table): bccz 1/sqrt 2 both ways (as bcc); fccz 1/2 in 3D (its face
+    // view stays fcc's 1/sqrt 2); reentrant 1/3 in 3D (its face view 1/sqrt 5).
+    case LatticeTopology::Bccz:        b.touch = 0.70710678118654752; return b;  // 1/sqrt 2
+    case LatticeTopology::Fccz:        b.touch = 0.5; return b;
+    case LatticeTopology::Reentrant:   b.touch = 1.0 / 3.0; return b;
   }
   throw std::invalid_argument(
       std::string("lattice_width_bounds: \"") + lattice_topology_name(topo) +
-      "\" has no canonical cell (it is tetragonal), so neither its open look nor where its "
+      "\" is not a lattice type core knows, so neither its open look nor where its "
       "struts touch is stated; no other type's bound is used for it (R1).");
+}
+
+// notes29: lattice.hpp states the three events and their closed forms; test_lattice_width_bounds measures channels and
+// see_through again on the periodic cell's voxels and recomputes touch from the segments.
+LatticeQuiltLimits lattice_quilt_limits(LatticeTopology topo) {
+  const double r2 = std::sqrt(2.0), r3 = std::sqrt(3.0), r6 = std::sqrt(6.0);
+  LatticeQuiltLimits q;
+  switch (topo) {
+    case LatticeTopology::Octet:       q.channels = 1.0 / r6;   q.see_through = (r2 - 1.0) / 2.0; break;
+    case LatticeTopology::SimpleCubic: q.channels = 1.0;        q.see_through = 1.0; break;
+    case LatticeTopology::Bcc:         q.channels = 1.0 / r2;   q.see_through = 1.0 / r2; break;
+    case LatticeTopology::Fcc:         q.channels = 1.0 / r3;   q.see_through = r2 - 1.0; break;
+    case LatticeTopology::Diamond:     q.channels = 1.0 / r2;   q.see_through = 1.0 / (2.0 * r2); break;
+    case LatticeTopology::Kelvin:      q.channels = r6 / 4.0;   q.see_through = 1.0 / (2.0 * r2); break;
+    case LatticeTopology::Rhombic:     q.channels = 1.0 / r6;   q.see_through = 1.0 / (2.0 * r2); break;
+    case LatticeTopology::Bccz:        q.channels = 1.0 / r2;   q.see_through = 1.0 / r2; break;
+    case LatticeTopology::Fccz:        q.channels = 1.0 / r3;   q.see_through = r2 - 1.0; break;
+    case LatticeTopology::Reentrant:   q.channels = 1.0 / r2;   q.see_through = 1.0 / r2; break;
+    case LatticeTopology::Gyroid:
+    case LatticeTopology::SchwarzD:
+      throw std::invalid_argument(std::string("lattice_quilt_limits: \"") + lattice_topology_name(topo) +
+                                  "\" is a sheet type: its walls have no struts to fuse (lattice_width_bounds states "
+                                  "where its channels close)");
+    default:
+      throw std::invalid_argument(std::string("lattice_quilt_limits: \"") + lattice_topology_name(topo) +
+                                  "\" is not a strut type core knows; no other type's quilt is used for it (R1)");
+  }
+  const LatticeWidthBounds b = lattice_width_bounds(topo);
+  q.touch = b.touch;
+  q.open_look = b.open_look;
+  return q;
+}
+
+double lattice_open_cell_mm(LatticeTopology topo, double strut_mm) {
+  return strut_mm / lattice_quilt_limits(topo).open_look;
+}
+
+double lattice_quilt_cell_mm(LatticeTopology topo, double strut_mm) {
+  return strut_mm / lattice_quilt_limits(topo).touch;
+}
+
+// notes29b: lattice.hpp states the rule (one printed line of air short of the touch).
+double lattice_quilt_off_strut_mm(LatticeTopology topo, double cell_mm, double line_mm) {
+  return lattice_quilt_limits(topo).touch * cell_mm - kQuiltOffGapLines * std::max(0.0, line_mm);
+}
+
+double lattice_quilt_off_cell_mm(LatticeTopology topo, double strut_mm, double line_mm) {
+  return (strut_mm + kQuiltOffGapLines * std::max(0.0, line_mm)) / lattice_quilt_limits(topo).touch;
 }
 
 LatticeTopologyChoice resolve_lattice_topology(const std::string& lattice_id,

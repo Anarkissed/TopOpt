@@ -190,12 +190,22 @@ add_library(topopt
   # The lattice file job (docs/design/lattice-rebuild/04-layout-file-job.md): job.json ->
   # layout -> mesh -> STL. `topopt-cli lattice-file` is its only caller in core.
   src/lattice_layout/file_job.cpp
+  # His 11-25: print resolutions when exporting (Full / Medium / Coarse) and each one's size estimate, from the layout.
+  src/lattice_layout/print_resolution.cpp
   # His print orientation (P2): "rotate at the door", every input of a job turned once so up is +Z (print_frame.hpp).
   src/lattice_layout/print_frame.cpp
   # His print orientation (P4): the six candidates, their guessed strength, support, height and bed (print_orientation.hpp).
   src/lattice_layout/print_orientation.cpp
   # Install 3: the lattice the strength check sees (rule V4); the check itself is run_job.cpp's.
   src/lattice_layout/strength.cpp
+  # 2026-11-24: what differs by strut type (lattice_layout.hpp, PER TYPE; cell_struts).
+  src/lattice_layout/types.cpp
+  # notes28 sheets (gyroid, Schwarz-D on this engine): the field, the seams, the membrane, sheet_cells.bin
+  # (lattice_layout.hpp, SHEETS), and the blend band (builder E's: lattice_layout_mesh.hpp, mesh_sheet_seam_band).
+  src/lattice_layout/sheets.cpp
+  src/lattice_layout/sheet_blend.cpp
+  # 2026-11-24: a print coupon per strut type, made by this engine (lattice_layout_file.hpp, make_type_coupon).
+  src/lattice_layout/coupon.cpp
   # Brief E2, Part A: the Organic strength check, a frame of beams (lattice_layout_frame.hpp).
   src/lattice_layout/frame_check.cpp
   # Brief E2, Part B: the width floors, their file and strengthened.json (the job key "strengthened").
@@ -564,6 +574,17 @@ add_test(NAME lattice_width_bounds COMMAND test_lattice_width_bounds)
 add_executable(test_lattice_layout tests/unit/test_lattice_layout.cpp)
 target_link_libraries(test_lattice_layout PRIVATE topopt)
 add_test(NAME lattice_layout COMMAND test_lattice_layout)
+# notes29 (his iPad notes on release 20, 2026-11-25): with Allow quilt off no strut type is laid past its own limits
+# (no cell under the open floor, no strut past the open look), in every mode; no holes in a region (no cell laid with
+# nothing in it); an even outline (no cut cell opened at the part's edge with no strut in it).
+add_executable(test_lattice_quilt_holes tests/unit/test_lattice_quilt_holes.cpp)
+target_link_libraries(test_lattice_quilt_holes PRIVATE topopt)
+add_test(NAME lattice_quilt_holes COMMAND test_lattice_quilt_holes)
+# ★ notes30 SA1 (Structural Auto, REMOVE.md): the strut law turned round (the lightest density that holds the target)
+# against the law itself for the 9 types with a law, and its field form.
+add_executable(test_strut_sizing tests/unit/test_strut_sizing.cpp)
+target_link_libraries(test_strut_sizing PRIVATE topopt)
+add_test(NAME strut_sizing COMMAND test_strut_sizing)
 # Stage F: the printable mesh made from the layout (one closed piece as a slicer reads it,
 # sealed lattice kept, bridges, what the layer check asks left out, posts, cancel). Without
 # the Manifold library the writer says it cannot, and the test checks that it says so.
@@ -615,6 +636,12 @@ add_test(NAME support_paint COMMAND test_support_paint)
 add_executable(test_print_orientation tests/unit/test_print_orientation.cpp)
 target_link_libraries(test_print_orientation PRIVATE topopt)
 add_test(NAME print_orientation COMMAND test_print_orientation)
+# ★ notes29 (P8, his print orientation on the iPad): a lay in the print frame turned back to the model frame (exact,
+# inverted); the iPad's turned Organic lay is the print file's, bar for bar; its growth climbs the kept up.
+add_executable(test_print_frame_turn tests/unit/test_print_frame_turn.cpp)
+target_link_libraries(test_print_frame_turn PRIVATE topopt)
+target_compile_definitions(test_print_frame_turn PRIVATE TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME print_frame_turn COMMAND test_print_frame_turn)
 # Organic cut 2 (brief E1, rules OF1..): the file as the solid plus unmerged closed tubes. The test makes its reference
 # unions with Manifold, so it is registered only where the writer has it.
 if(manifold_FOUND)
@@ -2354,6 +2381,45 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
       DOCS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../docs/strength-check"
       TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME lattice_strength COMMAND test_lattice_strength)
+    # The type matrix (2026-11-24): every strut type through the layout and the file job on core's fixtures (the cube,
+    # the filleted bore plate, the L-bracket stood on end), Structural (with the strength check) and Aesthetic, Auto
+    # and a typed cell, a face region and the whole part; each check with its RED control; the octet's bytes pinned.
+    add_executable(test_lattice_types_matrix tests/validation/test_lattice_types_matrix.cpp)
+    target_link_libraries(test_lattice_types_matrix PRIVATE topopt)
+    target_compile_definitions(test_lattice_types_matrix PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME lattice_types_matrix COMMAND test_lattice_types_matrix)
+    # notes28 sheets (SPEC section 6): gyroid and Schwarz-D on the new engine, laid, made and checked on the same
+    # fixtures, each check with its RED control; the octet's bytes pinned.
+    add_executable(test_lattice_sheets_matrix tests/validation/test_lattice_sheets_matrix.cpp)
+    target_link_libraries(test_lattice_sheets_matrix PRIVATE topopt)
+    target_compile_definitions(test_lattice_sheets_matrix PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME lattice_sheets_matrix COMMAND test_lattice_sheets_matrix)
+    # notes28 sheets, builder B: the strength check and the data out for gyroid and Schwarz-D (credit by place, the
+    # floor, the band, the blend band, the margins per voxel, sheet_cells.bin, the CLI's check, the file job's key).
+    add_executable(test_lattice_sheets_strength tests/validation/test_lattice_sheets_strength.cpp)
+    target_link_libraries(test_lattice_sheets_strength PRIVATE topopt)
+    target_compile_definitions(test_lattice_sheets_strength PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME lattice_sheets_strength COMMAND test_lattice_sheets_strength)
+    # His 11-25: print resolutions when exporting (Full / Medium / Coarse). Full is today's file byte for byte (every strut
+    # type and both sheets, pinned); Medium and Coarse print-clean, no strut or wall thinner; the layout's size estimate
+    # within its stated error; each with its RED control.
+    add_executable(test_print_resolution tests/validation/test_print_resolution.cpp)
+    target_link_libraries(test_print_resolution PRIVATE topopt)
+    target_compile_definitions(test_print_resolution PRIVATE
+      FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME print_resolution COMMAND test_print_resolution)
     # His print orientation (P2): "rotate at the door". The same job with up = +X makes the same file and report as a
     # copy of everything turned by hand; each input left unturned is caught (print_frame.hpp).
     add_executable(test_print_frame tests/validation/test_print_frame.cpp)
@@ -2363,6 +2429,15 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
       SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
       TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME print_frame COMMAND test_print_frame)
+    # OS19's companion (2026-11-26): how deep a Solid finish under the loaded face clears the interim guard, swept on the
+    # check's own grid with the stage switch off and `face`; the result's solid_depth_needed_mm is held to the sweep.
+    add_executable(test_organic_bare_lattice_depth tests/validation/test_organic_bare_lattice_depth.cpp)
+    target_link_libraries(test_organic_bare_lattice_depth PRIVATE topopt)
+    target_compile_definitions(test_organic_bare_lattice_depth PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME organic_bare_lattice_depth COMMAND test_organic_bare_lattice_depth)
   endif()
 
   # M6.2 integration test: the maintainer-authored demo job in
@@ -2627,7 +2702,8 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
-    LAW_EVIDENCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../evidence/2026-11-09-lattice-type-strut-laws")
+    LAW_EVIDENCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../evidence/2026-11-09-lattice-type-strut-laws"
+    LOW_LAW_EVIDENCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../evidence/2026-11-25-strut-laws-low-density")
   add_test(NAME lattice_type_strut_law COMMAND test_lattice_type_strut_law)
   # E2.4 (ruling 11-06 (1)): outer_finish "none", the open lattice, its cut cells uncredited.
   add_executable(test_lattice_open_finish tests/validation/test_lattice_open_finish.cpp)

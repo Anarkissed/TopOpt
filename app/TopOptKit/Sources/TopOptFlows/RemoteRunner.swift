@@ -679,6 +679,9 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     // field-equivalence gate lives in JobJSONEquivalenceTests.
     func buildJobJSON() throws -> Data { try Self.buildJobJSON(request) }
 
+    /// RED CONTROL (tests): as before notes30 — the job carries no solid top / bottom skins.
+    nonisolated(unsafe) static var controlNoSolidSkins = false
+
     /// ★ STATIC, SO THE ON-DEVICE PATH RUNS THE SAME DOCUMENT (maintainer,
     /// 2026-08-17: "Can you please make it run on the iPad as well"). The
     /// on-device lattice writes THIS job.json to a temp directory and hands it to
@@ -1013,6 +1016,13 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             TopOptKit.bridgeWallLineWidthMM(forOverride: request.wallLineWidthInnerMM)
         loads["wall_line_width_outer_mm"] =
             TopOptKit.bridgeWallLineWidthOuterMM(forOverride: request.wallLineWidthOuterMM)
+        // ★ notes30 (his word 11-26: the print settings he set travel with the part): the solid top and bottom skins, as
+        // layers and as mm (layers × his layer height), for the TO rebuild's printed grams (it assumed 1.0 mm / 0.6 mm).
+        for (key, layers) in [("top", request.topSolidLayers), ("bottom", request.bottomSolidLayers)]
+            where layers >= 0 && !controlNoSolidSkins {
+            loads[key + "_solid_layers"] = layers
+            loads[key + "_solid_mm"] = (Double(layers) * request.layerHeightMM * 1e6).rounded() / 1e6
+        }
         if !request.clearances.isEmpty {
             loads["clearances"] = request.clearances.map { c -> [String: Any] in
                 // The kind + distance fields are IDENTICAL for auto and manual (BAR

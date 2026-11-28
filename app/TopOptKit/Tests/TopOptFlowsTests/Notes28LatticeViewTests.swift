@@ -564,7 +564,7 @@ final class Notes28LatticeStageHostedTests: XCTestCase {
         h.pump(3)
         try h.pickFromMenu("capsuleMenu", "Structural", what: "the stage menu")
         h.pump(1.5)
-        if settingsSaved, h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleSetup", "the page's Save", settle: 1.5) }
+        if settingsSaved, h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleLattice", "the page's Save", settle: 1.5) }
         return (h, p)
     }
 

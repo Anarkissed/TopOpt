@@ -250,7 +250,7 @@ final class LatticeGrowthPass {
     func encode(_ enc: MTLRenderCommandEncoder, growth g: LatticeGrowth, depthState: MTLDepthStencilState,
                 clipFromModel: simd_float4x4, eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4,
                 model: simd_float4x4, heights: (lo: Float, hi: Float), now: CFTimeInterval,
-                shown: Int? = nil, playhead: Float? = nil) -> Int {
+                shown: Int? = nil, playhead: Float? = nil, heightRow: SIMD4<Float>? = nil) -> Int {
         sync(g)
         lastDrawn = 0
         let size = g.alpha(at: now)
@@ -266,7 +266,7 @@ final class LatticeGrowthPass {
         }
         var f = Frame(clipFromModel: clipFromModel, eyeFromModel: eyeFromModel, eyeNormalBasis: eyeNormalBasis,
                       colour: SIMD4(Self.colour, size), tip: SIMD4(Self.tipColour, playhead ?? g.clock), cue: SIMD4(1, 0, 0, 0),
-                      worldY: SIMD4(model.columns.0.y, model.columns.1.y, model.columns.2.y, model.columns.3.y),
+                      worldY: heightRow ?? SIMD4(model.columns.0.y, model.columns.1.y, model.columns.2.y, model.columns.3.y),
                       band: band, bandColour: SIMD4(Self.bandColour, 1))
         enc.setRenderPipelineState(pipeline)
         enc.setDepthStencilState(depthState)
@@ -389,15 +389,17 @@ extension MeshRenderer {
                              eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4, model: simd_float4x4) -> Int {
         guard growthInFrame, let g = growth, let pass = growthPass else { return 0 }
         var lo = Float.greatestFiniteMagnitude, hi = -Float.greatestFiniteMagnitude
+        // ★ notes29: laid standing on the face he kept, the band rises along the print's up (the part's own mm); else the world's
+        let row: SIMD4<Float>? = g.printUp.map { SIMD4(simd_normalize($0), 0) }
         if let b = mesh?.bounds, !b.isEmpty {
             for x in [b.min.x, b.max.x] { for y in [b.min.y, b.max.y] { for z in [b.min.z, b.max.z] {
-                let w = (model * SIMD4<Float>(x, y, z, 1)).y
+                let w = row.map { simd_dot($0, SIMD4<Float>(x, y, z, 1)) } ?? (model * SIMD4<Float>(x, y, z, 1)).y
                 lo = Swift.min(lo, w); hi = Swift.max(hi, w)
             }}}
         } else { lo = 0; hi = 1 }
         return pass.encode(enc, growth: g, depthState: depthState, clipFromModel: clipFromModel, eyeFromModel: eyeFromModel,
                            eyeNormalBasis: eyeNormalBasis, model: model, heights: (lo, hi), now: growthNow,
-                           shown: growthFrame.shown, playhead: growthFrame.playhead)
+                           shown: growthFrame.shown, playhead: growthFrame.playhead, heightRow: row)
     }
 
     /// The growth this view draws (the Lattice page's preview's), or none. Returns true when the frame must be redrawn.

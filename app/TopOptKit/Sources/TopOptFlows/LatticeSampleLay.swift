@@ -46,9 +46,11 @@ struct LatticeSampleLay: Equatable, Sendable {
             ? LatticeBounds.compute(settings: l, limits: TopOptKit.latticeLimits(topology: l.topologyID),
                                     lineWidthMM: s.beadMM).generateRelativeDensity : nil)
         if !s.byStress, l.densityMode != .sim, let rho = declared, rho > 0,
-           let pct = [l.cellSizeMode == .fixed && l.cellMM > 0 ? l.cellMM : s.cellMaxMM, s.cellMaxMM, 8].lazy
-               .compactMap({ percent(rho, $0) }).first {
-            s.dial = Swift.min(1, Swift.max(0.01, pct / 100))
+           let (cell, pct) = [l.cellSizeMode == .fixed && l.cellMM > 0 ? l.cellMM : s.cellMaxMM, s.cellMaxMM, 8].lazy
+               .compactMap({ c in percent(rho, c).map { (c, $0) } }).first {
+            // ★ notes29: the page's percent as core's dial (LatticeDensityDial.coreDial), as his part's rows are sent
+            s.dial = LatticeDensityDial.coreDial(percent: pct, cellMM: cell, topology: s.topology, lineWidthMM: s.beadMM,
+                                                 minStrutLines: s.minStrutLines, allowQuilt: s.allowQuilt)
         }
         var area: LatticeLayoutSession.Region?
         if let gid, var a = own {
@@ -72,9 +74,10 @@ struct LatticeSampleLay: Equatable, Sendable {
         s.algorithm = "uniform"
         s.cellMM = Swift.max(0, cellMM)
         if cellMM > 0 { s.cellMaxMM = cellMM }
-        if rho > 0, let pct = ProjectModel.latticeDensityPercent(rho: rho, cellMM: cellMM > 0 ? cellMM : s.cellMaxMM,
-                                                                 topology: s.topology, lineWidthMM: s.beadMM) {
-            s.dial = Swift.min(1, Swift.max(0.01, pct / 100))
+        let cell = cellMM > 0 ? cellMM : s.cellMaxMM
+        if rho > 0, let pct = ProjectModel.latticeDensityPercent(rho: rho, cellMM: cell, topology: s.topology, lineWidthMM: s.beadMM) {
+            s.dial = LatticeDensityDial.coreDial(percent: pct, cellMM: cell, topology: s.topology, lineWidthMM: s.beadMM,
+                                                 minStrutLines: s.minStrutLines, allowQuilt: s.allowQuilt)
         }
         return LatticeSampleLay(settings: s, area: nil)
     }
@@ -182,9 +185,16 @@ struct LatticeSampleLay: Equatable, Sendable {
         var cellLo: Double, cellHi: Double
         /// The struts' relative densities (the type's law), lightest and heaviest; 0: none.
         var rhoLo: Double, rhoHi: Double
+        /// ★ notes29: the struts' Density as the page says it (1 ... 100 %, 100 = the type's own quilt: never over),
+        /// lightest and heaviest; 0: none (a type with no band).
+        var pctLo: Double = 0, pctHi: Double = 0
         /// Cells inside the shape band (core's band < 1: graded toward the outline).
         var bandCells: Int
         var stages: [String: Double]
+        /// ★ SHEETS: a sheet sample's fields on the sample body's own map (the sheet pass draws them); nil for struts.
+        var sheets: LatticeSheetDrawing? = nil
+        /// Something was laid (struts, or a sheet).
+        var laidAnything: Bool { struts > 0 || sheets != nil }
     }
 
     /// Lays `plan` in the cube (`cube`) or the sample part, on a session of its own (closed when it ends; leaving the page
@@ -215,12 +225,40 @@ struct LatticeSampleLay: Equatable, Sendable {
         let colours = LatticeLayoutColours.colours(laid, type: type, grade: plan.band)
         let rho = zip(LatticeLayoutColours.densities(laid, type: type), laid.barFlags + [UInt8](repeating: 0, count: Swift.max(0, laid.barCount - laid.barFlags.count)))
             .filter { $0.0 > 0 && !LatticeLayoutColours.isSkin($0.1) }.map(\.0)
+        // ★ notes29 (his release-20 footer read "density 107 → 10 %": a strut's density by its type's law, past solid on the
+        // quilt's small cells): each strut's width on its own cell as the page's Density percent, never over 100 %
+        var pcts: [Double] = []
+        for i in 0..<laid.barCount where i < laid.barCell.count && 7 * i + 6 < laid.bars.count {
+            if i < laid.barFlags.count, LatticeLayoutColours.isSkin(laid.barFlags[i]) { continue }
+            if let p = LatticeDensityDial.percent(strutMM: Double(laid.bars[7 * i + 6]), cellMM: Double(laid.barCell[i]),
+                                                  topology: s.topology, lineWidthMM: s.beadMM) { pcts.append(p) }
+        }
         let cells = stride(from: 0, to: laid.cellInfo.count, by: 5).map { Double(laid.cellInfo[$0]) }.filter { $0 > 0 }
         let inBand = stride(from: 2, to: laid.cellInfo.count, by: 5).filter { laid.cellInfo[$0] < 0.999 }.count
         step("coloursMS")
-        return Made(body: body, bars: r.bars, flags: r.barFlags, colours: colours, struts: r.barCount,
-                    cellLo: cells.min() ?? 0, cellHi: cells.max() ?? 0, rhoLo: rho.min() ?? 0, rhoHi: rho.max() ?? 0,
-                    bandCells: inBand, stages: stages)
+        var made = Made(body: body, bars: r.bars, flags: r.barFlags, colours: colours, struts: r.barCount,
+                        cellLo: cells.min() ?? 0, cellHi: cells.max() ?? 0, rhoLo: rho.min() ?? 0, rhoHi: rho.max() ?? 0,
+                        pctLo: pcts.min() ?? 0, pctHi: pcts.max() ?? 0, bandCells: inBand, stages: stages)
+        if !r.sheets.isEmpty {   // ★ SHEETS: the sample body's map (the sheet is drawn clipped to it), its regions, its colours
+            let g = LatticeLayoutPreview.mapGeometry((body.lo, body.hi))
+            let m = try await session.grid(origin: g.origin, voxel: g.voxel, dims: g.dims)
+            try Task.checkCancellation()
+            var d = LatticeSheetDrawing(token: 1, fields: r.sheets, seams: r.sheetSeams,
+                                        map: LatticeLayoutSolidGrid(token: 1, origin: g.origin, voxel: g.voxel, dims: g.dims, rg: m.rg))
+            if r.sheets.count > 1, let map = d.map {
+                d.regions = LatticeSheetDrawing.regionIndex(fields: r.sheets, map: map, frames: r.frames, cellRegion: r.cellRegion,
+                                                            cellFrame: r.cellFrame, cellLo: r.cellLo,
+                                                            cellSize: stride(from: 0, to: r.cellInfo.count, by: 5).map { r.cellInfo[$0] })
+            }
+            d.colours = LatticeLayoutColours.sheetColours(r.sheets)
+            d.colourKey = 1
+            made.sheets = d
+            let walls = LatticeLayoutColours.sheetDensities(r.sheets).flatMap { $0 }.filter { $0 > 0 }
+            made.rhoLo = walls.min() ?? 0; made.rhoHi = walls.max() ?? 0
+            stages["mapMS"] = m.ms
+            made.stages = stages
+        }
+        return made
     }
 
     // MARK: the caption
@@ -234,8 +272,12 @@ struct LatticeSampleLay: Equatable, Sendable {
             parts.append(mm(made.cellLo) == mm(made.cellHi) ? "cells of \(mm(made.cellHi)) mm"
                                                              : "cells \(mm(made.cellLo)) to \(mm(made.cellHi)) mm")
         }
-        if made.rhoHi > 0 {
-            let lo = Int((made.rhoLo * 100).rounded()), hi = Int((made.rhoHi * 100).rounded())
+        // ★ notes29: the Density percent the page speaks (100 % = the type's own quilt), never over 100 %
+        if made.pctHi > 0 {
+            let lo = Int(made.pctLo.rounded()), hi = Int(made.pctHi.rounded())
+            parts.append(lo == hi ? "density \(hi) %" : "density \(hi) → \(lo) %")
+        } else if made.rhoHi > 0 {
+            let lo = Int((Swift.min(1, made.rhoLo) * 100).rounded()), hi = Int((Swift.min(1, made.rhoHi) * 100).rounded())
             parts.append(lo == hi ? "density \(hi) %" : "density \(hi) → \(lo) %")
         }
         if let f = finish { parts.append(f) }

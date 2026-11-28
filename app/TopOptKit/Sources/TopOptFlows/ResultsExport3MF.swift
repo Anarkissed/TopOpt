@@ -25,7 +25,15 @@ public enum ResultsExportCopy {
     public static let stlInfoTitle = "STL"
     public static let stlInfo = "An STL is the shape alone. It carries no painted supports and no print settings, so your "
         + "slicer starts from its own. The 3MF keeps both."
-    public static let printFileLine = "The print file"
+    /// ★ notes30 (his decision 11-27: "I think we should just say 'Turn on manual supports'. It's too much to ask the user to
+    /// give us the printer/nozzle/bed/print profile etc each time"): the Export button's line on a print file — the one thing
+    /// to do in the slicer — with its (i) beside the button saying where. RED CONTROL: the line before ("The print file").
+    public static var printFileLine: String { controlOldPrintFileLine ? "The print file" : "Turn on manual supports" }
+    nonisolated(unsafe) public static var controlOldPrintFileLine = false
+    public static let supportsInfoTitle = "Manual supports"
+    public static let supportsInfo = "The 3MF carries the painted supports. In Bambu Studio or OrcaSlicer, open Support, tick "
+        + "Enable support and set Type to tree (manual): the supports print just where they are painted. In PrusaSlicer, "
+        + "set Supports to For support enforcers only. An STL is the shape alone."
     public static let fileFailed = "Couldn\u{2019}t export the file"
 }
 
@@ -41,6 +49,9 @@ extension ResultsModel {
         return PartsThreeMF.write([PartsThreeMF.Object(name: name, vertices: v.meshVertices, indices: v.meshIndices)],
                                   title: projectName.isEmpty ? name : projectName)
     }
+
+    /// ★ his 11-25: the print file's three resolutions, as its report gives them (nil: not a print file, or none given).
+    public var printResolutions: PrintResolutionFacts? { reportBlocks?.printFile?.resolutions }
 
     /// The print file this result was made as: its name and size, as its report gives them (nil: not a print file's).
     public var printFileIdentity: PrintFileKeep.Identity? {
@@ -120,6 +131,13 @@ public enum PrintFileKeep {
 
     /// The version whose Results are on screen (the open workspace's), for Results' Export. Set by the workspace as it opens.
     @MainActor public static var open: (() -> (folder: UUID, store: ProjectStore)?)?
+
+    /// ★ notes30 (his word 11-26): the open version's print settings, as its project keeps them — what Export writes into the
+    /// 3MF it hands out (ThreeMFPrintSettings). nil: no version open.
+    @MainActor static func openPrintParams() -> PrintParams? {
+        guard let o = open?() else { return nil }
+        return o.store.snapshot(id: o.folder)?.printParams
+    }
 
     /// Whether the open version keeps this result's print file (asked as Results draws: the answer is kept per file and folder).
     @MainActor static func openFile(exists id: Identity?) -> Bool {

@@ -271,8 +271,8 @@ final class Notes25SampleKeptHostedTests: XCTestCase {
 /// The A1 pad, Structural, on Lattice Setup with the preview on (AppAsks1114HostedTests' set-up): `thinWalls` its first pad
 /// whole (the thin-wall pop-up comes by itself); `cellMM` a Manual cell (nothing fits: all of it solid).
 @MainActor
-private func latticeSetup(_ size: CGSize, _ name: String, _ test: XCTestCase, thinWalls: Bool, cellMM: Double? = nil) throws
-    -> (AppBuildHost, ProjectModel) {
+private func latticeSetup(_ size: CGSize, _ name: String, _ test: XCTestCase, thinWalls: Bool, cellMM: Double? = nil,
+                          popups: Bool = false) throws -> (AppBuildHost, ProjectModel) {
     let r = try FlexiblePressFixtures.a1Project(thinWalls ? 1 : 3, test, facePrism: false)
     let p = r.project
     p.lattice.flexible = nil
@@ -284,7 +284,9 @@ private func latticeSetup(_ size: CGSize, _ name: String, _ test: XCTestCase, th
     }
     if let c = cellMM { p.lattice.cellSizeMode = .fixed; p.lattice.cellMM = c }
     p.lattice.enabled = true
-    let h = AppBuildHost(WorkspacePlaceholder(model: r.app, project: p), size: size, test: test)
+    // `popups`: the centred pop-up layer over the page, as RootView mounts it (an (i)'s card is drawn there)
+    let page = WorkspacePlaceholder(model: r.app, project: p)
+    let h = popups ? AppBuildHost(page.overlay { AppPopupLayer() }, size: size, test: test) : AppBuildHost(page, size: size, test: test)
     h.pump(3)
     // ★ notes28: the stage now opens with its lattice view on; this set-up ARMS it by his tap (settings first, then their
     // Save), the flow these tests were written for — so the stage is entered as before
@@ -293,7 +295,7 @@ private func latticeSetup(_ size: CGSize, _ name: String, _ test: XCTestCase, th
     try h.pickFromMenu("capsuleMenu", "Structural", what: "\(name): the stage menu")
     h.pump(1.5)
     if h.frames.all["view-Lattice preview-on"] == nil { try h.tap("view-Lattice preview", "\(name): the lattice preview", settle: 1.5) }
-    if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleSetup", "\(name): the page's Save", settle: 1.5) }
+    if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleLattice", "\(name): the page's Save", settle: 1.5) }
     XCTAssertNil(h.frames.all["latticeSettingsPanel"], "\(name): premise: on Lattice Setup")
     return (h, p)
 }
@@ -316,7 +318,8 @@ final class Notes25LatticeSetupHostedTests: XCTestCase {
     func testThePopUpsReasonsAndTheNoticeInTheBottomCentre() throws {
         for (name, size) in hisSizes {
             LatticeLayoutPreview.lastGlowLit = 0
-            let (h, _) = try latticeSetup(size, name, self, thinWalls: true)
+            AppPopups.shared.current = nil
+            let (h, p) = try latticeSetup(size, name, self, thinWalls: true, popups: true)
             guard let panel = waitFor(h, "lattice-thin-walls-panel", seconds: 240) else {
                 return XCTFail("★ \(name): the thin-wall pop-up did not come")
             }
@@ -339,20 +342,52 @@ final class Notes25LatticeSetupHostedTests: XCTestCase {
                 XCTAssertGreaterThan(b.minY, learn.maxY - 0.5, "\(name): the buttons under the words")
             }
             XCTAssertTrue(screen.contains(panel), "★ \(name): the pop-up wholly on the screen")
+            // ★ RE-PINNED (notes30, R1): builder N1's notes29 one (i) (his 11-25: "follow the front-and-centre notification version
+            // across the ENTIRE APP … 'Tap anywhere to continue'"): each reason's (i) opens the centred card OVER this pop-up (was
+            // a Popover window), and a tap anywhere brings this pop-up back as it was — never closed, never left under the card.
+            var words: [String] = []
             for i in 1...3 {
+                XCTAssertNil(AppPopups.shared.current, "\(name): premise: no card up")
                 try h.tap("info-thin-walls-why-\(i)", "\(name): reason \(i)'s (i)", settle: 0.6)
-                XCTAssertNotNil(NSApp.windows.first { $0 !== h.window && $0.isVisible && $0.className.contains("Popover") },
-                                "★ \(name): reason \(i)'s (i) opens its words")
-                NSApp.windows.filter { $0 !== h.window && $0.className.contains("Popover") }.forEach { $0.orderOut(nil) }
-                h.pump(0.4)
+                let card = try XCTUnwrap(AppPopups.shared.current, "★ \(name): reason \(i)'s (i) opens its words")
+                XCTAssertTrue(card.info, "\(name): an (i)'s card, not an error's")
+                XCTAssertFalse(card.title.isEmpty || card.text.isEmpty, "\(name): reason \(i): its title and its words")
+                words.append(card.text)
+                XCTAssertNil(NSApp.windows.first { $0 !== h.window && $0.isVisible && $0.className.contains("Popover") },
+                             "\(name): no Popover window any more")
+                let c = try h.onScreen("appPopup", "★ \(name): reason \(i)'s card, wholly on the screen")
+                XCTAssertEqual(c.midX, size.width / 2, accuracy: 1, "★ \(name): the card front and centre")
+                XCTAssertEqual(c.midY, size.height / 2, accuracy: 1, "★ \(name): the card front and centre")
+                let text = try h.onScreen("appPopupText", "★ \(name): reason \(i)'s words")
+                XCTAssertTrue(c.insetBy(dx: -0.5, dy: -0.5).contains(text), "★ \(name): its words inside the card, readable")
+                XCTAssertTrue(c.intersects(panel), "\(name): the card stands over the pop-up")
+                try h.picture("notes30-thin-walls-info-\(name)-\(i).png")
+                // a tap anywhere — here where the pop-up's Continue (or Switch) lies under the card's dimmed backdrop. The
+                // card is drawn above the pop-up: the tap closes the card and never reaches Continue.
+                let under = ["lattice-thin-walls-continue", "lattice-thin-walls-switch"].compactMap { h.frames.all[$0] }
+                    .first { !c.contains(CGPoint(x: $0.midX, y: $0.midY)) }
+                let spot = under.map { CGPoint(x: $0.midX, y: $0.midY) } ?? CGPoint(x: c.midX, y: c.midY)
+                h.click(spot, settle: 0.6)
+                XCTAssertNil(AppPopups.shared.current, "★ \(name): a tap anywhere closes reason \(i)'s card")
+                XCTAssertNil(h.frames.all["appPopup"], "\(name): the card is gone")
+                let back = try XCTUnwrap(h.frames.all["lattice-thin-walls-panel"], "★ \(name): the thin-wall pop-up is back")
+                XCTAssertEqual(back.minX, panel.minX, accuracy: 0.5, "★ \(name): back as it was")
+                XCTAssertEqual(back.minY, panel.minY, accuracy: 0.5, "★ \(name): back as it was")
+                XCTAssertEqual(back.size.height, panel.size.height, accuracy: 0.5, "★ \(name): back as it was")
+                XCTAssertEqual(p.lattice.stageMode, .structural, "★ \(name): the tap never reached Switch to Aesthetic")
+                XCTAssertFalse(p.lattice.thinWallsNoticeSeen, "★ \(name): the tap never reached Continue")
             }
+            XCTAssertEqual(Set(words).count, 3, "★ \(name): each (i) its own reason's words")
             AppPopups.shared.current = nil
             try h.tap("lattice-thin-walls-learn", "\(name): Learn more", settle: 0.6)
             XCTAssertEqual(AppPopups.shared.current?.title, LatticeThinWallPrompt.pageTitle, "★ \(name): Learn more opens the page")
             for head in ["WHAT EACH IS FOR", "AT THIN WALLS", "HOW STRENGTH IS JUDGED", "WHICH TO PICK"] {
                 XCTAssertTrue(AppPopups.shared.current?.text.contains(head) == true, "\(name): the page says \(head)")
             }
-            AppPopups.shared.current = nil
+            // (notes30: the card is drawn now — closed as he would, a tap anywhere: here the screen's left edge)
+            h.click(CGPoint(x: 8, y: size.height / 2), settle: 0.6)
+            XCTAssertNil(AppPopups.shared.current, "\(name): a tap anywhere closes the page")
+            XCTAssertNotNil(h.frames.all["lattice-thin-walls-panel"], "\(name): the thin-wall pop-up stays")
 
             // ★ D10: the walls glow while the pop-up is up (the lay's own solid places), and stop when he picks
             XCTAssertNotNil(waitFor(h, "lattice-thin-walls-glow", seconds: 60), "★ \(name): the walls glow while the pop-up shows")
@@ -375,6 +410,9 @@ final class Notes25LatticeSetupHostedTests: XCTestCase {
             // ★ D10: he picks (Continue): the pop-up and its glow go
             try h.tap("lattice-thin-walls-continue", "\(name): Continue with Structural", settle: 1)
             XCTAssertNil(h.frames.all["lattice-thin-walls-glow"], "★ \(name): the glow ends when he picks")
+            // RED CONTROL (notes30): the same click with no card over the pop-up IS Continue — the pop-up goes
+            XCTAssertTrue(p.lattice.thinWallsNoticeSeen, "RED CONTROL \(name): Continue taken")
+            XCTAssertNil(h.frames.all["lattice-thin-walls-panel"], "RED CONTROL \(name): the pop-up closed")
         }
     }
 
@@ -406,7 +444,11 @@ final class Notes25LatticeSetupHostedTests: XCTestCase {
             let end = Date().addingTimeInterval(240)
             while h.frames.all["latticeCannot"] != nil, Date() < end { h.pump(1) }
             XCTAssertNil(h.frames.all["latticeCannot"], "★ \(name): a setting that lays brings Lattice back")
-            h.pump(1)
+            // ★ 362 (release (20)): the title's frame is reported a moment after "latticeCannot" goes; on a busy Mac one pump
+            // read the old width (113.5 = "Cannot Lattice") while the screen already said "Lattice" (54) — wait for it, ≤ 10 s
+            let settle = Date().addingTimeInterval(10)
+            repeat { h.pump(1) } while (h.frames.all["latticeButton-title"].map {
+                abs($0.width - width(LatticeCannotLattice.title)) <= 1.5 } ?? false) && Date() < settle
             if let t = h.frames.all["latticeButton-title"] {
                 XCTAssertNotEqual(t.width, width(LatticeCannotLattice.title), accuracy: 1.5, "★ \(name): no longer Cannot Lattice")
             }

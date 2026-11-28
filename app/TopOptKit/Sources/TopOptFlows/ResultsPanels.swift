@@ -32,6 +32,8 @@ public struct ResultsVersionRow: Equatable, Identifiable, Sendable {
     public let headline: String
     /// ★ R-b: what its one line says after the name — "87 g · 1.5×" (with "· in 2 pieces" when it prints in pieces).
     public var value: String = ""
+    /// ★ notes30 (362's review): the words in the margin's place (a load on bare vines: no valid margin; `margin` is nil).
+    public var marginWords: String? = nil
 }
 
 public enum ResultsVersions {
@@ -110,13 +112,17 @@ public enum ResultsVersions {
     static func row(_ tab: ResultVariantVM, title: String, margin: Double, headline: String? = nil,
                     pieces: Int? = nil, twoDecimals: Bool = false) -> ResultsVersionRow {
         let x = twoDecimals ? StrengthWords.x : Self.x   // ★ notes25 C3: a print file's margin always with two decimals
-        let verdict = tab.latticeAccepted == false ? "not certified" : x(margin) + " ✓"
+        // ★ notes30 (362's review): a load on bare vines has no valid margin — its words in the number's place, no tick
+        let words = tab.marginWords
+        let verdict = words ?? (tab.latticeAccepted == false ? "not certified" : x(margin) + " ✓")
         let piecesLine = pieces.map { " · in \($0) pieces" } ?? ""
         return ResultsVersionRow(id: "t\(tab.index)", title: title,
                                  subtitle: (tab.isRecommended ? "Recommended · " : "") + tab.massLabel + " · " + verdict + piecesLine,
-                                 recommended: tab.isRecommended, tabIndex: tab.index, margin: margin,
+                                 recommended: tab.isRecommended, tabIndex: tab.index, margin: words == nil ? margin : nil,
                                  massLabel: tab.massLabel, headline: headline ?? tab.headlineLabel,
-                                 value: tab.massLabel + " · " + (tab.latticeAccepted == false ? "not certified" : x(margin)) + piecesLine)
+                                 value: tab.massLabel + " · " + (words ?? (tab.latticeAccepted == false ? "not certified" : x(margin)))
+                                     + piecesLine,
+                                 marginWords: words)
     }
 }
 
@@ -294,6 +300,10 @@ extension ResultsModel {
             let plastic = tab.map { $0.massLabel + ($0.savingsPercent > 0 ? " \u{00B7} \($0.savingsPercent)% less than solid" : "") }
             r += a.rows(loadKg: shownLoadKg, unit: loadUnit, infillPercent: infillPercent, plastic: plastic)
             if let f = reportBlocks?.printFile { r += f.rows(.strength) }   // "Strengthened"
+            if let auto = reportBlocks?.structuralAuto {   // ★ notes30 SA1: how Auto strengthened it, its (i) the rounds
+                r.append(ResultsDetailRow(label: StructuralAutoCopy.strengthenedByAuto, value: StructuralAutoCopy.strengthenedValue(auto),
+                                          info: StructuralAutoCopy.strengthenedInfo(auto)))
+            }
             add("Version", version?.title)
             add("Recommended", recommendationLine.map { $0.hasPrefix("Recommended: ") ? String($0.dropFirst(13)) : $0 }
                 .map { $0.prefix(1).uppercased() + $0.dropFirst() })
@@ -305,6 +315,10 @@ extension ResultsModel {
             add("Version", version?.title)
             add("Struts", reportBlocks?.latticeFile?.strutsLine)   // ★ his ruling 11-17: on Structural the struts must pass too
             if let tab { add("Plastic", tab.massLabel + " · " + (version?.headline ?? tab.headlineLabel)) }
+            // ★ TO rebuild stage 2: the part as drawn, in printed grams, its (i) the solid figure
+            if let d = trueLoads.drawnPart, let v = TrueLoadsWords.drawnPartValue(d) {
+                r.append(ResultsDetailRow(label: TrueLoadsWords.drawnPartLabel, value: v, info: TrueLoadsWords.drawnPartInfo(d)))
+            }
             if isSelected { add("Mesh vs grid", selectedMassComparison.flatMap { $0.divergesBeyond1Percent || $0.meshIsEstimate ? $0.summary : nil }) }
             add("Stress scale", stressLegend.caption)
             if let tab, tab.maxStressMPa > 0 { add("Peak stress", String(format: "%.1f MPa", tab.maxStressMPa)) }
@@ -323,7 +337,8 @@ extension ResultsModel {
             let sc = scenarios(for: tab)
             if sc.count < 2 { add("Scenarios", "One load scenario") }
             for x in sc {
-                var v = x.margin.map { ResultsVersions.x($0) } ?? "—"
+                // ★ notes30 (362's review): a load on bare vines — the words, never a margin
+                var v = tab?.marginWords ?? x.margin.map { ResultsVersions.x($0) } ?? "—"
                 if x.governs { v += " · worst case" }
                 if x.unheld { v = "no path to its anchors" }
                 if let p = x.peakMPa { v += String(format: " · peak %.1f MPa", p) }
@@ -346,6 +361,12 @@ extension ResultsModel {
             add("This device", remoteComputeNote)
             for n in clearanceNotes { add("Keep clear", n) }
             for n in faceProtectionNotes { add("Protect", n) }
+            // ★ TO rebuild stage 1: the pad each anchor and load face got — one short line, each face by name behind its (i)
+            if let v = TrueLoadsWords.padValue(trueLoads.pads) {
+                let names = trueLoads.pads.map { placeName?($0) }
+                r.append(ResultsDetailRow(label: TrueLoadsWords.padLabel, value: v,
+                                          info: TrueLoadsWords.padInfo(trueLoads.pads, names: names)))
+            }
             for n in latticeNotes { add("Lattice", n) }
             if isSelected {
                 add("Latticed mass", latticeMassProvenanceLine)
@@ -548,9 +569,13 @@ struct ResultsVersionsPanel: View {
 
     @ViewBuilder private func line(_ r: ResultsVersionRow) -> some View {
         let on = r.tabIndex == selectedTab
-        DSRow(.group, key: "resultsVersion-\(r.id)", name: r.title, value: r.tabIndex == nil ? nil : r.value,
+        // ★ notes30 (362's review): a load on bare vines — no margin; its words on the row's own warning line and its weight
+        // alone as the value, so the result's name stays whole
+        let words = r.tabIndex == nil ? nil : r.marginWords
+        DSRow(.group, key: "resultsVersion-\(r.id)", name: r.title,
+              value: r.tabIndex == nil ? nil : (words == nil ? r.value : r.massLabel),
               selected: on, disabled: r.tabIndex == nil, tag: r.recommended ? "Recommended" : nil,
-              line: r.tabIndex == nil ? DSRowLine(r.subtitle) : nil,
+              line: r.tabIndex == nil ? DSRowLine(r.subtitle) : words.map { DSRowLine($0, tone: .warning) },
               tap: r.tabIndex.map { t in { pick(t) } }) {
             pickChip(r, on: on)
         }
@@ -769,15 +794,9 @@ struct ResultsDetailInfo: View {
     let label: String
     let text: String
     var body: some View {
-        Button { AppPopups.shared.help(label, text) } label: {
-            Image(systemName: "info.circle").font(.system(size: 15, weight: .regular))
-                .foregroundStyle(DS.Color.textTertiary.color)
-                .frame(width: DSParts.target, height: DSParts.target).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("About \(label)")
-        .accessibilityIdentifier("results-detail-info-" + label)
-        .background(ResultsChrome.publish("resultsDetailInfo-" + label))
+        // ★ notes29 (his 11-25): the one (i)
+        AppInfoButton(title: label, text: text, label: "About \(label)", id: "results-detail-info-" + label)
+            .background(ResultsChrome.publish("resultsDetailInfo-" + label))
     }
 }
 

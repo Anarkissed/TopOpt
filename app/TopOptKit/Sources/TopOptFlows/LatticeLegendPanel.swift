@@ -132,7 +132,6 @@ public struct LatticeLegendChrome<Content: View>: View {
     @Binding private var minimized: Bool
     /// The one-line explanation behind the (i), or nil for no (i) at all.
     private let info: String?
-    @State private var showInfo = false
     private let content: Content
 
     public init(tab: String = "TAP TO EXPLORE", width: CGFloat,
@@ -162,21 +161,9 @@ public struct LatticeLegendChrome<Content: View>: View {
                 // explanation of what to do"). It is a sentence you need once, and
                 // it was costing a column of width on every frame after that.
                 if let info {
-                    Button { showInfo.toggle() } label: {
-                        Image(systemName: "info.circle")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(DS.Color.accent.color)
-                            .frame(width: 26, height: 24)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("What can I do here?")
-                    .popover(isPresented: $showInfo) {
-                        Text(info)
-                            .font(.system(size: 13))
-                            .padding(14)
-                            .frame(width: 230)
-                    }
+                    // ★ notes29 (his 11-25): the one (i) — its 44 pt target over the header's 24 pt line
+                    AppInfoButton(title: "What can I do here?", text: info, label: "What can I do here?")
+                        .padding(.vertical, -10)
                 }
                 Button { minimized = true } label: {
                     Image(systemName: "chevron.up")
@@ -265,8 +252,6 @@ struct Line: Shape {
 }
 
 public struct LatticeLegendPanel: View {
-    /// Rows whose (i) has been tapped — their sentence is shown under the name.
-    @State private var infoOpen: Set<UUID> = []
     private let groups: [LatticeLegendGroup]
     private let span: (lo: Double, hi: Double)
     /// nil when the topology has no strut law (item a): the density shows without millimetres.
@@ -562,21 +547,10 @@ public struct LatticeLegendPanel: View {
                                 .foregroundStyle(DS.Color.textTertiary.color)
                                 .lineLimit(1)
                                 .fixedSize(horizontal: true, vertical: false)
-                            Button {
-                                if infoOpen.contains(g.id) { infoOpen.remove(g.id) } else { infoOpen.insert(g.id) }
-                            } label: {
-                                Image(systemName: infoOpen.contains(g.id) ? "info.circle.fill" : "info.circle")
-                                    .font(.system(size: T.detail + 1))
-                                    .foregroundStyle(DS.Color.accent.color)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("lattice-legend-info-\(g.id.uuidString)")
-                        }
-                        if infoOpen.contains(g.id) {
-                            Text(g.detail)
-                                .font(.system(size: T.detail))
-                                .foregroundStyle(DS.Color.textTertiary.color)
-                                .fixedSize(horizontal: false, vertical: true)
+                            // ★ notes29 (his 11-25): the one (i) — its words in the centred notification (they opened
+                            // under the line); its 44 pt target over the line
+                            AppInfoButton(title: g.name, text: g.detail, id: "lattice-legend-info-\(g.id.uuidString)")
+                                .padding(.vertical, -12)
                         }
                     }
                     Spacer(minLength: 0)

@@ -1,0 +1,18 @@
+LATTICE DE-HOMOGENIZATION PROBE — sc band [0.01606, 0.49638] (read from core)
+
+===== BOUNDARY POPULATIONS — free surfaces and cut cells (J4) =====
+  sandwich rho 0.016 N3 vpc48: K_dev free=3642.7 interior=3718.4 dropped=0 (217s, cg<=7433)
+  cut rho 0.016 N3 vpc48: K_dev free=4344.4 interior=4425.5 dropped=0 (339s, cg<=10779)
+  sandwich rho 0.025 N3 vpc40: K_dev free=2217.5 interior=2206.5 dropped=0 (130s, cg<=4243)
+  cut rho 0.025 N3 vpc40: K_dev free=2441.8 interior=2437.8 dropped=0 (258s, cg<=6498)
+  sandwich rho 0.035 N3 vpc32: K_dev free=1006.6 interior=1021.4 dropped=0 (62s, cg<=3455)
+  cut rho 0.035 N3 vpc32: K_dev free=1188.7 interior=1211.4 dropped=0 (107s, cg<=5118)
+  sandwich rho 0.050 N3 vpc32: K_dev free=593.3 interior=590.2 dropped=0 (65s, cg<=2806)
+  cut rho 0.050 N3 vpc32: K_dev free=653.8 interior=652.6 dropped=0 (114s, cg<=4271)
+    rho_meas 0.0423 is -15.5% off rho_lib 0.0500 (aliased): re-measuring at N3 vpc40
+  sandwich rho 0.065 N3 vpc24: K_dev free=332.0 interior=327.8 dropped=0 (26s, cg<=1978)
+  cut rho 0.065 N3 vpc24: K_dev free=376.6 interior=382.9 dropped=0 (46s, cg<=2868)
+  cut rho 0.050 N3 vpc40: K_dev free=809.8 interior=745.8 dropped=0 (319s, cg<=4846)
+
+DONE (rc=0).
+exit 0

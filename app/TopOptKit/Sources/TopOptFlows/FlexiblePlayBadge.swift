@@ -45,7 +45,7 @@ struct FlexiblePlayBadge: View {
     var body: some View {
         ZStack(alignment: .topTrailing) {
             if status == .working {
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { t in
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: AppSettings.skipAllAnimations)) { t in   // ★ notes29
                     Circle()
                         .inset(by: Self.ringWidth / 2)
                         .trim(from: 0, to: 0.3)

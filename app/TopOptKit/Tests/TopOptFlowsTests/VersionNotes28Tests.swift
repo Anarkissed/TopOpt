@@ -348,6 +348,20 @@ final class VersionNotes28Tests: VersionNotes1123Base {
         XCTAssertEqual(read.count, 1); XCTAssertEqual(read.first?.triangleCount, 1)
         XCTAssertLessThanOrEqual(ResultsExportCopy.stlLine.split(separator: " ").count, 5, "★ his rule: five words")
         XCTAssertTrue(ResultsExportCopy.stlInfo.contains("no painted supports"), "★ the (i) says what an STL leaves out")
+        // ★ notes30 (his 11-27, "just say 'Turn on manual supports'"): a print file's Export line, ≤ 5 positive words; its (i)
+        // says where the setting is in each slicer, and that an STL is the shape alone. RED CONTROL: the line before.
+        XCTAssertEqual(ResultsExportCopy.printFileLine, "Turn on manual supports")
+        for words in [ResultsExportCopy.printFileLine, ResultsExportCopy.supportsInfo] {
+            XCTAssertNil(words.range(of: #"n['’]t\b|\bnot\b|\bno\b"#, options: [.regularExpression, .caseInsensitive]), "positive words: \(words)")
+        }
+        XCTAssertLessThanOrEqual(ResultsExportCopy.printFileLine.split(separator: " ").count, 5, "★ his rule: five words")
+        for w in ["Bambu Studio", "OrcaSlicer", "Enable support", "tree (manual)", "PrusaSlicer", "For support enforcers only",
+                  "An STL is the shape alone"] {
+            XCTAssertTrue(ResultsExportCopy.supportsInfo.contains(w), "★ the (i) says: \(w)")
+        }
+        ResultsExportCopy.controlOldPrintFileLine = true
+        XCTAssertEqual(ResultsExportCopy.printFileLine, "The print file", "RED CONTROL: the line before says nothing to do")
+        ResultsExportCopy.controlOldPrintFileLine = false
         // a print file, kept with its version
         let (_, cube) = try optimizedCube()
         let file = Data(repeating: 7, count: 4096)

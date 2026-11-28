@@ -14,6 +14,7 @@
 // Eigen of its own); a STEP model needs a build with OCCT, as everywhere else.
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -46,6 +47,39 @@ inline MeshSpec file_mesh_defaults() {
   return m;
 }
 
+// ── PRINT RESOLUTION (2026-11-25, his "Offer print resolutions when exporting. Full detail vs medium vs coarse. All with
+// information about their file size estimates and resolution.") ────────────────────────────────────────────────────────
+// Job key "print_resolution": "full" | "medium" | "coarse" (not given: full, the job as before). A level loosens only how
+// finely the surface is written, never what prints: the layout, the cells, the struts' and walls' widths, the print check
+// and the strength check are the same at every level.
+//   FULL    the file as before, byte for byte (every strut type and the sheets).
+//   MEDIUM  sheets: surface within 0.05 mm (the bound the simplifier holds; Full's 0.02), contoured on a cell of half the
+//           thinnest wall (Full's third), never coarser than a 16th of the cell (Full's 24th; measured: as many
+//           triangles, a third quicker). Struts: a round strut and its joint balls 8 sides (Full's 12) where the corners
+//           then lie within 0.05 mm of the true round: every strut up to 1.4 mm wide (two lines, and more).
+//   COARSE  the same at 0.1 mm: struts up to 2.9 mm wide go to 8 sides (so a two-line lattice's struts are Medium's).
+// Walls stay at least two lines at every level: the sheets' bead guard and the floor's contoured wall
+// (sheet_print_wall_mm) take the level's bound, so a two-line sheet prints a little thicker (its thinnest wall measured
+// 0.95 mm at Full, 0.97 at Medium, 1.00 at Coarse; its plastic +5 % and +13 % on core's plate); a strut's flat sides are
+// never nearer its centre than at Full. What the print check does is the same: no level leaves a strut out that Full
+// keeps (a sheet's posts follow its surface, which the level moves by up to its bound).
+// A job with an Organic (weave) region is made at Full only: another level is refused (job_unreadable).
+enum class PrintResolution : std::uint8_t { Full = 0, Medium = 1, Coarse = 2 };
+inline constexpr PrintResolution kPrintResolutions[3] = {PrintResolution::Full, PrintResolution::Medium,
+                                                         PrintResolution::Coarse};
+const char* print_resolution_id(PrintResolution level);      // "full" | "medium" | "coarse"
+bool print_resolution_from_id(const std::string& id, PrintResolution& out);
+struct PrintResolutionLevel {
+  PrintResolution level = PrintResolution::Full;
+  double surface_mm = 0.02;            // the sheets' bound, and the struts' corners (0 at Full: the struts as before)
+  double strut_facet_mm = 0.0;         // MeshSpec::strut_facet_mm
+  double sheet_dc_wall_share = 3.0;    // MeshSpec::sheet_dc_wall_share
+  double sheet_dc_cell_share = 24.0;   // MeshSpec::sheet_dc_cell_share
+  const char* name = "Full detail";    // his words for the level
+  const char* words = "";              // the resolution in plain words: "surface within 0.05 mm"
+};
+PrintResolutionLevel print_resolution_level(PrintResolution level);
+
 // How the mesh is made from a layout.
 struct FileOptions {
   double pitch_mm = 0.25;   // how finely each cell's shape is read (read_open_space)
@@ -64,6 +98,51 @@ struct FileOptions {
   // sets mesh.weave_mesh), the writer's own Merged otherwise (a job with no weave region is never changed by it).
   bool weave_mesh_asked = false;
 };
+
+// PRINT RESOLUTION: the options a level makes the file with. Full leaves `o` exactly as given (the file as before);
+// Medium and Coarse set the sheets' bound and contouring cell and the struts' facets (print_resolution_level).
+void apply_print_resolution(PrintResolution level, FileOptions& o);
+
+// ── THE SIZE ESTIMATE PER LEVEL (before the file is made: from the layout alone) ─────────────────────────────────────
+// What it reads, all of it the layout's and the part's (no mesh): the part's own triangles; the cells, and of them those
+// cut by the part's surface; per round strut its radius and per joint its ball's (the writer's own reading: an end not on
+// the surface is a joint, its ball the widest strut there); the bridges (square bars); per sheet field its type, cell and
+// cells laid.
+struct PrintSizeInputs {
+  std::size_t part_triangles = 0;
+  std::size_t cells = 0, cut_cells = 0;
+  std::vector<float> strut_r;      // per round strut, mm
+  std::vector<float> ball_r;       // per joint, mm
+  std::size_t bridges = 0;
+  struct Sheet { TpmsKind kind = TpmsKind::Gyroid; double cell_mm = 0.0, wall_mm = 0.0; std::size_t cells = 0; };
+  std::vector<Sheet> sheets;
+  int bar_sides = 12;              // MeshSpec::bar_sides of the job
+  LatticeTopology topology = LatticeTopology::Octet;   // the layout's (a strut side's weight is its type's)
+  bool weave = false;              // a weave (Organic) region: no estimate (Full only)
+};
+PrintSizeInputs print_size_inputs(const Layout& layout, const Bars& bars, const std::vector<SheetField>& sheets,
+                                  std::size_t part_triangles, const FileOptions& options);
+// One level's estimate. `triangles` from the calibrated model (lattice_layout/print_resolution.cpp, THE MODEL: fitted on
+// core's fixtures at the three levels, its error stated there and held by test_print_resolution); `stl_bytes` is a
+// binary STL of that many (84 + 50 T, exact for the count); `threemf_bytes` the deflated 3MF the job writes (indexed).
+// `ms`: how long the Mac takes to make it, from a made job's own times (print_size_ms); -1 when not known.
+struct PrintSizeEstimate {
+  PrintResolution level = PrintResolution::Full;
+  std::size_t triangles = 0;
+  std::uint64_t stl_bytes = 0, threemf_bytes = 0;
+  double ms = -1.0;
+};
+PrintSizeEstimate estimate_print_size(const PrintSizeInputs& in, PrintResolution level);
+// The model behind it (for the test that fits and holds it): the terms at a level (0 the part's own triangles, 1 the cut
+// cells, 2 the cells of a strut lattice, 3 every round strut's sides, 4 every joint ball's sphere triangles, 5 the
+// bridges, 6 and 7 a gyroid's and a Schwarz-D's cell (mm) x cells) and each term's weight (a sheet's per level, a strut
+// side's per type).
+inline constexpr int kPrintSizeTerms = 8;
+std::array<double, kPrintSizeTerms> print_size_terms(const PrintSizeInputs& in, PrintResolution level);
+double print_size_weight(int term, PrintResolution level, LatticeTopology topology);
+// The bytes of a file of `triangles` triangles: binary STL (exact) and the job's deflated 3MF (estimated).
+std::uint64_t stl_bytes_for(std::size_t triangles);
+std::uint64_t threemf_bytes_for(std::size_t triangles);
 
 // What making the mesh found.
 struct FileReport {
@@ -110,6 +189,12 @@ struct FileReport {
   int base_builds = 0;
   double ms_shells = 0.0;
   std::vector<PrintableReport::PassTime> pass_ms;   // OF4: per pass of the tubes route
+  // SHEETS, E (SHEETS CONTRACT CHANGE (E)): the outcome's seams as the file made them (make_file_mesh of an Outcome):
+  // a blend's raise, and each that fell back to the solid wall with its one line why (fell_back, solid_wall, why);
+  // per seam the band's thinnest wall as measured (0: none made) and the remakes the print check's fallback took.
+  std::vector<SheetSeamBand> sheet_seams;
+  std::vector<double> seam_thinnest_mm;
+  int seam_remakes = 0;
 };
 
 // THE ONE PLACE THE MESH IS MADE for a file: the open space of the layout's cells, then
@@ -117,6 +202,11 @@ struct FileReport {
 // laid by, and has not been laid again since (its domain is the outcome's).
 // A stop flag (`stop`, when given) gives the work up by throwing LayCancelled.
 // The mesh is empty and `report.mesh.why` says why when it cannot be made.
+// SHEETS (SPEC 1.5, E): for an outcome with Blend seams it decides each seam ONCE here: the band is made
+// (mesh_sheet_seam_band, one call a seam) and handed to the mesh (MeshSpec::sheet_bands); a band that cannot be made
+// two lines thick falls back to the solid wall (the membrane is laid into a copy of the layout before its open space is
+// read); when the print check's loop ends with findings still inside a blended band, that seam falls back too and the
+// file is made again. FileReport::sheet_seams says what was done; sheet_fallback_layout gives the layout it was made of.
 TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome,
                             const FileOptions& options, FileReport& report,
                             const std::atomic<bool>* stop = nullptr);
@@ -124,6 +214,10 @@ TriangleMesh make_file_mesh(const Session& session, const Outcome& outcome,
 TriangleMesh make_file_mesh(const Session& session, const Layout& layout, const Bars& bars,
                             const FileOptions& options, FileReport& report,
                             const std::atomic<bool>* stop = nullptr);
+// SHEETS, E: `outcome` with `seams` (FileReport::sheet_seams): the seams that are solid walls get the membrane (and any
+// Organic region beside a sheet its own, as the lay gives it), into a copy of its layout. What the file was made of and
+// what the strength check credits.
+Outcome sheet_fallback_outcome(const Domain& domain, const Outcome& outcome, const std::vector<SheetSeamBand>& seams);
 
 // Brief E4, leg 2 (rule OS16): THE PRINT CHECK of the file, as the file job runs it (make_file_mesh: the solid carved,
 // the sags lifted or given legs, made, checked layer by layer and made again), its mesh dropped. `bars` the bars the
@@ -169,12 +263,68 @@ struct LatticeCredit {
   std::vector<double> cell_rho;      // its relative density (0 when the type has no law for it)
   std::size_t cells_credited = 0, cells_no_credit = 0;
   std::size_t cut = 0, lost_bar = 0, out_of_band = 0;   // why no credit (a cell counted under its first reason)
+  // SHEETS (SPEC 1.4, 3.3; builder B fills these, empty / 0 for a strut type). Per voxel: its own density,
+  // lattice_density_from_strut(type, its cell, half of sheet_wall_at(voxel centre)); 0 where `credited` is 0. The band
+  // test is per voxel. Per layout cell: the cells across the member there (Domain::Probe::room_through over the cell,
+  // rounded down; 0 not read). Voxels in a blend band (no credit, SPEC 1.5) and in the solid-wall membrane (solid).
+  std::vector<float> voxel_rho;
+  std::vector<std::int32_t> cell_across;
+  std::size_t blend_band = 0, membrane = 0;
+  // SHEETS (builder B, additive): per layout cell its sheet_cells.bin flags (SheetCellRecord::kCredited, kCut,
+  // kBlendBand, kOutOfBand, kUnderFloor, kMembrane); the floor it was judged by, in cells across
+  // (sheet_structural_floor_cells: 10 / 9 until builder D's tables); the cells under it (no credit, SPEC 3.3); the
+  // voxels credited. Empty / 0 for a strut type.
+  std::vector<std::uint32_t> cell_flags;
+  double floor_cells = 0.0;
+  std::size_t under_floor = 0, voxels_credited = 0;
+  // ANALYZE GUARD (sheets): per layout cell, the member's width there (mm): the narrowest Domain::Probe::room_through
+  // over the cell's held points, of which cell_across is the count; NaN where not read. Empty for a strut type.
+  std::vector<float> cell_room_mm;
 };
 // `solid`, when given, names the voxels to read (the part's); the rest are left -1. `left_out_at` is the file's
 // FileReport::left_out_at (the places the mesh writer left bars out for). Same answer for any number of threads.
+//
+// SHEETS (SPEC 1.4, 1.5, 3.3; builder B). For a sheet layout (sheet_kind_of) the same call credits by PLACE: the
+// fields are the layout's own (sheet_fields, as Outcome::sheets), the blend seams every touching pair
+// (sheet_seams) that Layout::membrane does not make a solid wall. Per cell: no credit when it is cut (until D's
+// tables and the reviewer's ruling, kSheetCutCellsCredited), when the member there holds fewer than the floor of
+// cells across (cell_across, read by Domain::Probe::room_through at the cell's held points; a member thinner than one
+// cell reads 0 and is under it too; a cell none of whose points is held is not read), or when its own wall's
+// density is out of the type's band (reported as for struts). Per voxel held by a cell that may be credited: its own
+// density, lattice_density_from_strut(type, the cell, half of sheet_wall_at(the voxel centre)), banded per voxel
+// (voxel_rho); no credit inside a blend band (|sheet_seam_mm| under half the band: blend_band, SPEC 1.5); a voxel the
+// solid-wall membrane keeps from every cell is counted (membrane) and is solid in the check, as everything else
+// no cell holds. `bars` and `left_out_at` are not read for a sheet (it has none).
 LatticeCredit lattice_credit(const Layout& layout, const Domain& domain, const Bars& bars,
                              const std::vector<Vec3>& left_out_at, const CreditGrid& grid,
                              const std::vector<char>* solid = nullptr, int threads = 0);
+// SPEC 3.3: a cut sheet cell is credited only with builder D's cut-layer rows in the law and the reviewer's ruling.
+inline constexpr bool kSheetCutCellsCredited = false;
+// The per-cell half of lattice_credit for a sheet layout, with no voxel grid: cell_credit, cell_rho, cell_across,
+// cell_flags and the cell counts (the per-voxel vectors stay empty). The file job reads it for sheet_cells.bin when the
+// check did not write one. For a strut layout: empty.
+LatticeCredit lattice_credit_cells(const Layout& layout, const Domain& domain, int threads = 0);
+
+// ANALYZE GUARD (sheets): THE MEMBER WIDTH the old check's cells-per-member guard reads for a sheet
+// (LatticePosture::member_width_mm, "the width measured on the part's own surface"; analyze.cpp, bar L4), per voxel of
+// the credit's grid: its cell's room (LatticeCredit::cell_room_mm: room_through over the cell's lattice, the measure the
+// lay's Structural floor and the credit's cell_across are read by), else, where that was not read, room_through at the
+// voxel centre; 0 where no cell holds the voxel. Without it the guard measures the voxel staircase, which reads a member
+// about two voxels thinner than it is: a member near the floor then holds no voxel at the floor, no convex corner is
+// joined to its member, and the corners read about one cell across (an all-lattice box ten cells across, refused).
+// Empty for a strut layout (the guard reads the staircase for it, as before).
+std::vector<double> sheet_member_width_mm(const Layout& layout, const Domain& domain, const LatticeCredit& credit,
+                                          const CreditGrid& grid, int threads = 0);
+
+// THE CHECK'S MARGIN PER VOXEL by the type's strut law (strut_strength.hpp: the bound the check's strut result reads,
+// Kd vm + Kv |p| in the plane and Kild vm + Kilv |p| + the off-axis term across the layers, at the density each
+// voxel is credited with: LatticeCredit::voxel_rho, else its cell's): min(yield / in-plane bound, z_knockdown x yield /
+// interlayer bound), +infinity where nothing loads it; NaN where the voxel is not credited, or the type has no law.
+// `stress_tensor_field` 6 per voxel of the credit's grid (Voigt [xx yy zz xy yz zx], true shear, MPa: the composite
+// solve's FixedDesignAnalysis::stress_tensor_field). Throws std::invalid_argument when the sizes disagree.
+std::vector<float> lattice_voxel_margins(LatticeTopology topo, const LatticeCredit& credit,
+                                         const std::vector<double>& stress_tensor_field, const Vec3& build_dir,
+                                         double yield_mpa, double z_knockdown);
 
 // What the file job hands the check, once its file is made.
 struct StrengthAsk {
@@ -264,6 +414,9 @@ struct FileJob {
   // through the door (print_frame.hpp, turn_file_job_inputs) once the part is open; the file is written standing on
   // the chosen face; the result's positions are turned back (turn_result_to_model) and it carries "print_frame".
   PrintFrame print_frame;
+  // PRINT RESOLUTION (key "print_resolution"): the level the file is made at; `options` already carry it
+  // (apply_print_resolution, in parse_file_job). Not given: Full.
+  PrintResolution resolution = PrintResolution::Full;
 };
 
 // P2: the door for a lattice file job: the zones, the cut pieces' cuts (regions and Protect skins), the demand field and
@@ -271,8 +424,28 @@ struct FileJob {
 // floors are NOT turned: a strengthening of a job with a print frame ran in that frame and wrote them there.
 void turn_file_job_inputs(const PrintFrame& f, FileJob& job);
 // The same door for a layout's own inputs (what the iPad's bridge session holds: its settings and its tensor). An
-// Organic ask's build_dir must then be +Z (the print frame's up): the caller sets it.
+// Organic ask's build_dir must then be +Z (the print frame's up): the caller sets it (turn_organic_asks).
 void turn_layout_inputs(const PrintFrame& f, Settings& settings, std::shared_ptr<const TensorField>& tensor);
+
+// ★ notes29 (P8, his print orientation on the iPad: after Keep, the preview still grew along the model's +Z): a SESSION
+// laid in the print frame, as the file job lays its part. The part is opened through the file job's own door
+// (open_in_print_frame: the base, then turn_step_model), each lay's settings and tensor are turned (turn_layout_inputs)
+// and its Organic asks grow along the print frame's up (turn_organic_asks: build_dir +Z), and what a lay gives comes back
+// to the MODEL frame once, for the drawing: every place and direction in it — the bars (their ends and planes), the
+// frames the cells sit on, the stepped edges, the bars cut in air, the guard's, the relief's and the growth report's
+// places (and the six sides it measured), the runs and their flat ends, the growth's pieces. A cell's corner and a wall
+// map are in their frame's own coordinates: they move with the frame. Layout::index (cells by place) is made again.
+// Along one of the six axes each turn is the exact signed permutation and the base's z shift; any other up the
+// rotation, rounded as any rotation is. The _to_print turns are the inverses (the round trip). Off: not a byte moves.
+void open_in_print_frame(PrintFrame& f, StepModel& model);
+void turn_organic_asks(const PrintFrame& f, OrganicAsk* ask, std::vector<OrganicGroup>* groups);
+void turn_outcome_to_model(const PrintFrame& f, Outcome& o);
+void turn_outcome_to_print(const PrintFrame& f, Outcome& o);
+// Its outcome, its runs and its flat ends.
+void turn_preview_to_model(const PrintFrame& f, OrganicPreview& p);
+void turn_preview_to_print(const PrintFrame& f, OrganicPreview& p);
+// The growth's pieces (6 floats each: a, then b).
+void turn_growth_to_model(const PrintFrame& f, GrowthTap::Read& r);
 
 // THE DEMAND FILE (a stress result for By stress, R16 to R18), little-endian:
 //   8 bytes "TODEMAND", int32 version (1), int32 nx, ny, nz, float64 origin x, y, z, float64 spacing,
@@ -357,7 +530,27 @@ struct FileResult {
   std::size_t thin_solid = 0;   // cut cells print rule P8 (f) made solid (Outcome::thin_solid)
   std::size_t small_patch_cells = 0;   // K5: cells made solid for a Structural patch narrower than its count across
   std::vector<int> quilt_regions;      // K3: Outcome::quilt_regions (laid with the quilt: nothing else laid there)
+  // 2026-11-24 (362, after reentrant on the cube's face region): a cell region whose struts the print check's leave-outs
+  // took (nearly) all of: kEmptiedShare or more of its struts (skin bars not counted), at least kEmptiedFewest of them.
+  // The file is still written, with nothing where the region's cells were (their space open, their struts gone); the app
+  // shows the region as "Cannot Lattice" with `why`, one plain line with the cause, never a silent empty lattice.
+  // Written as the result's "cannot_lattice" only when there is one (else the result is as it was).
+  struct Emptied {
+    int region = 0;
+    std::size_t struts = 0, left_out = 0;
+    std::string why;
+  };
+  std::vector<Emptied> emptied;
   std::vector<Layout::CellSearch> cell_search;   // K7, K8: Layout::cell_search (asked: CellSpec::cell_search, stretch_edges)
+  // SHEETS: the laid fields and seams (Outcome::sheets, sheet_seams; the result's "sheets" and "sheet_seams", written
+  // only for a sheet job). The seams' fell_back / why come from the file (the blend's loop), not the lay. In the result:
+  //   "sheets": [{"region": 1, "kind": "gyroid" | "schwarz_d", "cell_mm": 8, "wall_min_mm": 0.9, "wall_max_mm": 0.9,
+  //               "cells": 120}, ...]
+  //   "sheet_seams": [{"regions": [1, 2], "seam": "solid_wall" | "blend", "fell_back": false, "why": ""}, ...]
+  // The layout keys a sheet job reads (and the bridge's settings of the same names): "sheet_seam": "blend" |
+  // "solid_wall" (Settings::sheet_seam; not given: solid_wall), "auto_by_cell": true | false (StrutSpec::auto_by_cell).
+  std::vector<SheetField> sheets;
+  std::vector<SheetSeamBand> sheet_seams;
   bool cells_by_stress = false; // cell size by stress was applied to the layout (Outcome::cells_by_stress, C22)
   double step_held_at = 0.0;    // C24: the part's size-step limit kept (Outcome::step_held_at); 0 when none was asked
   double floor_cell_mm = 0.0, min_strut_mm = 0.0, open_look = 0.0, touch = 0.0;
@@ -411,7 +604,20 @@ struct FileResult {
   // P2: the job's print frame (off: as before). On, the result's positions are in the model frame
   // (turn_result_to_model) and the file is in the print frame; the result says which ("print_frame").
   PrintFrame print_frame;
+  // PRINT RESOLUTION: the level the file was made at, and the three levels' estimates (from the layout, before the file
+  // was made; `sized` false when none was made: a weave job, or a refusal before the lay). The result's
+  // "print_resolution" block (written for a cell lattice that was laid):
+  //   {"level": "full", "levels": [{"level": "full", "name": "Full detail", "words": "surface within 0.02 mm",
+  //     "triangles": N, "stl_bytes": N, "threemf_bytes": N, "ms": N}, ...medium, coarse]}
+  // `ms` per level: how long the Mac takes to make that file (print_size_ms of this job's own times).
+  PrintResolution resolution = PrintResolution::Full;
+  bool sized = false;
+  PrintSizeEstimate estimates[3];
 };
+// PRINT RESOLUTION: how long the Mac takes to make `level`'s file of a job, from a made job's own times: the job again
+// without its strength check, the sheets' contouring and the write scaled to the level (calibrated with the triangles).
+// -1 when `r` made no file.
+double print_size_ms(const FileResult& r, PrintResolution level);
 // P2: every position of a result made in the print frame, turned back to the model frame (once, before it is written).
 // The strength block is turned where the check writes it.
 void turn_result_to_model(const PrintFrame& f, FileResult& r);
@@ -439,6 +645,93 @@ FileResult run_file_job(const std::string& job_path, const std::string& out_dir,
 // refusal (as run_file_job would write it). Never throws.
 bool load_file_job(const std::string& job_path, int threads, FileJob& job, StepModel& model, FileResult& r,
                    void (*said)(const char*) = nullptr);
+
+// ── A PRINT COUPON PER STRUT TYPE (2026-11-24) ────────────────────────────────
+// His rule: every type but the octet (proven at 8 mm) and bccz (8 mm, 2026-07-29) is "Not print-tested" until he prints
+// a sample. The coupon is the 8 mm rim coupon's (printed 2026-11-11) made by THIS engine for any strut type: the old
+// coupon's outline (lattice_coupon_solid: 45 x 40 x 35 mm, a tongue, a half-round top that cuts the cells at every
+// angle), all lattice, 8 mm cells (smaller only where a wall needs it), two-line struts, Finish Skin over the cut cells,
+// and a flat 2 mm plate fused in (a 2 mm Protect skin on its underside: one file, flat on the bed). It goes through the
+// file job, so it is the print-checked file (made, checked layer by layer and made again) or a refusal in one line.
+struct CouponAsk {
+  LatticeTopology topology = LatticeTopology::Octet;
+  double cell_mm = 8.0;
+  double plate_mm = 2.0;
+  double bead_mm = 0.45;
+  int threads = 0;   // 0: every core
+};
+// The coupon's file job (its JSON), for the part saved as `model` (beside the job) whose underside is face
+// `underside_face`.
+std::string type_coupon_job(const CouponAsk& ask, const std::string& model, int underside_face);
+// Writes into `out_dir` (which must exist): <type>_coupon_part.stl (the part), <type>_coupon_job.json, and what the file
+// job writes there (<type>_coupon_lattice.stl, the file to print, and lattice_file.json). Never throws.
+FileResult make_type_coupon(const CouponAsk& ask, const std::string& out_dir);
+
+inline constexpr double kEmptiedShare = 0.9;
+inline constexpr std::size_t kEmptiedFewest = 4;
+// FileResult::emptied of a file made of `bars` (its cell regions; `weave_regions` are not read) with the print check's
+// leave-out places `left_out_at` (FileReport::left_out_at; bars_present is the writer's own rule).
+std::vector<FileResult::Emptied> emptied_regions(const Bars& bars, const std::vector<Vec3>& left_out_at,
+                                                 const std::vector<int>& weave_regions);
+
+// ── SHEETS: sheet_cells.bin (SPEC 1.6, the K4 colours and the Results card for a sheet, in place of bars.bin) ───
+// Written by the strength check beside strength.json (builder B) for a sheet job; little-endian:
+//   8 bytes "TOSHEET1", uint32 frame count F, uint32 cell count N, uint32 flags (0; reserved),
+//   F frames of 12 float32: origin xyz, ax[0] xyz, ax[1] xyz, ax[2] xyz (the part's own MODEL frame, P2 turned back),
+//   N records of 40 bytes, in the layout's cell order:
+//     int32 region, int32 frame (index into the F frames), float32 lo a, b, c (frame mm, the cube's low corner),
+//     float32 size_mm, float32 wall_mm (the cell's own wall, Cell::strut), float32 cells_across (0: not read),
+//     float32 margin (the check's margin for the cell, its worst voxel's; NaN: not judged), uint32 flags.
+inline constexpr char kSheetCellsMagic[8] = {'T', 'O', 'S', 'H', 'E', 'E', 'T', '1'};
+inline constexpr const char* kSheetCellsName = "sheet_cells.bin";
+struct SheetCellRecord {
+  std::int32_t region = 0, frame = 0;
+  float lo[3] = {0, 0, 0};
+  float size_mm = 0.0f, wall_mm = 0.0f, cells_across = 0.0f;
+  float margin = 0.0f;
+  std::uint32_t flags = 0;
+  // flags
+  static constexpr std::uint32_t kCredited = 1, kCut = 2, kBlendBand = 4, kOutOfBand = 8, kUnderFloor = 16,
+                                 kMembrane = 32;
+};
+static_assert(sizeof(SheetCellRecord) == 40, "sheet_cells.bin: 40 bytes a record");
+struct SheetCellsFile {
+  std::vector<Frame> frames;
+  std::vector<SheetCellRecord> cells;
+};
+// The records of a laid sheet layout (frames, region, frame, lo, size, wall, cut flag; margin NaN, the rest 0): the
+// check fills margin, cells_across and its flags. `frame` turns each frame into the model frame (P2).
+SheetCellsFile sheet_cells_of(const Layout& layout, const PrintFrame& frame = PrintFrame{});
+bool write_sheet_cells_file(const std::string& path, const SheetCellsFile& f);
+// Refuses a wrong magic, a file not exactly the size its counts need, a frame index out of range, a number that is not
+// finite (but a NaN margin); `why` says which.
+bool read_sheet_cells_file(const std::string& path, SheetCellsFile& out, std::string* why = nullptr);
+
+// SHEETS (builder B): sheet_cells.bin AS THE CHECK JUDGED IT: sheet_cells_of's records, each with its cells across
+// (LatticeCredit::cell_across), its flags (cell_flags; kCut kept) and its margin, the smallest of `voxel_margin` over
+// the voxels the cell holds (LatticeCredit::cell; lattice_voxel_margins: NaN where none is judged). `voxel_margin`
+// empty: every margin NaN (the cells judged, the margins not). The credit must be of this layout.
+SheetCellsFile sheet_cells_judged(const Layout& layout, const LatticeCredit& credit,
+                                  const std::vector<float>& voxel_margin, const PrintFrame& frame = PrintFrame{});
+// What the check writes for a sheet job beside strength.json: sheet_cells.bin (sheet_cells_judged) in `out_dir`, and
+// the strength block's sheet keys, as `keys` (lines of the block, each indented four spaces and ending ",\n"):
+//   "sheet_cells": "sheet_cells.bin",       the file, by its bare name (THE KEY the app fetches it by)
+//   "sheet_credit": {"cells", "cells_credited", "cells_cut", "cells_out_of_band", "cells_under_floor",
+//                    "cells_in_blend_band", "cells_by_membrane": counts of cells by their flags;
+//                    "floor_cells": the floor judged by; "cut_cells_credited": kSheetCutCellsCredited;
+//                    "voxels_credited", "voxels_blend_band", "voxels_membrane": the voxel counts (null with no grid);
+//                    "margins": true when the records carry the check's margins}
+// For a strut layout nothing is written (`file` and `keys` empty). Not ok: `why` (the file could not be written).
+struct SheetCheckFiles {
+  bool ok = true;
+  std::string why;
+  std::string file;   // kSheetCellsName when written
+  std::string keys;
+};
+SheetCheckFiles write_sheet_check_files(const std::string& out_dir, const Layout& layout, const LatticeCredit& credit,
+                                        const std::vector<float>& voxel_margin, const PrintFrame& frame = PrintFrame{});
+// The strength block (an object's text, "{" first) with `keys` (write_sheet_check_files) put in right after its "{".
+std::string strength_block_with(const std::string& block, const std::string& keys);
 
 // The result file's name, and its text.
 inline constexpr const char* kFileResultName = "lattice_file.json";

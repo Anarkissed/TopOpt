@@ -112,9 +112,69 @@ bool SolidAt::operator()(const Domain::Probe& probe, const Vec3& p, const Where&
   return true;   // lattice was asked for here and no cell holds it: solid (D14)
 }
 
+namespace {
+// The re-entrant rule of lay_bars, on one cell's bars (`from`: the strut of `struts` each came from; `glo`, `unit`: the
+// cell's integer grid in its frame). A waist strut joins a waist (not a corner of the cell) to a corner.
+void hold_waists(std::vector<Bar>& bars, const std::vector<std::size_t>& from, const std::vector<StrutCellStrut>& struts,
+                 const Frame& f, const double glo[3], const double unit[3]) {
+  const auto corner = [&](const StrutCellPoint& q, int S) { return q.x % S == 0 && q.y % S == 0 && q.z % S == 0; };
+  const int S = 4;
+  const auto z_of = [&](const StrutCellPoint& q) {
+    return f.at(glo[0] + q.x * unit[0], glo[1] + q.y * unit[1], glo[2] + q.z * unit[2]).z;
+  };
+  struct Waist { StrutCellPoint at; bool held = false; };
+  std::vector<Waist> waists;
+  const auto waist_of = [&](const StrutCellPoint& q) -> std::size_t {
+    for (std::size_t k = 0; k < waists.size(); ++k)
+      if (waists[k].at.x == q.x && waists[k].at.y == q.y && waists[k].at.z == q.z) return k;
+    waists.push_back({q, false});
+    return waists.size() - 1;
+  };
+  // Per bar: its waist (-1: a column), whether its strut lies below the waist, and whether its corner side is its end a.
+  std::vector<long> waist(bars.size(), -1);
+  std::vector<char> lower(bars.size(), 0), corner_is_a(bars.size(), 0), drop(bars.size(), 0);
+  for (std::size_t i = 0; i < bars.size(); ++i) {
+    const StrutCellStrut& s = struts[from[i]];
+    const bool ca = corner(s.a, S), cb = corner(s.b, S);
+    if (ca == cb) continue;   // a column (corner to corner)
+    const StrutCellPoint& w = ca ? s.b : s.a;
+    const StrutCellPoint& c = ca ? s.a : s.b;
+    waist[i] = static_cast<long>(waist_of(w));
+    lower[i] = z_of(c) < z_of(w);
+    // The piece's end a is on the strut's s.a side (pieces keep the strut's direction).
+    corner_is_a[i] = ca;
+  }
+  for (std::size_t i = 0; i < bars.size(); ++i) {
+    if (waist[i] < 0 || !lower[i]) continue;
+    const Bar& b = bars[i];
+    const Bar::End low = corner_is_a[i] ? b.end_a : b.end_b, high = corner_is_a[i] ? b.end_b : b.end_a;
+    const bool on_bed = (b.on_bed & (corner_is_a[i] ? Bar::kOnBedA : Bar::kOnBedB)) != 0;
+    const bool rests = low == Bar::End::Node || low == Bar::End::Solid || (low == Bar::End::Surface && on_bed);
+    if (!rests && low == Bar::End::Surface) drop[i] = 1;   // starts at a wall, in the air
+    if (rests && high == Bar::End::Node) waists[static_cast<std::size_t>(waist[i])].held = true;
+  }
+  for (std::size_t i = 0; i < bars.size(); ++i)
+    if (waist[i] >= 0 && !waists[static_cast<std::size_t>(waist[i])].held) drop[i] = 1;
+  std::size_t k = 0;
+  for (std::size_t i = 0; i < bars.size(); ++i)
+    if (!drop[i]) bars[k++] = bars[i];
+  bars.resize(k);
+}
+}  // namespace
+
 Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
   const StrutCell& type = lattice_strut_cell(layout.topology);   // throws for a type with none
-  const std::vector<StrutCellStrut> struts = strut_cell_closed_struts(type);
+  // The struts each frame's cells lay (cell_struts: a tetragonal type's columns stand up in every frame; a cubic type's
+  // list is the same for every frame, in its order).
+  std::vector<std::vector<StrutCellStrut>> struts_of(layout.frames.size());
+  // RE-ENTRANT (2026-11-24, his 10 mm cube with a face region: every cell cut by its sides, the print loop left out 120
+  // of 121 struts). Each waist of a re-entrant cell hangs from the two struts below it, the ones to the bottom corners
+  // of its side face, and holds the two above it. Where a wall cuts a lower strut, its piece starts at the wall in the
+  // air: nothing is under it. So, of a cell's bars, a lower waist strut is kept only where its lower end rests (on its
+  // corner node, in solid, or on the bed), and a waist that no lower strut reaches resting is not laid at all (its upper
+  // struts would hang from it). Every other type, and the columns, as before.
+  const bool reentrant = layout.topology == LatticeTopology::Reentrant;
+  for (std::size_t fi = 0; fi < layout.frames.size(); ++fi) struts_of[fi] = cell_struts(layout.topology, layout.frames[fi]);
   const int thread_count =
       threads > 0 ? threads : std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
 
@@ -129,6 +189,7 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
       const Cell& c = layout.cells[ci];
       if (c.absorbed) continue;   // K8: a sliver the next cell's struts reach across lays none of its own
       const Frame& f = layout.frames[static_cast<std::size_t>(c.frame)];
+      const std::vector<StrutCellStrut>& struts = struts_of[static_cast<std::size_t>(c.frame)];
       // K8: the struts span the cube and what it reaches past it on to a square face (Cell::reach_lo, reach_hi).
       const double glo[3] = {c.lo[0] - c.reach_lo[0], c.lo[1] - c.reach_lo[1], c.lo[2] - c.reach_lo[2]};
       const double unit[3] = {(c.size + c.reach_lo[0] + c.reach_hi[0]) / type.S,
@@ -138,6 +199,8 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
                              glo[1] + 0.5 * (c.size + c.reach_lo[1] + c.reach_hi[1]),
                              glo[2] + 0.5 * (c.size + c.reach_lo[2] + c.reach_hi[2])};
       Found& out = per_cell[ci];
+      // Re-entrant (below, after the cell's struts): which strut each of the cell's bars came from.
+      std::vector<std::size_t> from_strut;
       // Each node of the cell, read once (a hair toward the cell's middle): -1 not yet.
       std::map<std::array<int, 3>, bool> node_read;
       auto node_is_mine = [&](const StrutCellPoint& n) {
@@ -213,6 +276,7 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
             bar.a = a;
             bar.b = b;
             out.bars.push_back(bar);
+            if (reentrant) from_strut.push_back(static_cast<std::size_t>(&s - struts.data()));
             continue;
           }
         }
@@ -240,8 +304,10 @@ Bars lay_bars(const Layout& layout, const Domain& domain, int threads) {
           i = j;
           if (!kept) { ++out.stubs; continue; }
           out.bars.push_back(piece);
+          if (reentrant) from_strut.push_back(static_cast<std::size_t>(&s - struts.data()));
         }
       }
+      if (reentrant) hold_waists(out.bars, from_strut, struts, f, glo, unit);
     }
   };
   {
@@ -719,14 +785,204 @@ Pieces count_pieces(const Bars& bars, const Domain& domain, std::vector<char>* a
   return out;
 }
 
-Pieces drop_adrift_bars(Bars& bars, const Domain& domain, const Layout* layout) {
-  std::vector<char> adrift;
-  const Pieces found = count_pieces(bars, domain, &adrift, nullptr, layout);
+Pieces drop_adrift_bars(Bars& bars, const Domain& domain, const Layout* layout, const PiecesCount* counted) {
+  // S-1: the join's own count of these very bars, when it changed none of them (count_pieces is a function of the bars,
+  // the domain and the layout alone: counting again gives this, flag for flag).
+  if (counted && counted->adrift.size() != bars.bars.size()) counted = nullptr;   // not of these bars: count
+  std::vector<char> own;
+  const Pieces found = counted ? counted->found : count_pieces(bars, domain, &own, nullptr, layout);
+  const std::vector<char>& adrift = counted ? counted->adrift : own;
   if (found.adrift == 0) return found;
   std::vector<char> keep(adrift.size());
   for (std::size_t i = 0; i < adrift.size(); ++i) keep[i] = !adrift[i];
   keep_only(bars, keep);
   return found;
+}
+
+std::size_t join_cut_off_pieces(Bars& bars, const Domain& domain, int threads, const Layout* layout,
+                                std::optional<PiecesCount>* unchanged) {
+  (void)threads;   // one pass over the few ends of the pieces adrift
+  if (unchanged) unchanged->reset();
+  std::vector<char> adrift;
+  std::vector<int> piece;
+  const Pieces found = count_pieces(bars, domain, &adrift, &piece, layout);
+  if (found.adrift == 0) {   // nothing cut off: as it was
+    if (unchanged) *unchanged = PiecesCount{found, std::move(adrift)};
+    return 0;
+  }
+  const std::unique_ptr<const SolidAt> solid_at = layout ? std::make_unique<const SolidAt>(*layout) : nullptr;
+  const std::vector<Bar> before = bars.bars;   // every end is run on against the bars as they are now
+  // The bars sorted into a grid, to find those near a line (as join_loose_bars does).
+  double longest = 0.0, widest = 0.0;
+  for (const Bar& b : before) {
+    longest = std::max(longest, std::max(b.cell, std::fabs(b.b.x - b.a.x) + std::fabs(b.b.y - b.a.y) + std::fabs(b.b.z - b.a.z)));
+    widest = std::max(widest, b.width);
+  }
+  const double pitch = std::max(1.0, longest);
+  auto slot = [&](double x) { return static_cast<long long>(std::floor(x / pitch)); };
+  std::map<std::array<long long, 3>, std::vector<std::size_t>> grid;
+  for (std::size_t i = 0; i < before.size(); ++i) {
+    const Bar& b = before[i];
+    for (long long x = slot(std::min(b.a.x, b.b.x) - widest); x <= slot(std::max(b.a.x, b.b.x) + widest); ++x)
+      for (long long y = slot(std::min(b.a.y, b.b.y) - widest); y <= slot(std::max(b.a.y, b.b.y) + widest); ++y)
+        for (long long z = slot(std::min(b.a.z, b.b.z) - widest); z <= slot(std::max(b.a.z, b.b.z) + widest); ++z)
+          grid[{x, y, z}].push_back(i);
+  }
+  const Domain::Probe probe = domain.probe();
+  auto open_at = [&](const Vec3& q) {
+    const Where w = probe.where(q);
+    if (!w.lattice()) return false;
+    return !(solid_at && (*solid_at)(probe, q, w));
+  };
+  // Each Node end of a bar of a piece adrift, run straight on along its own bar for at most one cell of its own: the
+  // first bar whose middle line it reaches within half that bar's width (bars ending at this node are not read: they
+  // meet it there) ends the run. Into a bar of another piece: joined there. Into its own piece: nothing. Through space
+  // that is not open lattice first: into solid it ends in the solid (held, S11); out of the part, nothing.
+  struct Join { std::size_t bar; int end; Vec3 to; Bar::End kind; int into; };
+  std::vector<Join> joins;
+  std::vector<std::size_t> near;
+  for (std::size_t i = 0; i < before.size(); ++i) {
+    if (!adrift[i]) continue;
+    for (int end = 0; end < 2; ++end) {
+      const Bar& me = before[i];
+      if ((end ? me.end_b : me.end_a) != Bar::End::Node) continue;
+      const Vec3 p = end ? me.b : me.a, q = end ? me.a : me.b;
+      Vec3 d{p.x - q.x, p.y - q.y, p.z - q.z};
+      const double own = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+      if (!(own > 0.0)) continue;
+      d = Vec3{d.x / own, d.y / own, d.z / own};
+      const double limit = me.cell > 0.0 ? me.cell : own;
+      const Vec3 far{p.x + d.x * limit, p.y + d.y * limit, p.z + d.z * limit};
+      near.clear();
+      for (long long x = slot(std::min(p.x, far.x) - widest); x <= slot(std::max(p.x, far.x) + widest); ++x)
+        for (long long y = slot(std::min(p.y, far.y) - widest); y <= slot(std::max(p.y, far.y) + widest); ++y)
+          for (long long z = slot(std::min(p.z, far.z) - widest); z <= slot(std::max(p.z, far.z) + widest); ++z) {
+            const auto it = grid.find({x, y, z});
+            if (it != grid.end()) near.insert(near.end(), it->second.begin(), it->second.end());
+          }
+      std::sort(near.begin(), near.end());
+      near.erase(std::unique(near.begin(), near.end()), near.end());
+      const PointKey here = key_of(p);
+      double land = -1.0;
+      int into = -1;
+      for (std::size_t k : near) {
+        if (k == i) continue;
+        const Bar& other = before[k];
+        if (key_of(other.a) == here || key_of(other.b) == here) continue;   // it meets this node: a joint, not a run
+        double at = 0.0;
+        if (approach(p, d, limit, other.a, other.b, &at) > 0.5 * other.width) continue;
+        if (land < 0.0 || at < land) { land = at; into = static_cast<int>(k); }
+      }
+      // What the line passes through first.
+      const double reach = land >= 0.0 ? land : limit;
+      Bar::End kind = land >= 0.0 ? Bar::End::Joined : Bar::End::Loose;
+      double stop = reach;
+      for (double t = 0.25; t < reach + 0.25; t += 0.25) {
+        const double at = std::min(t, reach);
+        const Vec3 x{p.x + d.x * at, p.y + d.y * at, p.z + d.z * at};
+        if (open_at(x)) continue;
+        if (probe.where(x).why == Why::Outside) { kind = Bar::End::Loose; break; }   // out of the part: nothing
+        double in = std::max(0.0, at - 0.25), out = at;
+        for (int k = 0; k < 12; ++k) {
+          const double m = 0.5 * (in + out);
+          (open_at(Vec3{p.x + d.x * m, p.y + d.y * m, p.z + d.z * m}) ? in : out) = m;
+        }
+        kind = Bar::End::Solid;
+        stop = in + me.width;   // S11: on into the solid by its own width
+        break;
+      }
+      if (kind == Bar::End::Loose) continue;
+      if (kind == Bar::End::Joined && piece[static_cast<std::size_t>(into)] == piece[i]) continue;   // its own piece
+      joins.push_back({i, end, Vec3{p.x + d.x * stop, p.y + d.y * stop, p.z + d.z * stop}, kind,
+                       kind == Bar::End::Joined ? into : -1});
+    }
+  }
+  if (joins.empty()) {   // no end reached anything: every bar is as it was, and so is the count
+    if (unchanged) *unchanged = PiecesCount{found, std::move(adrift)};
+    return 0;
+  }
+  for (const Join& j : joins) {
+    Bar& b = bars.bars[j.bar];
+    if (j.end) { b.b = j.to; b.end_b = j.kind; b.into_b = j.into; }
+    else { b.a = j.to; b.end_a = j.kind; b.into_a = j.into; }
+  }
+  bars.joined += joins.size();
+  return joins.size();
+}
+
+std::size_t solidify_empty_cells(Layout& layout, const Bars& bars) {
+  // Each cell's own struts: a bar laid for a cell of its size whose middle lies in its cube (a hair round it). Bars are
+  // binned by their middle on a coarse grid in the part's own space; a cell asks the bins its cube's corners span.
+  const double pitch = 4.0;
+  auto slot = [&](double v) { return static_cast<long long>(std::floor(v / pitch)); };
+  std::map<std::array<long long, 3>, std::vector<std::size_t>> grid;
+  for (std::size_t i = 0; i < bars.bars.size(); ++i) {
+    const Bar& b = bars.bars[i];
+    const Vec3 m{0.5 * (b.a.x + b.b.x), 0.5 * (b.a.y + b.b.y), 0.5 * (b.a.z + b.b.z)};
+    grid[{slot(m.x), slot(m.y), slot(m.z)}].push_back(i);
+  }
+  std::vector<char> empty(layout.cells.size(), 0);
+  std::size_t count = 0;
+  for (std::size_t ci = 0; ci < layout.cells.size(); ++ci) {
+    const Cell& c = layout.cells[ci];
+    if (c.absorbed) continue;   // K8: a sliver another cell's struts span lays none of its own
+    // A Lattice region's cells only: there the part around the lattice is solid, and an empty cell is a notch in it.
+    // The whole part's own lattice (region 0) has no solid round it; an empty cut cell at its open surface is the
+    // lattice running out to the surface (D14b), left as it was.
+    if (c.region <= 0) continue;
+    const Frame& f = layout.frames[static_cast<std::size_t>(c.frame)];
+    Vec3 lo{1e300, 1e300, 1e300}, hi{-1e300, -1e300, -1e300};
+    for (int k = 0; k < 8; ++k) {
+      const Vec3 p = f.at(c.lo[0] + ((k & 1) ? c.size : 0.0), c.lo[1] + ((k & 2) ? c.size : 0.0),
+                          c.lo[2] + ((k & 4) ? c.size : 0.0));
+      lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
+      hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+    }
+    bool held = false;
+    for (long long x = slot(lo.x - 1e-3); x <= slot(hi.x + 1e-3) && !held; ++x)
+      for (long long y = slot(lo.y - 1e-3); y <= slot(hi.y + 1e-3) && !held; ++y)
+        for (long long z = slot(lo.z - 1e-3); z <= slot(hi.z + 1e-3) && !held; ++z) {
+          const auto it = grid.find({x, y, z});
+          if (it == grid.end()) continue;
+          for (std::size_t i : it->second) {
+            const Bar& b = bars.bars[i];
+            if (std::fabs(b.cell - c.size) > 1e-9 * std::max(1.0, c.size)) continue;
+            const Vec3 m{0.5 * (b.a.x + b.b.x) - f.origin.x, 0.5 * (b.a.y + b.b.y) - f.origin.y,
+                         0.5 * (b.a.z + b.b.z) - f.origin.z};
+            bool in = true;
+            for (int a = 0; a < 3 && in; ++a) {
+              const double t = m.x * f.ax[a].x + m.y * f.ax[a].y + m.z * f.ax[a].z;
+              in = t >= c.lo[a] - 1e-6 && t <= c.lo[a] + c.size + 1e-6;
+            }
+            if (in) { held = true; break; }
+          }
+        }
+    if (!held) { empty[ci] = 1; ++count; }
+  }
+  if (count == 0) return 0;   // the layout is left exactly as it was
+  // Each empty cell leaves the cells, in cell order, and joins the solid list (D14: lattice space no cell holds is
+  // solid), so whoever draws or builds from the layout sees it solid.
+  std::vector<Cell> kept;
+  kept.reserve(layout.cells.size() - count);
+  for (std::size_t ci = 0; ci < layout.cells.size(); ++ci) {
+    const Cell& c = layout.cells[ci];
+    if (!empty[ci]) { kept.push_back(c); continue; }
+    layout.solid.push_back(c);
+    SolidWhy why;
+    why.why = c.cut ? NoCell::Sliver : NoCell::Other;
+    why.have_mm = 0.0f;
+    why.need_mm = static_cast<float>(c.strut);
+    layout.solid_why.push_back(why);
+    for (RegionCells& r : layout.regions)
+      if (r.frame == c.frame && r.region == c.region) {
+        if (r.cells > 0) --r.cells;
+        ++r.solid;
+        break;
+      }
+  }
+  layout.cells.swap(kept);
+  if (layout.index) layout.index = index_cells(layout, layout.index->pitch);   // cell numbers moved
+  return count;
 }
 
 std::vector<SteppedEdge> stepped_edges(const Bars& bars) {

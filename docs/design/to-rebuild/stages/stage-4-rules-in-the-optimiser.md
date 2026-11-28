@@ -82,3 +82,38 @@ Under the switch: every SOLID version with pockets carries `"sealed_pockets": {"
 Detection checked on a made 24^3 cube: no cavity 0; one 4^3 cavity 1 (8.000 mm3); the same with a one-voxel channel out 0; two cavities 2, largest reported; a cavity that meets the way out only at an EDGE or a CORNER of voxels still counts as sealed (face-to-face is the rule in the code's own comments; a printed diagonal contact is not a drain).
 OPEN: (1) a sealed pocket in a lattice job with NO lattice cell inside it is accepted today and still is: his decision says a lattice refuses; for the reviewer / LatticeReview; (2) the `lattice_variant` job type throws the old text from `run_job.cpp` (#362's file); (3) multiscale and frozen-lattice jobs: nothing told, not checked; (4) to run once in a real job with the switch off (the same report bytes) and on.
 
+### Rulings and decisions, 2026-11-28
+
+THE REVIEWER, 08:23Z, maintainer-approved (in short; the full text is in the channel): (a) the one-line wall (0.45 mm) is his printability floor and stands; the resolution does NOT chase it (8 voxels through 0.45 mm is a 0.056 mm voxel); A-06's planned answer is section-force stress once it passes the statically indeterminate test: keep that FIRST in 4a's measuring; until then a thin load-bearing member is a stated limit named in the readout; NO readability floor in voxels on the optimiser's own members without his word (if he asks: measure what a 6-voxel floor costs in grams and margin on his two parts); the long-run answer is "keep going finer" plus the hot-spot box. (b) the 4a / 4b split agreed; one piece at a time. (c) tests G and I as corrected agreed. (d) a sealed pocket with no lattice cell in a lattice job: reported, not refused; put to him.
+THE MAINTAINER, the same morning, asked the literal question: "I think just reported - unless there is a technical reason it should be refused?" There is none for filament printing (the pocket's roof is the overhang rule's matter, stage 4b). DECIDED: reported. That is what piece 3 does.
+
+### 4a piece 3 seen in a real run (2026-11-28): the 15 mm bracket has no sealed pocket; the runs with the switch unset and on are the same bytes (four files and report.json), and unset matches today.
+
+### 4a piece 4 as a NOTICE, `TOPOPT_STAGE4=member` (2026-11-28; a builder's code; unit checks in `to_part_scale`; one real run)
+
+`thin_member(...)` in `part_scale.hpp`, on the same member-width measure the thin-member rule reads. Per accepted version, when the thinnest member is under 8 voxels through: report block `"thin_member": {"thinnest_mm", "voxels_through", "resolved", "resolution_needed"}` and one stderr line. It changes nothing else: not the resolution, not the verdict (the ruling above). On the 15 mm bracket at res 48 every version reads: thinnest 0.625 mm = 2 voxels through; resolution 192 would resolve it. Unset: today's bytes; on: the same four files, the block added.
+LIMITS OF THE NOTICE: the width measure reads even voxel counts only (3 through reads 4; 7 would read 8 and pass); and it names the thinnest member anywhere, which here is probably the finish's own wall floor, not necessarily a member that carries load. To be useful in the readout it must name thin members that are LOADED (a later step, with the section-force reading).
+
+### Section-force stress on a STATICALLY INDETERMINATE case (the reviewer's first item for 4a's measuring); 2026-11-28 05:00; print-only rows in `to_strength_cut_skin`
+
+Two parallel members, 2.5 and 6.5 voxels thick (cut faces off the voxel boundaries, real stiffness), joined by stiff end blocks and SHARING the load; each cut at mid-span. Percent against the same assembly 4 x finer (835 000 voxels):
+
+| case, member | section forces, the section from the MODEL'S OWN fills | section forces, the true section handed in | the per-voxel peak | the surface carry |
+|---|---|---|---|---|
+| tension, 2.5 voxels | +0.0 | +1.1 | -1.4 | +0.0 |
+| tension, 6.5 voxels | +0.1 | +1.4 | -2.0 | -0.1 |
+| bending, 2.5 voxels | +0.4 | +5.1 | -6.6 | +0.0 |
+| bending, 6.5 voxels | +0.1 | +2.9 | -4.7 | -0.6 |
+
+The load SHARE between the members is right at the base grid (member 1 carries 0.382 of the tension against 0.383 at 4 x; axial forces within 0.5 %). Each member's own bending moment about the TRUE centroid is not (the thin member's +48 %): the coarse model's stiffness centre sits elsewhere; taking the section from the model's own fills removes it, and then the reading is within 0.4 % at 2.5 voxels through. So section-force stress with the model's own section HOLDS THE BAR on this indeterminate case, where the per-voxel peak is 1 to 7 % low. (The surface carry also holds here, within 0.6 %: these members are straight.) Still to do before it can be the reading under 8 voxels through: FINDING the members and their cut planes on a general shape (a skeleton), and a member that is curved or tapers.
+
+### 4a piece 5, first half: the load-path check as a standalone function (2026-11-28 04:55; `load_path.hpp`, header-only; test `to_stage4_load_path`; a builder's code; not yet called from the loop, which is the stage 3 helper's file)
+
+`load_path_check(grid, density, threshold 0.5, with_thinnest_link, connectivity 26)`: one flood fill from the anchors; a load group that reaches no anchor is unheld. It follows the rule the code already has (`voxel.hpp` 535 to 573; `walk_load_path`): printed = tag not Empty and density above 0.5, Load and Fixture voxels included; neighbours by face, EDGE or CORNER (26), on purpose: voxels that touch at a corner share a node and pass force; a Load voxel carved away counts as a broken path. Also a cheap "how near to breaking" measure: 1, 2 or 3 = the path survives no, one or two one-voxel erosions.
+Checks (10 pass): a solid bar connected; a bar cut through: 1 unheld group, the stranded voxels counted; two arms, one cut: 2 groups, 1 unheld; two halves meeting only along an edge: connected at 26 and 18 neighbours, not at 6; necks of 1 x 1, 3 x 3 and a full section read 1, 2, 3. Time on 128 x 128 x 64: 22 ms, with or without the link measure: cheap enough for every iteration.
+
+### 4b, the overhang piece as standalone functions (2026-11-28 05:00; `overhang_rule.hpp`, header-only; test `to_stage4_overhang`, 13 checks pass; a builder's code; not called from the loop)
+
+Today's rule (`orient.cpp` 162): a printed voxel is supported by the voxel directly below or one of its 4 face neighbours in the layer below (the corner neighbours sit at 54.7 degrees and do not count); the plate is the part's own lowest printed layer. Followed exactly: `overhang_measure` gives the same count as today's function on every shape, plus the unsupported area and the largest patch. `overhang_filter` is Langelaar's layer filter in voxel form (a voxel is kept only as far as the filtered layer below supports it; P-norm 40), for a build direction along the grid's z, up or down; other directions are refused, not approximated. No sensitivities yet (the adjoint is the next step, with the call from the loop).
+Checks: a block on the plate 0 unsupported; a T: 224 (the slab's 256 underside voxels less the 32 over the column), today's count the same; a staircase stepping one voxel a layer 0, two voxels a layer 54; the filter leaves the T with 0 unsupported and its column untouched, and leaves supported shapes unchanged; building downward flips all of it. Time on 128 x 128 x 64: measure 1.9 ms, filter 9.0 ms.
+

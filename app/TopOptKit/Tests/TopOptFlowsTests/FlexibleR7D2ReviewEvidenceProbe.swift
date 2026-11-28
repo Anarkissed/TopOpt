@@ -221,13 +221,13 @@ final class FlexibleR7D2ReviewEvidenceProbe: XCTestCase {
         press(h, "info-c-" + r3.key, what: "Face 3's (i) on the chip"); pump(1)
         log.append("  R03 (i) rows \(String(describing: s.faceStats(r3, group: c, project: p)?.rows.map { "\($0.label) \($0.value)" }))")
         frames(h, s, "R03"); shot(h, "R03_chip_info_below_the_chip")
-        s.faceUI.info = nil
+        AppPopups.shared.current = nil   // ★ notes30: the (i) opens the centred notification
 
         s.heat = false; pump(1.2)
         s.pickGroup(c, project: p); pump(1.2)
         press(h, "info-l-" + r3.key, what: "Face 3's (i) in the list"); pump(1)
         frames(h, s, "R04"); shot(h, "R04_list_info_beside_the_legend")
-        s.faceUI.info = nil; s.heat = true; pump(1)
+        AppPopups.shared.current = nil; s.heat = true; pump(1)   // ★ notes30: the (i) opens the centred notification
 
         s.pickGroup(top.id, project: p); pump(1.2)
         s.tapFace(p, face: 2, point: nil, mesh: mesh); pump(1.5)

@@ -26,7 +26,8 @@ namespace {
 
 // The anchor / load pad in mm on the face path (TOPOPT_PAD_MM, default 3.0: an
 // open choice stage 1 settles by measurement). The voxel path keeps its 3 voxels.
-double face_pad_depth_mm() {
+double face_pad_depth_mm(double job_pad_mm) {
+  if (job_pad_mm >= 0.0) return job_pad_mm > 0.0 ? job_pad_mm : 3.0;  // the job's typed pad
   const char* v = std::getenv("TOPOPT_PAD_MM");
   const double d = v ? std::atof(v) : 0.0;
   return d > 0.0 ? d : 3.0;
@@ -51,7 +52,8 @@ double face_pad_depth_mm() {
 // (Manual mode).
 constexpr double kAutoPadStrengthMm = 0.2;
 constexpr bool kAutoPadIsDefault = true;
-bool auto_pad(double* strength_mm) {
+bool auto_pad(double* strength_mm, double job_pad_mm) {
+  if (job_pad_mm >= 0.0) return false;  // the job's typed pad is a fixed depth
   const char* v = std::getenv("TOPOPT_PAD_MM");
   if (v == nullptr || *v == '\0') {
     *strength_mm = kAutoPadStrengthMm;
@@ -64,11 +66,14 @@ bool auto_pad(double* strength_mm) {
   return true;
 }
 double pad_depth_for(const VoxelGrid& grid, const std::vector<FacePiece>& pieces,
-                     double line_width_mm, PadReceipt* receipt = nullptr) {
+                     double line_width_mm, double job_pad_mm,
+                     PadReceipt* receipt = nullptr) {
   double strength = 0.0;
-  if (!auto_pad(&strength)) {
-    if (receipt) receipt->pad_mm = face_pad_depth_mm();
-    return face_pad_depth_mm();
+  if (!auto_pad(&strength, job_pad_mm)) {
+    const double d = face_pad_depth_mm(job_pad_mm);
+    std::printf("[loadcase] fixed pad %.2f mm\n", d);
+    if (receipt) receipt->pad_mm = d;
+    return d;
   }
   const double thickness = face_backing_thickness_mm(grid, pieces);
   const double depth = auto_pad_depth_mm(thickness, strength, line_width_mm);
@@ -978,21 +983,28 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       // The pad's depth on the face path: a fixed number of mm, or the automatic
       // rule (pad_depth_for). Unused on the voxel path, which pads by layers.
       const bool by_face = face_load_mode() != FaceLoadMode::Voxel;
+      if (lc.pad_mm >= 0.0) {
+        const char* env = std::getenv("TOPOPT_PAD_MM");
+        if (env != nullptr && *env != '\0')
+          std::fprintf(stderr,
+                       "[loadcase] pad: the job's typed pad %.2f mm is used; TOPOPT_PAD_MM=%s "
+                       "is ignored\n", lc.pad_mm, env);
+      }
       auto face_pad = [&](int fid) {
-        if (!by_face) return face_pad_depth_mm();
+        if (!by_face) return face_pad_depth_mm(lc.pad_mm);
         PadReceipt rc;
         rc.face_id = fid;
         const double d = pad_depth_for(grid, face_pieces(model, {fid}, 0.5 * grid.spacing),
-                                       lc.wall_line_width_mm, &rc);
+                                       lc.wall_line_width_mm, lc.pad_mm, &rc);
         opts.pad_receipts.push_back(rc);
         return d;
       };
       auto region_pad = [&](const ResolvedFaceRegion& r) {
-        if (!by_face) return face_pad_depth_mm();
+        if (!by_face) return face_pad_depth_mm(lc.pad_mm);
         PadReceipt rc;
         rc.region_id = r.id;
         const double d = pad_depth_for(grid, region_pieces(model, r, 0.5 * grid.spacing),
-                                       lc.wall_line_width_mm, &rc);
+                                       lc.wall_line_width_mm, lc.pad_mm, &rc);
         opts.pad_receipts.push_back(rc);
         return d;
       };

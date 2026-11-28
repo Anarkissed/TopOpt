@@ -199,8 +199,9 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     // builder applies when none are declared); each force group becomes a
     // distributed traction; the production margin (default 1.5) + gravity/build
     // orientation come back on `options`.
-    const ProductionLoadCase lc =
+    ProductionLoadCase lc =
         production_loadcase_from_job(job, result.model);
+    lc.pad_mm = job.loads.pad_mm;  // the user's typed pad (loads.pad_mm)
     result.fixture_face_ids = lc.anchor_face_ids;
     ProductionRunSetup setup;
     try {

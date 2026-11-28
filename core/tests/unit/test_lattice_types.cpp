@@ -618,17 +618,24 @@ int main() {
     }
   }
 
-  // ── Finding 6 (ruling 2026-11-02): BCC and SC are offered in Structural only. The facts
-  // say so with a one-line reason, every other live type is offered in both, and the
-  // parse refuses an Aesthetic job with the same words (and only that job).
+  // ── Finding 6 (ruling 2026-11-02): a type whose R11 ceiling (strut at a fifth of the cell)
+  // lies under its measured band is offered in Structural only. The facts say so with a
+  // one-line reason, every other live type is offered in both, and the parse refuses an
+  // Aesthetic job with the same words (and only that job). That was BCC and SC, whose bands
+  // started at strut/cell 0.219 and 0.204; since 2026-11-25 they run down to 0.079 and 0.085
+  // (evidence/2026-11-25-strut-laws-low-density), under the ceiling, so the rule offers them
+  // in both and no live type is Structural only. The rule is read from core, not listed.
   {
     for (const std::string& gid : lattice_gen_topology_names()) {
       const LatticeTopology tt = lattice_topology_from_id(gid);
       const LatticeTypeFacts f = lattice_type_facts(gid);
-      const bool structural_only = (gid == "bcc" || gid == "sc");
+      const bool structural_only = lattice_type_numbers_measured(tt) && tt != LatticeTopology::Octet &&
+                                   lattice_aesthetic_density_ceiling(tt) < lattice_rho_min(tt);
+      if (gid == "bcc" || gid == "sc")
+        CHECK(!structural_only, (gid + ": its band now reaches under the open-print ceiling").c_str());
       CHECK(f.structural.allowed, (gid + ": offered in Structural").c_str());
       CHECK(f.aesthetic.allowed == !structural_only,
-            (gid + ": Aesthetic offered unless BCC or SC").c_str());
+            (gid + ": Aesthetic offered unless its band starts past the ceiling").c_str());
       CHECK(structural_only == (f.aesthetic.reason.find("Structural parts only") !=
                                 std::string::npos),
             (gid + ": the refusal says why in one line").c_str());

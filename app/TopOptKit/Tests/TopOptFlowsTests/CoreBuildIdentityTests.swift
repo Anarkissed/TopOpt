@@ -136,7 +136,16 @@ final class LatticeTypeReadinessFromCoreTests: XCTestCase {
         XCTAssertNil(why("octet"))
         // ★ RE-PINNED (release (2), E2): core builds and certifies nine types. Kelvin's job runs, so it waits for its app
         // batch (the type gate); gyroid is built and certified but core's job parser refuses it, so it reads core's refusal.
-        XCTAssertEqual(why("kelvin"), LatticeTypeCatalog.appBatchPending)
+        // ★ RE-PINNED (notes28, 2026-11-24): Kelvin's batch shipped with all the strut types — offered now
+        // ★ RE-PINNED (notes30, R1): 362's notes28 526c4a8f, his "Sure" 11-25: this is the OLD run's catalog, octet only.
+        XCTAssertEqual(why("kelvin"), LatticeTypeCatalog.oldRunPending, "★ the old run: kelvin waits for the new engine")
+        let newEngine = LatticeTypeCatalog.layoutEntriesFromCore(structural: false)
+        for id in LatticeTypeCatalog.order where !["gyroid", "schwarz_d"].contains(id) {   // ★ his 11-24: every strut type
+            XCTAssertEqual(newEngine.first { $0.id == id }?.offered, true, "★ \(id): offered where the new engine lays it")
+        }
+        LatticeTypeCatalog.appBatchesForTests = ["octet"]   // RED CONTROL: behind the old gate it waited for its batch
+        defer { LatticeTypeCatalog.appBatchesForTests = nil }
+        XCTAssertEqual(LatticeTypeCatalog.entriesFromCore().first { $0.id == "kelvin" }?.reason, LatticeTypeCatalog.appBatchPending)
         XCTAssertEqual(why("reentrant"), "Not buildable or strength-checked yet")
         XCTAssertEqual(why("gyroid"), LatticeTypeCatalog.jobRefused)
         XCTAssertEqual(TopOptKit.latticeTypeReadiness("gyroid", generatable: TopOptKit.latticeGeneratableTopologies,

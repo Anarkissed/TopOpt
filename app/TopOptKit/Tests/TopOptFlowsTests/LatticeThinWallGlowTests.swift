@@ -64,10 +64,14 @@ final class LatticeThinWallGlowTests: XCTestCase {
         XCTAssertEqual(LatticeThinWallPrompt.manualHint, "Your cell size is set by hand: a smaller cell may lattice some of them.",
                        "★ the hint in a Manual cell mode")
         // ★ notes25 (D10): "set by hand" is Fixed and Swept only — never Auto (his 11-09), nor Fit
+        // ★ RE-PINNED (notes30 X2, cell advice): the hint's gate is LatticeThinWallPrompt.cellLine — set by hand AND a smaller
+        // cell can lay (Notes30CellAdviceTests); release 21's gate (set by hand alone) is its RED CONTROL there
         let ws = try FlexibleSource.code("LatticeThinWallReasons.swift")
-        let gate = try XCTUnwrap(ws.range(of: "if LatticeThinWallPrompt.cellSetByHand(lattice) {"), "★ the hint's gate")
-        XCTAssertTrue(String(ws[gate.upperBound...].prefix(120)).contains("Text(LatticeThinWallPrompt.manualHint)"),
-                      "★ the hint only where the cell is set by hand")
+        let gate = try XCTUnwrap(ws.range(of: "if let hint = LatticeThinWallPrompt.cellLine(lattice, cells: cells) {"),
+                                 "★ the hint's gate")
+        XCTAssertTrue(String(ws[gate.upperBound...].prefix(120)).contains("Text(hint)"),
+                      "★ the hint only where the cell is set by hand and a smaller one lays")
+        XCTAssertEqual(LatticeThinWallPrompt.cellLine(LatticeSettings(), cells: nil), nil, "Auto, no floor known: no hint")
         var l = LatticeSettings()
         for (mode, byHand) in [(LatticeCellSizeMode.auto, false), (.fit, false), (.fixed, true), (.swept, true)] {
             l.cellSizeMode = mode
@@ -195,7 +199,7 @@ final class LatticeThinWallGlowHostedTests: XCTestCase {
         // ★ the session's first preview opens the Lattice page first (settings before any bake — armLatticePreview); its
         // Save (the capsule's Setup, as he leaves it) bakes, and the pop-up shows on Lattice Setup only
         if h.frames.all["view-Lattice preview-on"] == nil { try h.tap("view-Lattice preview", "the lattice preview", settle: 1.5) }
-        if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleSetup", "the page's Save: the capsule's Setup", settle: 1.5) }
+        if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleLattice", "the page's Save: the capsule's Lattice", settle: 1.5) }
         XCTAssertNil(h.frames.all["latticeSettingsPanel"], "premise: on Lattice Setup, the page saved and closed")
         // his stand bakes for a while in a debug build
         let end = Date().addingTimeInterval(420)

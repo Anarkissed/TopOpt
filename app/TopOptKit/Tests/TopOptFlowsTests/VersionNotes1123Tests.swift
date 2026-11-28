@@ -298,8 +298,8 @@ final class VersionNotes1123HostedTests: VersionNotes1123Base {
             let (h, app, v1) = try page(size)
             let p = try XCTUnwrap(app.project)
             h.pump(1.5)   // past the page's settling
-            if h.frames.all["capsuleLattice"] != nil { try h.tap("capsuleLattice", "\(size): the Lattice stage", settle: 1.5) }
-            if h.frames.all["capsuleSetup"] != nil { try h.tap("capsuleSetup", "\(size): back to Setup", settle: 1) }
+            if h.frames.all["capsuleSetup"] != nil { try h.tap("capsuleSetup", "\(size): Setup, the settings", settle: 1.5) }
+            if h.frames.all["capsuleLattice"] != nil { try h.tap("capsuleLattice", "\(size): back to the Lattice view", settle: 1) }
             XCTAssertEqual(p.id, v1, "\(size): ★ opening and looking makes no version")
             XCTAssertEqual(app.library.index.part(containing: v1)?.versions.count, 1)
             p.quality = .fine

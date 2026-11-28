@@ -32,6 +32,8 @@ public struct LatticeSetupWizard: View {
     @State private var model: LatticeWizardModel
     /// ★ notes25 B6: the setting "Change settings" or the fix wizard's Solve asked for (lit and scrolled to the middle).
     @ObservedObject private var settingAsk = SettingToChange.shared
+    /// ★ SHEETS: the sheet seams the last lay laid ("Where regions meet" shows only when two sheet regions touch).
+    @ObservedObject private var sheetsLaid = LatticeSheetsLaid.shared
     /// ★ §5 — which numeric field has the keypad open. One at a time, keyed by the
     /// field's id, so every number on this page types as well as drags.
     @State private var numberPadField: String?
@@ -167,19 +169,23 @@ public struct LatticeSetupWizard: View {
             Text(organicNotice?.message ?? "")
         }
         .onChange(of: model.stage) { _ in rebuild() }
+        // ★ notes29 (his 11-25): the page follows a Structural ⇄ Aesthetic switch made while it is open (single-cell members
+        // are Aesthetic's alone: on Structural they never lock the Finish)
+        .onChange(of: project.lattice.stageMode) { m in model.setStage(aesthetic: (m ?? .structural) == .aesthetic) }
+        // ★ notes30 X2 (his answer, 11-26): the pop-up's "Turn Allow quilt on" made while it is open — the page's own switch
+        // follows, so its Save keeps it on
+        .onChange(of: project.lattice.allowQuilt) { on in if model.allowQuilt != on { model.allowQuilt = on; rebuild() } }
+        // ★ notes30 X2 (his yes, 11-26): and its "Small cells in thin walls", first among them
+        .onChange(of: project.lattice.smallCellsInThinWalls) { on in
+            if model.smallCellsInThinWalls != on { model.smallCellsInThinWalls = on; rebuild() }
+        }
         .onAppear { if openedLattice == nil { openedLattice = project.lattice } }
     }
-
-    /// Which (i) popover is open, by id — one at a time.
-    @State private var infoShown: String?
     /// the settings as they were when the page opened — "Exit" until they differ
     @State private var openedLattice: LatticeSettings? = nil
     @State private var panelRowsHeight: CGFloat = 0
     @State private var canvasHeight: CGFloat = 0
-    /// ★ The small pop-up for the single-cell ⇄ finish rule (2026-09-18): which one is
-    /// showing — "skin-required" when the switch turns on, "finish-locked" when a locked
-    /// finish is tapped.
-    @State private var finishRuleNotice: String?
+    // ★ notes29: the single-cell ⇄ finish rule's two notices are centred pop-ups now (AppPopups), no state here
     /// The grown path's print fine-tuning, folded away until asked for (item 2.2).
     @State private var showPrintTuning = false
     /// "Grading needs a stress simulation" — shown when shape-fit-only is turned off
@@ -349,10 +355,10 @@ public struct LatticeSetupWizard: View {
             }
             .toggleStyle(SwitchToggleStyle(tint: DS.Color.okGreen.color))   // ★ B7: the panel's switch green (DSSwitch)
             .latticeID("wizard-grade-toggle")
-            captionLine(model.gradingMode == LatticeGradingMode.none
-                        ? "One cell, one density, everywhere."
-                        : "The lattice varies across the part.",
-                        info: "grade-toggle")
+            captionLine(model.gradingMode == LatticeGradingMode.none ? Self.gradeOffLine : Self.gradeOnLine,
+                        info: "grade-toggle",
+                        "On: the cells and their density vary across the part, as the Grade row below says. "
+                        + "Off: one cell size and one density everywhere.")
         }
     }
 
@@ -365,7 +371,10 @@ public struct LatticeSetupWizard: View {
             HStack(spacing: 4) {
                 ForEach([LatticeGradingMode.full, .fitShape, .stressOnly],
                         id: \.rawValue) { m in
+                    // ★ SHEETS: Grade to shape greyed (the two shape grades); a sheet grades its walls by the stress alone
+                    let off = m != .stressOnly && LatticeSheets.greyed(model.topologyID).contains(.gradeToShape)
                     Button {
+                        guard !off else { return }
                         model.gradingMode = m
                         rebuild()
                     } label: {
@@ -381,13 +390,15 @@ public struct LatticeSetupWizard: View {
                             .foregroundStyle((model.gradingMode == m ? DS.Color.textPrimary : DS.Color.textTertiary).color)
                     }
                     .buttonStyle(.plain)
+                    .disabled(off)
+                    .opacity(off ? 0.35 : 1)
                     .latticeID("wizard-grade-type-\(m.rawValue)")
                 }
             }
             .modifier(LatticeSegmentTrack())
-            captionLine(model.gradingMode == .full ? "Density by stress, cells fit the outline."
-                        : model.gradingMode == .fitShape ? "Cells fit the outline, one density."
-                        : "Density by stress, one cell size.",
+            if LatticeSheets.greyed(model.topologyID).contains(.gradeToShape) { sheetGreyedCaption(.gradeToShape) }   // ★ SHEETS
+            captionLine(model.gradingMode == .full ? Self.gradeFullLine
+                        : model.gradingMode == .fitShape ? Self.gradeShapeLine : Self.gradeStressLine,
                         info: "grade-type",
                         "Stress + shape: the density follows the solve and the cells fit the "
                         + "outline. Shape: the cells fit the outline; one density everywhere. "
@@ -454,9 +465,10 @@ public struct LatticeSetupWizard: View {
                     Text("Simulate Stresses")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(DS.Color.textPrimary.color)
-                    captionLine(model.simulateStresses ? "An FEA decides the Sim settings."
-                                                       : "Every setting is yours.",
-                                info: "sim")
+                    captionLine(model.simulateStresses ? Self.simOnLine : Self.simOffLine,
+                                info: "sim",
+                                "On: a stress simulation (an FEA) decides every setting marked Sim. "
+                                + "Off: no simulation runs, and every setting is yours to set.")
                 }
             Spacer(minLength: DS.Space.s)
             latticeSwitch(isOn: model.simulateStresses) {
@@ -527,7 +539,8 @@ public struct LatticeSetupWizard: View {
                 .foregroundStyle(DS.Color.textTertiary.color)
             HStack(spacing: DS.Space.xs) {
                 ForEach(Self.cellTransitions, id: \.rawValue) { t in
-                    let off = t.unavailableReason != nil
+                    // ★ SHEETS: Doubled / Stepped greyed — one cell size per region
+                    let off = t.unavailableReason != nil || LatticeSheets.greyed(model.topologyID).contains(.doubledStepped)
                     Button {
                         guard !off else { return }
                         model.cellTransition = t
@@ -550,7 +563,9 @@ public struct LatticeSetupWizard: View {
                     .latticeID("wizard-cell-transition-\(t.rawValue)")
                 }
             }
-            if let blocked = LatticeStructuralSteppedGate.refusal(
+            if LatticeSheets.greyed(model.topologyID).contains(.doubledStepped) {
+                sheetGreyedCaption(.doubledStepped)   // ★ SHEETS
+            } else if let blocked = LatticeStructuralSteppedGate.refusal(
                 latticeEnabled: true, algorithm: model.cellTransition.coreAlgorithm,
                 stageMode: project.lattice.stageMode) {
                 // ★★ STRUCTURAL STEPPED IS BLOCKED (reviewer, 2026-10-08): the gate's line, and the
@@ -560,17 +575,20 @@ public struct LatticeSetupWizard: View {
                         model.cellTransition = .defaultGrade
                         rebuild()
                     } label: {
-                        Self.tapNote(blocked + " · " + LatticeStructuralSteppedGate.fixLabel)
+                        // ★ notes29 (his 11-25): five words on the tap; the gate's sentence in the (i)
+                        let _ = LatticeCaptions.record(Self.steppedBlockedLine)
+                        Self.tapNote(Self.steppedBlockedLine)
                     }
                     .buttonStyle(.plain)
                     .latticeID("wizard-stepped-structural-blocked")
-                    infoButton("grade-style-blocked", LatticeStructuralSteppedGate.detail)
+                    infoButton("grade-style-blocked", blocked + ". " + LatticeStructuralSteppedGate.detail
+                               + " Tap the line to use Default Grade.")
                 }
             } else {
-                captionLine(model.cellTransition.unavailableReason
-                            ?? (model.cellTransition == .stepped ? "Any printable step, packed to the outline."
-                                                                  : "Cells halve on core's ladder."),
-                            info: "grade-style", model.cellTransition.body)
+                captionLine(model.cellTransition.unavailableReason != nil ? Self.gradeStyleMissingLine
+                            : model.cellTransition == .stepped ? Self.steppedLine : Self.defaultGradeLine,
+                            info: "grade-style",
+                            (model.cellTransition.unavailableReason.map { $0 + " " } ?? "") + model.cellTransition.body)
             }
 
             // ★★★ GRADE TO SHAPE BAND — directly under the transition it belongs to
@@ -685,7 +703,7 @@ public struct LatticeSetupWizard: View {
         HStack(spacing: DS.Space.xs) {
             Text(title).font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)   // ★ B7: the panel's overline (DSPanelSection)
                 .foregroundStyle(DS.Color.textTertiary.color)
-            infoButton(id, text)
+            infoButton(id, text, title: title)
         }
         .padding(.top, DS.Space.xs)
     }
@@ -693,11 +711,14 @@ public struct LatticeSetupWizard: View {
     /// ★★ ONE LINE, AND THE REST BEHIND THE (i) (his 2026-09-18: "get rid of most
     /// of the text in the settings. Have a single line of text with an (i) in it for
     /// more details if absolutely necessary"). `brief` is the line — never wrapped —
-    /// and `detail`, when given, is the popover the (i) opens. No detail ⇒ no (i).
+    /// and `detail`, when given, is what the (i) opens. No detail ⇒ no (i).
+    /// ★ notes29 (his 11-25: "You should aim for about 5 words below ANY setting, with an (i)"): `brief` is at most five words
+    /// (LatticeCaptions.words; LatticeCaptionsNotes29Tests walks every one), the rest in `detail`.
     /// `probe`: an id the brief's frame is published under while a test records (11-10: the band's lines are measured).
     private func captionLine(_ brief: String, info id: String, _ detail: String? = nil,
                              tint: Color? = nil, probe: String? = nil) -> some View {
-        HStack(spacing: DS.Space.xs) {
+        LatticeCaptions.record(brief)
+        return HStack(spacing: DS.Space.xs) {
             Text(brief)
                 .dsStyle(DS.TypeScale.caption2)
                 .foregroundStyle(tint ?? DS.Color.textTertiary.color)
@@ -712,19 +733,21 @@ public struct LatticeSetupWizard: View {
     /// Strength, as ONE SHORT LINE drawn at full size, with the rest behind its (i). Both used to sit under Strength, Band's
     /// last, so his (i) on Band opened two rows below its slider, and Strength's line was shrunk to fit.
     struct BandCaption { let brief: String; let info: String; let detail: String }
-    static let strengthBrief = "0 is today's grade; + more, − less."
-    static let strengthDetail = "+ thickens the struts and shrinks the cells further; − does less. "
+    // ★ notes29 (his 11-25): five words; the old line opens the (i)
+    static let strengthBrief = "Plus grades more, minus less."
+    static let strengthDetail = "0 is today's grade; + grades more, − less. "
+        + "+ thickens the struts and shrinks the cells further; − does less. "
         + "A multiplier on how much the grade does at every point of the band: at +1 "
         + "the struts thicken and the cells shrink twice as far, at −1 half as far. "
         + "The band's length is set above and is not changed by this."
     static let shapeBand = BandCaption(
-        brief: "How far in the cells grade down.", info: "band",
+        brief: "How far in cells shrink.", info: "band",
         detail: "How far in from the face's outline the cells grade down toward the "
             + "solid outline, in millimetres. A cell stands where its centre is far "
             + "enough in for its size; the smallest cells always reach the outline. "
             + "From 25 mm the solid outline also thickens inward.")
     static let organicBand = BandCaption(
-        brief: "How far in the cells shrink.", info: "organic-band",
+        brief: "How far in spacing shrinks.", info: "organic-band",
         detail: "Within this many millimetres of a face outline the strut spacing runs "
             + "down to the printable floor at the outline, and the struts thicken with "
             + "it. 0 turns the grade off. The tint on the lattice shows the same band.")
@@ -763,28 +786,12 @@ public struct LatticeSetupWizard: View {
                     tint: DS.Color.textQuaternary.color, probe: "\(idPrefix)-strength-note")
     }
 
-    /// The (i): a popover with the explanation, one open at a time.
-    private func infoButton(_ id: String, _ text: String) -> some View {
-        Button { infoShown = id } label: {
-            Image(systemName: "info.circle")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(DS.Color.textTertiary.color)
-        }
-        .buttonStyle(.plain)
-        .popover(isPresented: Binding(get: { infoShown == id },
-                                      set: { if !$0 { infoShown = nil } })) {
-            // ★ SIZED TO ITS TEXT, NEVER SCROLLED (his 2026-09-18: "ensure that in any of
-            // the (i) the pop-ups are the required size to fit the text. There should be
-            // no need to scroll. Just make it bigger").
-            Text(text)
-                .dsStyle(DS.TypeScale.footnote)
-                .foregroundStyle(DS.Color.textPrimary.color)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-                .padding(16)
-                .frame(width: 380)
-        }
-        .latticeID("wizard-info-\(id)")
+    /// The (i): ★ notes29 (his 11-25) the one (i) (AppInfoButton) — its glyph in a 44 pt target, the explanation in the centred
+    /// notification ("Tap anywhere to continue"), sized to its words (his 2026-09-18: "the required size to fit the text … no
+    /// need to scroll"). It opened a popover beside it, which he saw as the error look.
+    private func infoButton(_ id: String, _ text: String, title: String? = nil) -> some View {
+        AppInfoButton(title: title ?? LatticeCaptions.infoTitle(id), text: text)
+            .latticeID("wizard-info-\(id)")
     }
 
     private var organicAesthetic: Bool { (project.lattice.stageMode ?? .structural) == .aesthetic }
@@ -872,8 +879,8 @@ public struct LatticeSetupWizard: View {
         .frame(minHeight: 44)
         .latticeID("lattice-organic-skin-thickness")
         OrganicGreyLine(label: "Skin thickness")
-        if let why = organicSkinRefusal {
-            Text(why).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.warning.color).lineLimit(2)
+        if let why = organicSkinRefusal {   // ★ notes29 (his 11-25): five words; the reason in the (i)
+            shortNote(LatticeCaptions.numberNotApplied, info: "skin-thickness-refused", why, warning: true)
         }
         HStack(spacing: 0) {
             Text("Skin density").font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)
@@ -1047,7 +1054,7 @@ public struct LatticeSetupWizard: View {
             if !fitPossible {
                 let why = LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled, hasIncludeWall: false)
                 if let why, LatticeJobIncludeGate.opensWallMarking(why) {
-                    refusalNote(why, marksWalls: markWalls != nil)
+                    refusalNote(Self.markWallFirstLine, why, id: "fit-nothing-set", marksWalls: markWalls != nil)
                         .latticeID("wizard-organic-fit-nothing-set")
                 } else {
                     shortNote("Needs a lattice region")
@@ -1208,7 +1215,8 @@ public struct LatticeSetupWizard: View {
                 if let w = lookWindowMM {
                     shortNote(String(format: "%.2f–%.2f mm cells", w.lo, w.hi))
                 } else {
-                    shortNote("Mark a wall to size the cells", warning: true)
+                    shortNote(Self.markWallFirstLine, info: "look-walls",
+                              "Mark a wall to size the cells: Look sets the cell sizes from the walls you mark.", warning: true)
                 }
             }
 
@@ -1238,8 +1246,18 @@ public struct LatticeSetupWizard: View {
     }
 
     /// ★ A caption of a few words (his item 8). Anything longer belongs in an (i).
-    private func shortNote(_ text: String, warning: Bool = false) -> some View {
-        Self.note(text, warning: warning)
+    /// ★ notes29 (his 11-25): at most five words (LatticeCaptionsNotes29Tests), the rest in `detail`, behind its (i).
+    @ViewBuilder private func shortNote(_ text: String, info id: String? = nil, _ detail: String? = nil,
+                                        warning: Bool = false) -> some View {
+        let _ = LatticeCaptions.record(text)
+        if let id, let detail {
+            HStack(spacing: DS.Space.xs) {
+                Self.note(text, warning: warning)
+                infoButton(id, detail)
+            }
+        } else {
+            Self.note(text, warning: warning)
+        }
     }
     static func note(_ text: String, warning: Bool = false) -> some View {
         Text(text).dsStyle(DS.TypeScale.caption2)
@@ -1341,13 +1359,18 @@ public struct LatticeSetupWizard: View {
             && LatticeJobIncludeGate.opensWallMarking(organicIncludeWhy)
     }
     /// A warning note; when a wall is what it lacks, its tap leaves by Save & Exit for the walls.
-    @ViewBuilder private func refusalNote(_ text: String, marksWalls: Bool) -> some View {
+    /// ★ notes29 (his 11-25): `brief` (five words) on the page, the whole sentence (`detail`) behind its (i).
+    @ViewBuilder private func refusalNote(_ brief: String, _ detail: String, id: String, marksWalls: Bool) -> some View {
         if marksWalls {
-            Button { exitToWallMarking() } label: { Self.tapNote(text) }
-            .buttonStyle(.plain)
-            .accessibilityHint(WallMarkingSubline.hint)
+            HStack(spacing: DS.Space.xs) {
+                let _ = LatticeCaptions.record(brief)
+                Button { exitToWallMarking() } label: { Self.tapNote(brief) }
+                .buttonStyle(.plain)
+                .accessibilityHint(WallMarkingSubline.hint)
+                infoButton(id, detail)
+            }
         } else {
-            shortNote(text, warning: true)
+            shortNote(brief, info: id, detail, warning: true)
         }
     }
     /// ★ THE ONE Check-sizes submission — the button's, and under Auto the re-check line's
@@ -1480,8 +1503,9 @@ public struct LatticeSetupWizard: View {
         // ★ RULING (d) (2026-09-30): an answer measured on an older job route is kept but not
         // used — one line says so, and what checks the sizes again (or why nothing can)
         if project.lattice.organicSizesNeedRecheck, organicProbeState != .running {
-            refusalNote(OrganicForecast.recheckLine(checkRefusal: organicProbeRefusal),
-                        marksWalls: organicRefusalMarksWalls)
+            // ★ notes29 (his 11-25): five words; the whole line behind its (i)
+            refusalNote(Self.sizesRecheckLine, OrganicForecast.recheckLine(checkRefusal: organicProbeRefusal),
+                        id: "sizes-recheck", marksWalls: organicRefusalMarksWalls)
                 .latticeID("wizard-organic-sizes-recheck")
         }
         // ★ RULING (c) (2026-09-30): Check sizes shows only when it can act, so a job with no
@@ -1490,23 +1514,21 @@ public struct LatticeSetupWizard: View {
         if let why = organicIncludeRefusal, !project.lattice.organicSizesNeedRecheck,
            project.lattice.currentOrganicForecast?.uncheckedSummary(
                structural: structural, grades: model.simulateStresses, checkRefusal: why) == nil {
-            refusalNote(why, marksWalls: organicRefusalMarksWalls)
+            refusalNote(Self.cantCheckSizesLine, why, id: "check-refused", marksWalls: organicRefusalMarksWalls)
                 .latticeID("wizard-organic-check-refused")
         }
         // ★ ruling V3 (2026-09-29): not one size's stress bar was computed — say so, and
         // what would get them checked; each size's reason behind the (i)
         if let none = project.lattice.currentOrganicForecast?.uncheckedSummary(
             structural: structural, grades: model.simulateStresses, checkRefusal: organicProbeRefusal) {
-            HStack(spacing: DS.Space.xs) {
-                refusalNote(none.line, marksWalls: organicRefusalMarksWalls)
-                infoButton("none-checked", none.info)
-            }
-            .latticeID("wizard-organic-none-checked")
+            refusalNote(Self.noSizesCheckedLine, none.line + " " + none.info, id: "none-checked",
+                        marksWalls: organicRefusalMarksWalls)
+                .latticeID("wizard-organic-none-checked")
         }
         // ★ ruling V1 (2026-09-29): a variant's Check sizes left a face wall out — say so
         if let line = LatticeVariantFaceWalls.line(withoutShape: project.lattice.currentOrganicForecast?.facesWithoutShape ?? 0,
                                                    regions: project.lattice.currentOrganicForecast?.regionsWithoutShape ?? []) {
-            shortNote(line, warning: true)
+            shortNote(Self.faceWallsLeftOutLine, info: "face-walls-left-out", line, warning: true)
                 .latticeID("wizard-organic-face-walls-left-out")
         }
     }
@@ -1522,13 +1544,17 @@ public struct LatticeSetupWizard: View {
             }
             .latticeID("wizard-organic-auto-recheck")
         } else if organicProbeRefusal == nil {
-            Button { runCheckSizes() } label: { Self.tapNote(OrganicForecast.recheckTapLine) }
-            .buttonStyle(.plain)
-            .accessibilityHint(OrganicForecast.checkSizesHelp)
+            HStack(spacing: DS.Space.xs) {
+                let _ = LatticeCaptions.record(Self.recheckTapBrief)
+                Button { runCheckSizes() } label: { Self.tapNote(Self.recheckTapBrief) }   // ★ notes29: five words
+                .buttonStyle(.plain)
+                .accessibilityHint(OrganicForecast.checkSizesHelp)
+                infoButton("recheck-tap", OrganicForecast.recheckTapLine + " " + OrganicForecast.checkSizesHelp)
+            }
             .latticeID("wizard-organic-auto-recheck")
         } else {
-            refusalNote(OrganicForecast.recheckLine(checkRefusal: organicProbeRefusal),
-                        marksWalls: organicRefusalMarksWalls)
+            refusalNote(Self.sizesRecheckLine, OrganicForecast.recheckLine(checkRefusal: organicProbeRefusal),
+                        id: "auto-recheck", marksWalls: organicRefusalMarksWalls)
                 .latticeID("wizard-organic-auto-recheck")
         }
         if case let .failed(why) = organicProbeState {
@@ -1720,7 +1746,8 @@ public struct LatticeSetupWizard: View {
             // ★ the reviewer's ruling (2), 2026-11-06: one plain line until core builds the real band (LatticeTypes, after
             // its queue: grading.shape_grade_strength); it goes by itself the day the linked core takes that key
             if !TopOptKit.gradingSchemaAccepts(key: "shape_grade_strength") {
-                shortNote(Self.shapeGradeRunLine).latticeID("wizard-shape-grade-run-line")
+                shortNote(Self.shapeGradeRunBrief, info: "shape-grade-run", Self.shapeGradeRunLine)   // ★ notes29
+                    .latticeID("wizard-shape-grade-run-line")
             }
             // ★★★ HOW MANY STEPS THIS PART CAN ACTUALLY GRADE (maintainer, 2026-08-23:
             // the band offered 0–60 mm while his settings allowed exactly ONE step, and
@@ -1732,9 +1759,10 @@ public struct LatticeSetupWizard: View {
             // that implies a gradient the printer cannot lay is the decorative-control
             // defect this page has paid for before.
             if let steps = shapeFitSteps, steps <= 1 {
-                captionLine("No room to step down at this cell and bead.",
+                captionLine(Self.bandNoRoomLine,
                             info: "band-no-room",
-                            "A finer cell would need struts under one extrusion. Use a coarser "
+                            "No room to step down at this cell and bead. "
+                            + "A finer cell would need struts under one extrusion. Use a coarser "
                             + "cell, or a finer nozzle, to grade.",
                             tint: DS.Color.warning.color)
                     .latticeID("wizard-shape-fit-no-room")
@@ -1770,13 +1798,15 @@ public struct LatticeSetupWizard: View {
             }
             .toggleStyle(SwitchToggleStyle(tint: DS.Color.okGreen.color))
             .latticeID("wizard-let-walls-cut-cells")
-            captionLine(model.letWallsCutCells ? "Walls and pockets may cut through cells."
-                                               : "Whole cells, each fitted between walls.",
+            // ★ notes29 (his 11-25): five words; the rest in the (i)
+            captionLine(model.letWallsCutCells ? Self.cutCellsOnLine : Self.cutCellsOffLine,
                         info: "cut-cells",
                         "New engine only. On: cells may be cut wherever a wall, pocket or skin falls. "
                         + "Off: whole cells, each sized to fit its wall.")
         }
     }
+    static let cutCellsOnLine = "Walls may cut through cells."
+    static let cutCellsOffLine = "Whole cells fit between walls."
 
     @ViewBuilder private var smallCellsSwitch: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -1788,15 +1818,24 @@ public struct LatticeSetupWizard: View {
             }
             .toggleStyle(SwitchToggleStyle(tint: DS.Color.okGreen.color))
             .latticeID("wizard-small-cells-thin-walls")
-            .disabled(project.lattice.allowQuilt)   // ★ 11-13: Allow quilt already lets cells go this small (the engine reads either)
-            captionLine(project.lattice.allowQuilt ? "Allow quilt is on: it already lets cells go this small."
-                        : model.smallCellsInThinWalls ? "Thin walls get small, denser cells instead of going solid."
-                                                    : "A wall too thin for an open cell stays solid.",
-                        info: "small-cells",
-                        "New engine only. A wall too thin for an open cell at two-line struts takes small, denser cells "
-                        + "(never touching) instead of going solid.")
+            // ★ 362's merge (his 11-25: "It is its own thing"): Small cells in thin walls is NOT tied to Allow quilt — thin
+            // walls only, never past the type's fusing point (builder N2b makes the engine side so: core's
+            // CellSpec::small_in_thin_walls, one printed line short of touching); only when Allow quilt is on does it have
+            // nothing left to add (11-13).
+            .disabled(model.allowQuilt || LatticeSheets.greyed(model.topologyID).contains(.smallCellsInThinWalls))
+            // ★ notes29 (his 11-25): five words; the rest in the (i) (★ notes29b: the engine's own rule, LatticeSetupWizard.smallCellsInfo)
+            if LatticeSheets.greyed(model.topologyID).contains(.smallCellsInThinWalls) {   // ★ notes30 M1: a sheet, one cell
+                sheetGreyedCaption(.smallCellsInThinWalls)
+            } else {
+                captionLine(model.allowQuilt ? Self.smallCellsQuiltLine
+                            : model.smallCellsInThinWalls ? Self.smallCellsOnLine : Self.smallCellsOffLine,
+                            info: "small-cells", Self.smallCellsInfo)   // (its last sentence says what Allow quilt on does)
+            }
         }
     }
+    static let smallCellsQuiltLine = "Allow quilt already does this."
+    static let smallCellsOnLine = "Thin walls get small cells."
+    static let smallCellsOffLine = "Too-thin walls stay solid."
 
     @ViewBuilder private var singleCellSwitch: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -1804,9 +1843,9 @@ public struct LatticeSetupWizard: View {
                                  set: { on in
                                      let hadSkin = model.boundary == .fullSkin
                                      model.setSingleCellMembers(on)
-                                     // ★ SKIN IS SET AND SAID (his 2026-09-18): the pop-up
-                                     // names the change the switch just made.
-                                     if on, !hadSkin { finishRuleNotice = "skin-required" }
+                                     // ★ SKIN IS SET AND SAID (his 2026-09-18): the notice names the change the switch just
+                                     // made. ★ notes29: in the centred notification (it was a popover beside the switch)
+                                     if on, !hadSkin { AppPopups.shared.help(Self.skinRequiredTitle, Self.skinRequiredText) }
                                      rebuild()
                                  })) {
                 Text("Allow single-cell members")
@@ -1815,26 +1854,23 @@ public struct LatticeSetupWizard: View {
             }
             .toggleStyle(SwitchToggleStyle(tint: DS.Color.okGreen.color))   // ★ B7: the panel's switch green (DSSwitch)
             .latticeID("wizard-single-cell-members")
-            .popover(isPresented: Binding(get: { finishRuleNotice == "skin-required" },
-                                          set: { if !$0 { finishRuleNotice = nil } })) {
-                Text("The finish is now Skin: it must be on while single-cell members is on.")
-                    .dsStyle(DS.TypeScale.footnote)
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(16)
-                    .frame(maxWidth: 300)
-            }
             // ★ SAID, NOT HIDDEN (his 2026-09-18): a one-cell member's struts are
             // severed at the face caps and a skin re-ties them — core's rule — so when
             // the finish chosen above would not, the line says the run adds one.
-            captionLine(model.singleCellMembers ? "One cell across a member; finish locked to Skin."
-                                                : "Two cells across a member.",
+            captionLine(model.singleCellMembers ? Self.singleCellOnLine : Self.singleCellOffLine,
                         info: "single-cell",
                         "A member one cell wide has its struts cut at the face caps with no "
                         + "node to end on; the Skin finish re-ties them, so it is required "
                         + "and locked while this is on. Off, two cells across a member.")
         }
     }
+    static let singleCellOnLine = "One cell across; Skin locked."
+    static let singleCellOffLine = "Two cells across a member."
+    static let skinRequiredTitle = "The finish is now Skin"
+    static let skinRequiredText = "Skin must be on while single-cell members is on: a member one cell wide has its struts cut "
+        + "at the face caps, and the skin re-ties them."
+    static let finishLockedTitle = "The finish is locked to Skin"
+    static let finishLockedText = "To change the finish, turn off single-cell members."
 
     /// ★★ "KEEP THE LATTICE WHERE THE PART IS TOO THIN TO CERTIFY IT."
     ///
@@ -1881,7 +1917,7 @@ public struct LatticeSetupWizard: View {
             }
             // ★ WHY IT CANNOT BE OPERATED, said as the fact it is. Greying a row in
             // silence is the defect this page has already paid for.
-            captionLine(c.disabledReason == nil ? "Lattice kept where the part is too thin to certify."
+            captionLine(c.disabledReason == nil ? Self.subfloorLine   // ★ notes29: five words
                                                 : "Not available on this job.",
                         info: "subfloor", c.disabledReason ?? c.body,
                         tint: (c.disabledReason == nil ? DS.Color.textTertiary : DS.Color.warning).color)
@@ -1902,12 +1938,15 @@ public struct LatticeSetupWizard: View {
     /// ★ WHAT A SIM AXIS SAYS INSTEAD OF OFFERING A FIELD. A number the user
     /// cannot set must not look like one they can — the readout-that-looks-like-
     /// a-picker defect this page has already paid for twice.
-    private func simDerivedNote(_ what: String) -> some View {
-        HStack(spacing: 4) {
+    /// ★ notes29 (his 11-25): five words (`what`), the rest in its (i) (`detail`).
+    private func simDerivedNote(_ what: String, info id: String, _ detail: String) -> some View {
+        LatticeCaptions.record(what)
+        return HStack(spacing: 4) {
             Image(systemName: "wand.and.stars")
                 .font(.system(size: 9, weight: .bold))
             Text(what)
                 .dsStyle(DS.TypeScale.caption2)
+            infoButton(id, detail)
         }
         .foregroundStyle(DS.Color.accent.opacity(0.85).color)
     }
@@ -1918,7 +1957,8 @@ public struct LatticeSetupWizard: View {
                                              titled: Bool) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             if titled {
-                Text(s.title)
+                // ★ SHEETS: the dial's row reads "Wall thickness" for a sheet
+                Text(s == .thickness ? LatticeSheets.dialTitle(model.topologyID, strut: s.title) : s.title)
                     .font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)   // ★ B7: the panel's overline (DSPanelSection)
                     .foregroundStyle(DS.Color.textTertiary.color)
             }
@@ -1949,13 +1989,13 @@ public struct LatticeSetupWizard: View {
                 // determined. That is the honest mechanism, and it is the one
                 // the Density and Cell size rows below already offer.
                 if model.densityMode.needsSimulation, model.simulateStresses {
-                    simDerivedNote("Derived from the simulated density. "
-                                   + "To pin it, pin Density and Cell size.")
+                    simDerivedNote(Self.thicknessDerivedLine, info: "thickness-derived",
+                                   "Derived from the simulated density. To pin it, pin Density and Cell size.")
                         .latticeID("wizard-thickness-derived")
-                } else if let why = LatticeTypeCatalog.selectionRefusal(model.topologyID) {
+                } else if let why = typeStaleLine(typeEntries) {   // ★ notes28: the stage's own catalog
                     // ★ Q2 (2026-10-05): a saved type core does not call live has no band, so
                     // no printable range to scrub — core's readiness words where it was.
-                    shortNote(why, warning: true)
+                    shortNote(Self.typeCantRunLine, info: "thickness-no-band", why, warning: true)
                         .latticeID("wizard-thickness-no-band")
                 } else {
                     // ★★ A THICKNESS IN MILLIMETRES (maintainer, 2026-08-19: "Off
@@ -1982,11 +2022,18 @@ public struct LatticeSetupWizard: View {
                         model.touched(.thickness)
                         rebuild()
                     }
-                    Text("One extrusion is \(mmText(range.lowerBound)) — the thinnest "
-                         + "strut this printer can lay at a \(mmText(model.cellMM)) cell.")
-                        .dsStyle(DS.TypeScale.caption2)
-                        .foregroundStyle(DS.Color.textQuaternary.color)
-                        .latticeID("wizard-thickness-floor-note")
+                    if LatticeSheets.isSheet(model.topologyID) {   // ★ SHEETS: "Thinnest is two lines", its (i)
+                        captionLine(LatticeSheets.thinnestCaption, info: "sheet-wall",
+                                    LatticeSheets.wallInfo(model.topologyID, cellMM: model.cellMM,
+                                                           lineWidthMM: project.printParams.strutLineWidthMM))
+                            .latticeID("wizard-sheet-wall-caption")
+                    } else {
+                        captionLine("Thinnest strut: \(mmText(range.lowerBound)).", info: "thickness-floor",
+                                    "One extrusion is \(mmText(range.lowerBound)) — the thinnest "
+                                    + "strut this printer can lay at a \(mmText(model.cellMM)) cell.",
+                                    tint: DS.Color.textQuaternary.color)
+                            .latticeID("wizard-thickness-floor-note")
+                    }
                 }
             case .cellSize:
                 // ★ "cell size could be auto or swept or manually input"
@@ -2005,17 +2052,23 @@ public struct LatticeSetupWizard: View {
                 // so with the permission off it is not offered, exactly as the
                 // sweep is not. Manual and Fit stand alone. See
                 // `LatticeSettings.resolvedCellPlan` for what each one emits.
+                // ★ SHEETS: cell size by stress (Auto · Sim, Swept · Sim) greyed — one cell size per region
                 segmentRow(model.simulateStresses
                            ? ["Auto · Sim", "Swept · Sim", "Manual", "Fit"]
                            : ["Manual", "Fit"],
-                           selected: cellModeIndex) { i in
+                           selected: cellModeIndex,
+                           greyed: model.simulateStresses && LatticeSheets.greyed(model.topologyID).contains(.cellSizeByStress)
+                                ? [0, 1] : []) { i in
                     let modes: [LatticeCellSizeMode] = model.simulateStresses
                         ? [.auto, .swept, .fixed, .fit]
                         : [.fixed, .fit]
                     model.setCellSizeMode(modes[i])
                 }
-                if model.simulateStresses, model.cellSizeMode == .auto {
-                    captionLine("The solve picks the cell everywhere.", info: "auto-cell",
+                if model.simulateStresses, LatticeSheets.greyed(model.topologyID).contains(.cellSizeByStress) {
+                    sheetGreyedCaption(.cellSizeByStress)
+                }
+                if model.simulateStresses, model.cellSizeMode == .auto, !LatticeSheets.isSheet(model.topologyID) {
+                    captionLine(Self.autoCellLine, info: "auto-cell",
                                 autoCellNote, tint: DS.Color.textQuaternary.color)
                         .latticeID("wizard-auto-cell-note")
                 }
@@ -2054,7 +2107,8 @@ public struct LatticeSetupWizard: View {
                     model.setDensityMode(choices[i])
                 }
                 if model.densityMode.needsSimulation {
-                    simDerivedNote("Each region graded from its own stress.")
+                    simDerivedNote(Self.densityByStressLine, info: "density-sim",
+                                   "Each region is graded from its own stress: the stress simulation sets the density there.")
                         .latticeID("wizard-density-sim-note")
                 }
                 if model.densityMode == .perRegion {
@@ -2064,7 +2118,7 @@ public struct LatticeSetupWizard: View {
                     // Saying so beats a control that silently does nothing — the
                     // Diagrid-readout defect, which this project has already paid
                     // for once.
-                    captionLine("Saved per region, not yet run.", info: "per-region",
+                    captionLine(Self.perRegionLine, info: "per-region",
                                 "Set each region's density in its drawer. Core still derives "
                                 + "density from the cell — these are saved, not yet run.",
                                 tint: DS.Color.warning.color)
@@ -2073,47 +2127,43 @@ public struct LatticeSetupWizard: View {
                 // ★★★ ALLOW QUILT (his ruling, 2026-09-12) — octet only. Off, every
                 // density is held under the aesthetic ceiling (strut a fifth of the
                 // cell). On, the manual methods may go past it; simulated ones never.
-                if LatticeType.named(model.topologyID)?.hasAestheticCeiling == true {
+                // ★ notes28: the new engine's one switch for EVERY strut type it lays (core's struts: the widest strut is the
+                // type's open look, its quilt only with Allow quilt) — no longer the octet's alone; its (i) is the type's own
+                // ★ notes29 (his 11-25: "It should *always* be off. Especially in 'Auto'"): the page's own setting now
+                // (LatticeWizardModel.allowQuilt), so Cancel and Reset all undo it like every other row, and Save on Auto saves
+                // it off (saveAndClose). It wrote the part's settings at the tap, past Cancel and Reset all.
+                if LatticeType.named(model.topologyID)?.hasAestheticCeiling == true || LatticeLayoutSession.lays(model.topologyID) {
                     HStack(spacing: DS.Space.s) {
                         Text("Allow quilt").dsStyle(DS.TypeScale.caption)
                             .foregroundStyle(DS.Color.textPrimary.color)
                         Spacer(minLength: DS.Space.s)
-                        latticeSwitch(isOn: project.lattice.allowQuilt) {
-                            project.lattice.allowQuilt.toggle(); rebuild()
+                        latticeSwitch(isOn: model.allowQuilt) {
+                            model.allowQuilt.toggle(); rebuild()
                         }
                         .accessibilityLabel("Allow quilt")
                         .latticeID("wizard-allow-quilt")
                     }
-                    captionLine(project.lattice.allowQuilt ? "Manual densities may fuse the struts."
-                                                           : "Densities stay under the fusing point.",
-                                info: "quilt",
-                                "Octet struts fuse into a quilt once a strut is about a fifth of "
-                                + "the cell. Off, every density stays under that point. On, the "
-                                + "manual density methods may pass it; simulated ones never do.")
+                    captionLine(model.allowQuilt ? Self.quiltOnLine : Self.quiltOffLine,
+                                info: "quilt", Self.quiltInfo(model.topologyID))
                 }
             case .finish:
                 // ★ FOUR NOW — "Covered" is the solid outer shell.
                 segmentRow(["None", "Rim", "Skin", "Covered"],
-                           selected: boundaryIndex, greyed: Self.rimNeedsEngineWork ? [1] : []) { i in
+                           selected: boundaryIndex, greyed: (Self.rimNeedsEngineWork ? [1] : Set<Int>())
+                            .union(LatticeSheets.greyed(model.topologyID).contains(.finishSkin) ? [2] : [])) { i in   // ★ SHEETS
                     // ★ LOCKED TO SKIN while single-cell members is on: the tap is
                     // refused and the pop-up says how to unlock it (his 2026-09-18).
+                    // ★ notes29: the centred pop-up (it was a popover on the row); never on Structural, which has no
+                    // single-cell members (finishLockedBySingleCell reads the stage)
                     if !model.setBoundary([.none, .rim, .fullSkin, .covered][i]) {
-                        finishRuleNotice = "finish-locked"
+                        AppPopups.shared.show(Self.finishLockedTitle, Self.finishLockedText)
                     }
                 }
                 .opacity(model.finishLockedBySingleCell ? 0.55 : 1)
-                .popover(isPresented: Binding(get: { finishRuleNotice == "finish-locked" },
-                                              set: { if !$0 { finishRuleNotice = nil } })) {
-                    Text("To change the finish, turn off single-cell members.")
-                        .dsStyle(DS.TypeScale.footnote)
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(16)
-                        .frame(maxWidth: 300)
-                }
                 .latticeID("wizard-finish-row")
+                if LatticeSheets.greyed(model.topologyID).contains(.finishSkin) { sheetGreyedCaption(.finishSkin) }   // ★ SHEETS
                 if model.finishLockedBySingleCell {
-                    captionLine("Skin is required while single-cell members is on.",
+                    captionLine(Self.finishLockedLine,
                                 info: "finish-locked",
                                 "A member one cell wide has its struts cut at the face caps "
                                 + "with no node to end on; the skin re-ties them. Turn off "
@@ -2123,8 +2173,9 @@ public struct LatticeSetupWizard: View {
                 }
                 // ★ B7 slice 2b (the reviewer 11-08 21:32Z, ruling 4): Rim greyed, said in one line, until the engine builds it
                 if Self.rimNeedsEngineWork {
-                    captionLine(model.boundary == .rim ? Self.rimStoredLine : Self.rimGreyedLine, info: "rim",
-                                "Rim thickens the struts along the part's edges. Today's engine finds those edges only "
+                    captionLine(model.boundary == .rim ? Self.rimStoredBrief : Self.rimGreyedBrief, info: "rim",
+                                (model.boundary == .rim ? Self.rimStoredLine : Self.rimGreyedLine) + " "
+                                + "Rim thickens the struts along the part's edges. Today's engine finds those edges only "
                                 + "where two flat CAD faces meet, so it refuses Rim on a real part. Rim comes back "
                                 + "when that engine work lands.",
                                 tint: DS.Color.textQuaternary.color)
@@ -2132,16 +2183,16 @@ public struct LatticeSetupWizard: View {
                 }
                 // ★ RELEASE (4): None and Rim run open — the faces beside a prism too; the preview draws their skin
                 if model.boundary.jobOuterFinish == "none", !model.finishLockedBySingleCell {
-                    captionLine(Self.openFacesPreviewLine, info: "open-faces",
-                                "The faces beside a Lattice prism, the ones you didn't set to Lattice. Under None and Rim the "
+                    captionLine(Self.openFacesPreviewBrief, info: "open-faces",
+                                Self.openFacesPreviewLine + " The faces beside a Lattice prism, the ones you didn't set to Lattice. Under None and Rim the "
                                 + "run leaves the lattice open there; the preview still draws a thin skin over them.",
                                 tint: DS.Color.textQuaternary.color)
                         .latticeID("wizard-open-faces-note")
                 }
                 if model.boundary == .covered {
-                    captionLine("A solid outer wall over the lattice.", info: "covered",
-                                "At the printer's own wall thickness. The lattice is still "
-                                + "there — just not on show.",
+                    captionLine(Self.coveredLine, info: "covered",
+                                "A solid outer wall over the lattice, at the printer's own wall thickness. The lattice is "
+                                + "still there — just not on show.",
                                 tint: DS.Color.textQuaternary.color)
                         .latticeID("wizard-covered-fact")
                 }
@@ -2156,8 +2207,8 @@ public struct LatticeSetupWizard: View {
                         .latticeID("wizard-skin-pattern-fact")
                     // ★ B7 slice 2b: Skin runs as core's "skin" — the woven skin with no solid shell — which core does not
                     // certify yet (run_job.cpp finish_certified); said here, before the run, not found in Results
-                    captionLine(Self.skinNotCertifiedLine, info: "skin-cert",
-                                "The woven skin replaces the solid shell. The engine's strength check doesn't credit a "
+                    captionLine(Self.skinNotCertifiedBrief, info: "skin-cert",
+                                Self.skinNotCertifiedLine + " The woven skin replaces the solid shell. The engine's strength check doesn't credit a "
                                 + "part without its shell yet, so Results shows this lattice as not accepted and "
                                 + "recommends the solid. Covered keeps the shell and is certified.",
                                 tint: DS.Color.textQuaternary.color)
@@ -2199,29 +2250,108 @@ public struct LatticeSetupWizard: View {
         // one is a LABEL card with its (i), two or more are big cards with nothing pre-picked on a new lattice (Save waits
         // for a pick). Unready types are hidden. Under Organic the cards hide (the switch below is the way back) — but a
         // saved type core can't run still shows its fix, as before.
-        let entries = LatticeTypeCatalog.entriesFromCore()
+        // ★★ notes28 (all nine strut types on the new engine): the stage's own catalog (`LatticeTypeCatalog.stageEntries`:
+        // what the engine lays, for Structural or Aesthetic); each card wears the engine's own sample of its type
+        // (`LatticeTypePictureView`). The Aesthetic-only three stay on the page when they can't be picked, greyed with their
+        // caption (at most five words) and an (i) saying why — never hidden, so he can see what Aesthetic would add.
+        let entries = typeEntries
         let offered = entries.filter(\.offered)
-        let stale = LatticeTypeCatalog.selectionRefusal(model.topologyID, in: entries)
+        let shown = entries.filter { $0.offered || Self.typeShownGreyed($0) }
+        let stale = typeStaleLine(entries)
         let organicOn = model.cellTransition == .organicGrade
+        let change = typeChangeLines
         return VStack(alignment: .leading, spacing: DS.Space.xs) {
             if !organicOn || stale != nil {
-                if offered.count <= 1 {
+                if shown.count <= 1 {
                     if let one = offered.first { typeLabelCard(one, fixesStale: stale != nil) }
                 } else {
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: DS.Space.xs), GridItem(.flexible())],
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: DS.Space.xs, alignment: .top),
+                                        GridItem(.flexible(), spacing: DS.Space.xs, alignment: .top),
+                                        GridItem(.flexible(), alignment: .top)],
                               spacing: DS.Space.xs) {
-                        ForEach(offered) { e in typeCard(e, fixesStale: stale != nil) }
+                        ForEach(shown) { e in typeCard(e, fixesStale: stale != nil) }
                     }
                     if typePickNeeded { shortNote(Self.typePickLine).latticeID("wizard-type-pick-note") }
                 }
             }
             if let why = typeReason ?? stale {
-                shortNote(why).latticeID("wizard-type-reason")
+                shortNote(Self.typeReasonLine, info: "type-reason", why).latticeID("wizard-type-reason")   // ★ notes29
+            }
+            // ★ notes28: a new type on a part that already has a lattice says what changes before Save (five words; the rest
+            // behind its (i))
+            if !change.isEmpty, !organicOn {
+                captionLine(LatticeTypeChange.caption, info: "type-change", change.joined(separator: " "),
+                            probe: "wizard-type-change-note")
             }
         }
     }
 
-    static let typePickLine = "Pick a lattice type to save."
+    /// ★ notes28: the Lattice stage's catalog for this part — the new engine's (a STEP part's lattice is laid and made by it),
+    /// or, where the old run still makes it (an STL part), what both can do.
+    private var typeEntries: [LatticeTypeEntry] {
+        LatticeTypeCatalog.stageEntries(structural: (project.lattice.stageMode ?? .structural) == .structural,
+                                        newEngine: LatticeFileButton.takes(project.lattice, modelPath: project.importedFile?.path))
+    }
+
+    /// ★ notes28: a card shown though it can't be picked: a strut type whose batch has shipped (the Aesthetic-only three on
+    /// Structural, a type whose measured strength law does not cover the engine's struts yet, a type the engine can't lay
+    /// yet) — greyed with its caption and (i). Only a type whose batch has not shipped is hidden (the sheets).
+    static func typeShownGreyed(_ e: LatticeTypeEntry) -> Bool {
+        !e.offered && e.reason != LatticeTypeCatalog.appBatchPending && LatticeTypeCatalog.newEngineShipped(e.id)
+    }
+
+    /// The saved type's refusal on this stage, in the picker's own sentence (nil: it can run).
+    private func typeStaleLine(_ entries: [LatticeTypeEntry]) -> String? {
+        guard let e = entries.first(where: { $0.id == model.topologyID }) else {
+            return LatticeTypeCatalog.selectionRefusal(model.topologyID, in: entries)
+        }
+        return LatticeTypeCatalog.line(e)
+    }
+
+    /// ★ notes28: what changes when the picked type differs from the saved one (a part that already has a lattice).
+    private var typeChangeLines: [String] {
+        guard project.lattice.enabled, model.topologyID != project.lattice.topologyID else { return [] }
+        return LatticeTypeChange.lines(project.lattice, to: model.topologyID,
+                                       lineWidthMM: project.printParams.strutLineWidthMM)
+    }
+
+    /// ★ notes28: a picked type carries the page's densities to it (`LatticeWizardModel.setTopology(_:lineWidthMM:)`).
+    private func pickType(_ id: String) {
+        model.setTopology(id, lineWidthMM: project.printParams.strutLineWidthMM,
+                          organic: model.cellTransition == .organicGrade)
+    }
+
+    static let typePickLine = "Pick a type to save."   // ★ notes29: five words (was "Pick a lattice type to save.")
+
+    /// ★ notes28: Allow quilt's (i), the type's own numbers (core's lattice_width_bounds through the engine): where its struts
+    /// touch, and the open look they keep on their own. Never the octet's numbers under another name. ★ notes29b: with the
+    /// switch off the limit is the quilt, one printed line short of it (core's lattice_quilt_off_strut_mm), not the open look.
+    static func quiltInfo(_ id: String) -> String {
+        let f = LatticeLayoutSession.typeFacts(id)
+        let name = LatticeType.displayName(forID: id)
+        guard f.lays, f.touch > 0, f.openLook > 0 else {
+            return "\(name) struts fuse into a quilt once they are wide enough to touch. Off, every density stays under "
+                + "that point. On, the manual density methods may pass it; simulated ones never do."
+        }
+        func pct(_ v: Double) -> String { "\(Int((v * 100).rounded())) %" }
+        if f.isSheet {   // ★ SHEETS: a wall, not struts (core's touch: the channels close); ★ notes30 M1: notes29b's limit
+            return "\(name)'s wall closes its channels once it is \(pct(f.touch)) of the cell. Off, walls stop one printed "
+                + "line short of that, so every channel prints open; on their own they stay near \(pct(f.openLook)) of the "
+                + "cell, and only a density you ask for goes past that. On, the manual methods may reach it; simulated ones "
+                + "never do."
+        }
+        return "\(name) struts touch and fuse into a quilt once a strut is \(pct(f.touch)) of the cell. Off, struts stop "
+            + "one printed line short of touching, so every gap prints open; on their own they stay near \(pct(f.openLook)) "
+            + "of the cell, and only a density you ask for goes past that. On, the manual density methods may reach the "
+            + "quilt; simulated ones never do."
+    }
+
+    /// ★ notes29b: Small cells in thin walls' (i) (his question on release 20: "Are you saying that no matter what happens, all
+    /// Small cells in thin walls are going to be quilted?" -- no).
+    static let smallCellsInfo = "New engine only. A wall too thin for the normal open cell takes its own smaller, denser "
+        + "cells instead of going solid. They go down to the size where the thinnest strut stops one printed line short of "
+        + "touching its neighbour, never further, so they never fuse into a quilt. Only thin walls change: every other cell "
+        + "stays as it was. A wall too thin even for that stays solid. With Allow quilt on, cells already go this small."
     static func typeInfo(_ name: String) -> String {
         "The lattice's cell shape. \(name) is the type the app offers today; more types arrive one update at a time, "
             + "each once its settings and pictures are in."
@@ -2229,7 +2359,7 @@ public struct LatticeSetupWizard: View {
 
     /// Two or more types offered, and none picked yet on a new lattice: Save waits.
     var typePickNeeded: Bool {
-        LatticeTypeCatalog.entriesFromCore().filter(\.offered).count >= 2
+        typeEntries.filter(\.offered).count >= 2
             && model.cellTransition != .organicGrade && !(typePicked ?? project.lattice.enabled)
     }
 
@@ -2239,7 +2369,7 @@ public struct LatticeSetupWizard: View {
             Button {
                 guard fixesStale else { return }
                 typeReason = nil
-                if model.cellTransition == .organicGrade { model.topologyID = e.id } else { model.setTopology(e.id) }
+                pickType(e.id)
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(e.displayName).font(.system(size: 15, weight: .semibold))
@@ -2260,24 +2390,63 @@ public struct LatticeSetupWizard: View {
     }
 
     /// ★ Two or more types: a big card each; lit only once picked (a saved lattice's type counts as picked).
+    /// ★ notes28: the engine's own picture of the type above its name; a card that can't be picked is greyed, its caption
+    /// under the name (at most five words) and its (i) in the corner, and a tap on it says why instead of picking.
     private func typeCard(_ e: LatticeTypeEntry, fixesStale: Bool) -> some View {
-        let on = model.topologyID == e.id && (typePicked ?? project.lattice.enabled)
-        return Button {
-            typeReason = nil
-            typePicked = true
-            if model.cellTransition == .organicGrade { model.topologyID = e.id } else { model.setTopology(e.id) }
-        } label: {
-            Text(e.displayName).font(.system(size: 14, weight: .semibold)).multilineTextAlignment(.center)
-                .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
-                .frame(maxWidth: .infinity, minHeight: 64)
+        let on = e.offered && model.topologyID == e.id && (typePicked ?? project.lattice.enabled)
+        // ★ 362's ruling 11-24 (his rule "NOT PRINT-TESTED"): the tag under the card until he marks the type tested
+        // ★ notes29 (his 11-25: "the ones with 'not print tested' are higher than the ones without it. They need to all be at
+        // the exact same height"): every card is one height whatever it carries, and the tag's 44 pt row is kept under every
+        // card, empty once the type is tested — the grid's rows never centre a shorter card lower.
+        return VStack(spacing: 0) {
+            typeCardBody(e, on: on)
+            ZStack {
+                Color.clear.frame(height: Self.typeTagRowHeight)
+                LatticePrintTestedTag(id: e.id, name: e.displayName)
+            }
+            .frame(height: Self.typeTagRowHeight)
+        }
+        .frame(height: Self.typeCardHeight + Self.typeTagRowHeight, alignment: .top)
+        .latticeID("wizard-type-column-\(e.id)")
+    }
+    /// ★ notes29: one card height (the picture, two lines of name and two of caption) and the tag's row under it.
+    static let typeCardHeight: CGFloat = 128
+    static let typeTagRowHeight: CGFloat = 44
+
+    private func typeCardBody(_ e: LatticeTypeEntry, on: Bool) -> some View {
+        ZStack(alignment: .topTrailing) {
+            Button {
+                guard e.offered else { typeReason = LatticeTypeCatalog.line(e); return }
+                typeReason = nil
+                typePicked = true
+                pickType(e.id)
+            } label: {
+                VStack(spacing: 2) {
+                    LatticeTypePictureView(id: e.id, greyed: !e.offered)
+                        .frame(height: 52)
+                    Text(e.displayName).font(.system(size: 12, weight: .semibold)).multilineTextAlignment(.center)
+                        .lineLimit(2).minimumScaleFactor(0.85)
+                        .foregroundStyle((!e.offered ? DS.Color.textQuaternary
+                                          : on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
+                    if let c = LatticeTypeCatalog.caption(e) {
+                        Text(c).font(.system(size: 10, weight: .medium)).lineLimit(2).multilineTextAlignment(.center)
+                            .foregroundStyle(DS.Color.textTertiary.color)
+                            .latticeID("wizard-type-caption-\(e.id)")
+                    }
+                }
+                .padding(.vertical, DS.Space.xs).padding(.horizontal, 4)
+                .frame(maxWidth: .infinity, minHeight: Self.typeCardHeight, maxHeight: Self.typeCardHeight, alignment: .top)   // ★ notes29
                 .background(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
                     .fill((on ? DS.Color.fillSelected : DS.Color.fillSubtle).color))
                 .overlay(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
                     .strokeBorder(on ? DS.Color.accent.color : Color.clear, lineWidth: 2))
+                .opacity(e.offered ? 1 : 0.7)
                 .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .latticeID("wizard-type-\(e.id)")
+            if !e.offered, let why = e.reason { infoButton("type-\(e.id)", why, title: e.displayName) }
         }
-        .buttonStyle(.plain)
-        .latticeID("wizard-type-\(e.id)")
     }
 
     /// ★★★ ORGANIC, ITS OWN ROW BELOW THE LATTICE TYPES (his ruling, 2026-09-02: "add an
@@ -2372,13 +2541,12 @@ public struct LatticeSetupWizard: View {
         // ★ §9(d) — WHICH FIELD DRIVES THE SWEEP, said plainly. Not stress:
         // `plan_cell_sizes` reads each block's thinnest DENSITY (printability)
         // and thinnest MEMBER WIDTH (the cells-per-member ceiling).
-        Text("Core picks a cell per block from its density and member width.")
-            .dsStyle(DS.TypeScale.caption2)
-            .foregroundStyle(DS.Color.textQuaternary.color)
+        // ★ notes29 (his 11-25): five words under the range, the rest in the (i)
+        captionLine(Self.sweptLine, info: "swept",
+                    "Core picks a cell per block from its density and member width.",
+                    tint: DS.Color.textQuaternary.color)
         if let warn = model.sweptWindowWarning {
-            Text(warn)
-                .dsStyle(DS.TypeScale.caption)
-                .foregroundStyle(DS.Color.warning.color)
+            captionLine(Self.sweptNarrowLine, info: "swept-narrow", warn, tint: DS.Color.warning.color)
                 .latticeID("wizard-swept-narrow")
         }
     }
@@ -2518,13 +2686,23 @@ public struct LatticeSetupWizard: View {
         leaveLatticeArea()   // ★ B7 (E3): an open area's grade goes to its own store; the model is the Part tab's again
         // ★ B4: Along's display pick is not a bake input, so it is saved on its own test
         if settingsChangedSinceOpen || model.gradeAlong != project.lattice.gradeAlong {
-            project.lattice = model.applied(to: project.lattice)
+            // ★ notes28: a new type on a part that already has a lattice carries every density stored per group and per face
+            // to it at the same place on the dial (`LatticeTypeChange`; the page's own two came through the model already)
+            let base = project.lattice.enabled && model.topologyID != project.lattice.topologyID
+                ? LatticeTypeChange.applied(project.lattice, to: model.topologyID,
+                                            lineWidthMM: project.printParams.strutLineWidthMM)
+                : project.lattice
+            project.lattice = model.applied(to: base)
         }
         if let edits = latticeAreaEdits {
             var s = project.lattice
             s.saveAreaGrading(edits, areas: project.latticeAreaGroups.map(\.id))
             if s != project.lattice { project.lattice = s }
         }
+        // ★ notes29 (his 11-25: "It should *always* be off. Especially in 'Auto'"): Auto never quilts (K3, the preview and the
+        // print file already ask for none) and its switch is Manual's alone, so Save on Auto saves Allow quilt off — a hidden
+        // "on" never waits for the next Manual visit
+        if !latticeManual, project.lattice.allowQuilt { project.lattice.allowQuilt = false }
         onExit()
     }
 
@@ -2594,8 +2772,24 @@ public struct LatticeSetupWizard: View {
     static let manualAreaHeader = "This area's own"
     /// ★ The reviewer's words (ruling (2), 2026-11-06), under the shape grade until core's band is real.
     static let shapeGradeRunLine = "The run's shape grade is a solid outline; the band and Strength are preview only."
-    /// Where an area's grade differs from the part's: the preview draws one grade, the run grades this area its own way.
-    static let latticeAreaPreviewLine = "The preview draws one grade for the whole part; the run grades this area as set here."
+    /// ★ notes30 (F1, 362): where the open group's grade changes what the preview lays (`groupGradeShows`), its (i). It said
+    /// "The preview draws one grade for the whole part; …" — untrue since Install 2's `areaOwn` and the sample laid per tab.
+    static let latticeAreaPreviewLine = "The preview draws this group's own grade, set on this tab. The Part tab's grade is for the groups with none of their own."
+
+    /// ★ notes30 (F1, 362: "show it only where it is true"): the open group's grade is what the preview draws, apart from the
+    /// Part tab's — this tab's settings (`page`, the group's grade on them) lay differently from the same settings with the Part
+    /// tab's grade, band and Strength. The page's sample lays exactly this (`LatticeSampleLay.page`), and his part's preview the
+    /// group's own the same way (`LatticeLayoutPreview.areaOwn`). False where the two grades lay alike (no stress to follow, no
+    /// shape grade on this algorithm, or the same grade). It was shown wherever the grade or band differed, two groups or more.
+    @MainActor static func groupGradeShows(_ page: LatticeSettings, partGrade part: LatticeAreaGrading, lineWidthMM: Double,
+                                           wallRingMM: Double) -> Bool {
+        var asPart = page
+        if let m = part.gradingMode { asPart.gradingMode = m }
+        if let b = part.shapeFitBandMM { asPart.shapeFitBandMM = b }
+        if let st = part.shapeGradeStrength { asPart.shapeFitGradeStrength = st }
+        return LatticeSampleLay.page(page, lineWidthMM: lineWidthMM, wallRingMM: wallRingMM).settings
+            != LatticeSampleLay.page(asPart, lineWidthMM: lineWidthMM, wallRingMM: wallRingMM).settings
+    }
 
     /// The open area's lattice group, nil on Part (the tabs are `ProjectModel.latticeAreaGroups`, in order).
     private func latticeAreaGroupID(_ c: CellsPageContext) -> UUID? {
@@ -2904,6 +3098,42 @@ public struct LatticeSetupWizard: View {
         rebuild()
     }
 
+    /// ★ notes30 SA1 (his D1, 11-26: "use the existing safety margin. Put the default at 150%"; his rework 11-27):
+    /// "Strengthened to 150 %" with its (i); the tap is the Safety margin's own menu (150 / 200 / 300, and Custom in steps of 25: 175 is there). The
+    /// one number, one place: it is the part's Safety margin, as the loads screen shows it.
+    private var structuralAutoRow: some View {
+        let m = project.force.safetyMarginValue
+        let caption = StructuralAutoCopy.strengthenedTo(m)
+        let _ = LatticeCaptions.record(caption)
+        return HStack(spacing: DS.Space.xs) {
+            Menu {
+                ForEach(SafetyMargin.presets, id: \.value) { p in
+                    Button(p.label) { project.force.setSafetyMargin(p.value) }
+                }
+                Menu(StructuralAutoCopy.customMenu) {
+                    ForEach(Self.structuralAutoCustomMargins, id: \.self) { v in
+                        Button(StructuralAutoCopy.percent(v)) { project.force.setSafetyMargin(v) }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(caption).dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+                        .foregroundStyle(DS.Color.accent.color)
+                        .saidWhole(caption)
+                    Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(DS.Color.accent.color)
+                }
+                .frame(minHeight: AppInfoButton.target)
+                .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("structural-auto-sized-for")
+            AppInfoButton(title: caption, text: StructuralAutoCopy.strengthenedToInfo(m), id: "structural-auto-sized-for-info")
+        }
+        .background(CornerPairStyle.publish("structuralAutoRow"))
+    }
+    /// Custom margins the row offers, in the loads screen's steps of 25 between its presets.
+    static let structuralAutoCustomMargins: [Double] = [1.75, 2.25, 2.5, 2.75]
+
     /// The open tab's rows. Part: the type (and, with no lattice group yet, the area rows). An area: its finish and grading,
     /// and in Manual the rest. Organic keeps its own pane (a traced lattice has no cell, no finish ladder).
     /// AnyView here and in each row below: the whole page in one opaque type crashed the iPad's Release compiler (SILGen, 11-05).
@@ -2914,18 +3144,23 @@ public struct LatticeSetupWizard: View {
         return AnyView(Group {
         if area == nil {
             AnyView(settingControl(.type, titled: true))
+            // ★ notes30 SA1: what Auto strengthens the struts to (his Safety margin, D1), under the type
+            if !latticeManual, StructuralAuto.thickens(project.lattice, pageManual: false) { AnyView(structuralAutoRow) }
             if latticeManual, !Self.controlHideSimulateStresses, !(organic && project.importedFile != nil) {
                 AnyView(simulateStressesSwitch)
             }
             if c.regions.isEmpty || (organic && project.importedFile != nil) {
                 if organic, project.importedFile != nil, !latticeManual { organicPartModeRow }
                 if organic, project.importedFile != nil, !c.regions.isEmpty {
-                    shortNote(project.lattice.wholePart ? Self.organicWholePartLine : Self.organicPartLine)
+                    // ★ notes29 (his 11-25): five words; the sentence in the (i)
+                    shortNote(project.lattice.wholePart ? Self.organicWholePartBrief : Self.organicPartBrief,
+                              info: "organic-part", project.lattice.wholePart ? Self.organicWholePartLine : Self.organicPartLine)
                         .latticeID("lattice-page-organic-part-note")
                 }
                 latticeAreaRows(organic: organic, structural: structural)
             } else {
-                shortNote(Self.latticePerAreaLine).latticeID("lattice-page-per-area-note")
+                shortNote(Self.latticePerAreaBrief, info: "per-area", Self.latticePerAreaLine)   // ★ notes29
+                    .latticeID("lattice-page-per-area-note")
                 // ★ B7 slice 2: the part's finish is set here once an area can have its own (Rim / Skin stay the part's)
                 if !organic, TopOptKit.regionOuterFinishWired { AnyView(settingControl(.finish, titled: true)) }
                 zoneFinishPreviewNote
@@ -2935,13 +3170,20 @@ public struct LatticeSetupWizard: View {
             Text(area.uppercased()).font(.system(size: 10.5, weight: .bold)).tracking(0.8)
                 .foregroundStyle(DS.Color.textTertiary.color)
             // ★ E3 (reviewer 2026-11-06): the grade is this area's own now; "These settings apply to every region today" goes
+            // ★ notes29 (his 11-25): five words; the sentence ("The grade, its band and the finish are this area's; …") in the (i)
             shortNote(organic && project.importedFile != nil
+                      ? (project.lattice.wholePart ? Self.organicAreaBrief : Self.organicGroupBrief) : Self.latticeAreaOwnBrief,
+                      info: "area-own",
+                      organic && project.importedFile != nil
                       ? (project.lattice.wholePart ? Self.organicAreaLine : Self.organicGroupLine) : Self.latticeAreaOwnLine)
                 .latticeID("lattice-page-area-own-note")
-            if let part = latticePartGrade, c.regions.count > 1,
-               part.gradingMode != model.gradingMode
-                || (model.gradingMode.fitsShape && part.shapeFitBandMM != model.shapeFitBandMM) {
-                shortNote(Self.latticeAreaPreviewLine).latticeID("lattice-page-area-preview-note")
+            // ★ notes30 (F1, 362): "Preview shows this group's grade." only where it is so — the group's grade lays apart from
+            // the Part tab's (`groupGradeShows`); never on Organic, which has no grade here
+            if !organic, let part = latticePartGrade,
+               Self.groupGradeShows(model.applied(to: project.lattice), partGrade: part,
+                                    lineWidthMM: project.printParams.strutLineWidthMM, wallRingMM: project.printParams.wallRingMM) {
+                shortNote(Self.latticeAreaPreviewBrief, info: "area-preview", Self.latticeAreaPreviewLine)   // ★ notes29
+                    .latticeID("lattice-page-area-preview-note")
             }
             zoneFinishPreviewNote
             latticeAreaRows(organic: organic, structural: structural, zone: latticeAreaGroupID(c))
@@ -2992,14 +3234,18 @@ public struct LatticeSetupWizard: View {
             }
             .modifier(LatticeSegmentTrack())
             if partOuter == nil && !partOnSkin {
-                shortNote(Self.zoneRimSkinLine(partName)).latticeID("lattice-zone-rim-skin-note")
+                shortNote(Self.zoneRimSkinBrief(partName), info: "zone-rim-skin", Self.zoneRimSkinLine(partName))   // ★ notes29
+                    .latticeID("lattice-zone-rim-skin-note")
             } else if partOnSkin {
-                shortNote(Self.zoneCoveredUnderSkinLine).latticeID("lattice-zone-covered-under-skin-note")
+                shortNote(Self.zoneCoveredUnderSkinBrief, info: "zone-covered-under-skin", Self.zoneCoveredUnderSkinLine)
+                    .latticeID("lattice-zone-covered-under-skin-note")
             }
             if !skinWired {
-                shortNote(Self.zoneRimSkinNeedEngineLine).latticeID("lattice-zone-rim-skin-engine-note")
+                shortNote(Self.zoneRimSkinNeedEngineBrief, info: "zone-rim-skin-engine", Self.zoneRimSkinNeedEngineLine)
+                    .latticeID("lattice-zone-rim-skin-engine-note")
             } else if sheet {
-                shortNote(Self.zoneSkinOnSheetLine).latticeID("lattice-zone-skin-sheet-note")
+                shortNote(Self.zoneSkinOnSheetBrief, info: "zone-skin-sheet", Self.zoneSkinOnSheetLine)
+                    .latticeID("lattice-zone-skin-sheet-note")
             }
         })
     }
@@ -3028,7 +3274,10 @@ public struct LatticeSetupWizard: View {
     @ViewBuilder private var zoneFinishPreviewNote: some View {
         let zones = zonesRunningAnotherFinish
         if !zones.isEmpty {
-            shortNote(Self.zoneFinishPreviewLine(zones)).latticeID("lattice-page-zone-finish-preview-note")
+            // ★ notes29 (his 11-25): five words; "The preview shows the part's finish; Front face runs open (see Results)" in the (i)
+            shortNote(Self.zoneFinishPreviewBrief, info: "zone-finish-preview",
+                      Self.zoneFinishPreviewLine(zones) + " Results shows each zone's own finish.")
+                .latticeID("lattice-page-zone-finish-preview-note")
         }
     }
 
@@ -3054,6 +3303,7 @@ public struct LatticeSetupWizard: View {
             else { AnyView(settingControl(.finish, titled: true)) }
             AnyView(gradeToggleRow)
             if model.gradingMode != LatticeGradingMode.none { AnyView(gradeTypeRow) }
+            if zone == nil, LatticeSheets.isSheet(model.topologyID) { sheetRows }   // ★ SHEETS
         }
         if latticeManual, !newOrganic {   // ★ (his 11-18: no "Manual · this area" with nothing below it)
             Text(Self.latticeManualSection.uppercased()).font(.system(size: 10.5, weight: .bold)).tracking(0.8)
@@ -3181,7 +3431,7 @@ public struct LatticeSetupWizard: View {
                         }
                     }
                 }
-                shortNote(LatticeCellsRow.tabsNote)
+                shortNote(Self.tabsBrief, info: "tabs", LatticeCellsRow.tabsNote)   // ★ notes29
             }
         }
     }
@@ -3197,22 +3447,38 @@ public struct LatticeSetupWizard: View {
                         .foregroundStyle(DS.Color.textTertiary.color)
                     switch row {
                     case .grade:
+                        // ★ notes29 (his notes on release 20): the Density percent is the page's dial (100 % = the type's own
+                        // quilt, LatticeDensityDial); with Allow quilt off (★ notes29b) a percent past the limit, one printed
+                        // line short of the quilt, is refused with the centred pop-up. The store stays the density the run
+                        // reads. (The page's own switch, N1's `model.allowQuilt`: what the page shows is what it lays.)
+                        let dial = LatticeDensityDial.Page(model.applied(to: project.lattice),
+                                                           lineWidthMM: project.printParams.strutLineWidthMM,
+                                                           allowQuilt: model.allowQuilt && project.latticePageManual)
                         HStack(spacing: DS.Space.s) {
-                            cellsPercentBox("cells-grade-from", title: "Grade from", value: model.relativeDensity) { v in
-                                model.relativeDensity = Swift.min(1, Swift.max(v, Swift.max(0.05, model.minRelativeDensity + 0.02)))
+                            cellsPercentBox("cells-grade-from", title: "Grade from", value: Swift.min(dial.shown(model.relativeDensity), dial.most / 100)) { v in
+                                guard let rho = dial.typed(v * 100) else { return }
+                                model.relativeDensity = Swift.min(1, Swift.max(rho, Swift.max(0.05, model.minRelativeDensity + 0.02)))
                                 rebuild()
                             }
                             Text("\u{2192}").font(.system(size: 13, weight: .bold)).foregroundStyle(DS.Color.textTertiary.color)
-                            cellsPercentBox("cells-grade-to", title: "Grade to", value: model.minRelativeDensity) { v in
-                                model.minRelativeDensity = Swift.max(0, Swift.min(v, model.relativeDensity - 0.02))
+                            cellsPercentBox("cells-grade-to", title: "Grade to", value: Swift.min(dial.shown(model.minRelativeDensity), dial.most / 100)) { v in
+                                guard let rho = dial.typed(v * 100) else { return }
+                                model.minRelativeDensity = Swift.max(0, Swift.min(rho, model.relativeDensity - 0.02))
                                 rebuild()
                             }
-                            Text("density").dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
+                            Text(LatticeSheets.gradeUnit(model.topologyID))   // ★ SHEETS: wall thicknesses for a sheet
+                                .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
                         }
                     case .strength:
+                        // ★ notes29 (his 11-25): five words; the sentence in the (i)
                         shortNote(!AppSettings.shared.newEngineTest   // ★ Install 3: the switch retired (on; false only in tests)
+                                  ? Self.strengthRunBrief
+                                  : LatticeFileJob.strengthWired ? Self.strengthExportBrief   // ★ Install 3: the check
+                                  : Self.strengthNotYetBrief,
+                                  info: "strength",
+                                  !AppSettings.shared.newEngineTest
                                   ? LatticeCellsRow.strengthLine
-                                  : LatticeFileJob.strengthWired ? LatticeCellsRow.strengthOnExportLine   // ★ Install 3: the check
+                                  : LatticeFileJob.strengthWired ? LatticeCellsRow.strengthOnExportLine
                                   : LatticeCellsRow.strengthNewEngineLine)
                     case .along, .ties, .overhangs:
                         EmptyView()   // ★ B7 slice 2: off the page (`LatticeCellsRow.rows` never lists them)
@@ -3228,6 +3494,7 @@ public struct LatticeSetupWizard: View {
                                  write: @escaping (Double) -> Void) -> some View {
         Text("\(Int((value * 100).rounded())) %")
             .font(.system(size: 12, weight: .bold)).monospacedDigit()
+            .said("\(title) \(Int((value * 100).rounded())) %")   // ★ notes29: the hosted test reads what the box shows
             .foregroundStyle(DS.Color.textPrimary.color)
             .padding(.vertical, 6).padding(.horizontal, DS.Space.m)
             .background(Capsule().fill(DS.Color.fillSelected.color))
@@ -3240,6 +3507,46 @@ public struct LatticeSetupWizard: View {
                 write(v / 100)
             }
             .latticeID(key)
+    }
+
+    // MARK: ★ SHEETS (notes28 sheets SPEC 5)
+
+    /// A control greyed for a sheet: its caption (at most five words) and its (i).
+    private func sheetGreyedCaption(_ g: LatticeSheets.Greyed) -> some View {
+        captionLine(g.caption, info: "sheet-greyed-\(g.rawValue)", g.info, tint: DS.Color.textQuaternary.color)
+            .latticeID("wizard-sheet-greyed-\(g.rawValue)")
+    }
+
+    /// A sheet's own rows on the Part tab: on Auto, the wall's row (its caption and (i): Auto picks by the cell); "Where
+    /// regions meet" when two sheet regions touch (the last lay's seams), Blend in Aesthetic and Solid wall in Structural.
+    private var sheetRows: AnyView {
+        let id = model.topologyID
+        let structural = (project.lattice.stageMode ?? .structural) == .structural
+        let seams = sheetsLaid.seams(for: project.importedFile?.path)
+        return AnyView(VStack(alignment: .leading, spacing: DS.Space.s) {
+            if !latticeManual {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(LatticeSheets.wallRowTitle).font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)
+                        .foregroundStyle(DS.Color.textTertiary.color)
+                    captionLine(LatticeSheets.thinnestCaption, info: "sheet-wall-auto",
+                                LatticeSheets.wallInfo(id, cellMM: model.cellMM, lineWidthMM: project.printParams.strutLineWidthMM))
+                        .latticeID("wizard-sheet-wall-auto")
+                }
+            }
+            if LatticeSheets.seamRowShown(id, seams: seams) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(LatticeSheets.seamTitle).font(.system(size: 10.5, weight: .bold)).tracking(0.8).textCase(.uppercase)
+                        .foregroundStyle(DS.Color.textTertiary.color)
+                    segmentRow(LatticeSheets.seamChoices, selected: LatticeSheets.seamIndex(project.lattice)) { i in
+                        project.lattice.sheetSeam = i == 0 ? LatticeSheets.blend : LatticeSheets.solidWall
+                        rebuild()
+                    }
+                    .latticeID("wizard-sheet-seam")
+                    captionLine(LatticeSheets.seamCaption, info: "sheet-seam", LatticeSheets.seamInfo(structural: structural))
+                        .latticeID("wizard-sheet-seam-caption")
+                }
+            }
+        })
     }
 
     // MARK: the moves
@@ -3469,8 +3776,10 @@ extension LatticeSetupWizard {
                 else { model.strutFromMM = a; model.strutToMM = b; rebuild() }
             }
             return AnyView(VStack(alignment: .leading, spacing: 5) {
-                sectionTitle("Strut width", info: "manual-strut-width",
-                             "The thinnest strut, where the stress is nothing, and the thickest, at the target stress, in mm. "
+                sectionTitle(LatticeSheets.isSheet(model.topologyID) ? LatticeSheets.rangeTitle : "Strut width",   // ★ SHEETS
+                             info: "manual-strut-width",
+                             LatticeSheets.isSheet(model.topologyID) ? LatticeSheets.rangeInfo
+                             : "The thinnest strut, where the stress is nothing, and the thickest, at the target stress, in mm. "
                              + "Auto takes them from Grade to and Grade from. Tap Set, then drag or tap a number to type it.")
                 segmentRow([area ? "Part's" : "Auto", "Set"], selected: from != nil && to != nil ? 1 : 0) { i in
                     if i == 0 { write(nil, nil); return }
@@ -3483,9 +3792,12 @@ extension LatticeSetupWizard {
                     scrubRow("manual-strut-from", value: a, unit: "mm", step: 0.02, range: floor...hi) { v in write(v, Swift.max(v, b)) }
                     captionLine("To (at the target stress)", info: "manual-strut-to")
                     scrubRow("manual-strut-to", value: b, unit: "mm", step: 0.02, range: floor...hi) { v in write(Swift.min(a, v), v) }
-                    captionLine("Two lines, \(mmText(floor)), is the thinnest strut that prints.", info: "manual-strut-floor")
+                    captionLine("Thinnest printable: \(mmText(floor)).", info: "manual-strut-floor",   // ★ notes29
+                                "Two lines, \(mmText(floor)), is the thinnest strut that prints.")
                 } else {
-                    captionLine(area ? "As the whole part." : "From Grade to and Grade from.", info: "manual-strut-auto")
+                    captionLine(area ? "As the whole part." : "From the Grade range.", info: "manual-strut-auto",   // ★ notes29
+                                area ? "This group uses the whole part's strut widths."
+                                     : "Auto takes the struts from Grade to and Grade from.")
                 }
             })
         case .cellsAcross:
@@ -3504,7 +3816,8 @@ extension LatticeSetupWizard {
                 }
                 .latticeID("lattice-manual-cells-across")
                 if let n = v, let w = LatticeManualControl.cellsAcrossWarning(n, l) {
-                    shortNote(w, warning: true).latticeID("lattice-manual-cells-across-warning")
+                    shortNote(Self.cellsAcrossWarnBrief, info: "manual-cells-across-warning", w, warning: true)   // ★ notes29
+                        .latticeID("lattice-manual-cells-across-warning")
                 } else {
                     captionLine(v.map { "At least \($0) across." } ?? (area ? "As the whole part: \(partN)." : "Auto: \(autoN) across."),
                                 info: "manual-cells-across-line")
@@ -3553,9 +3866,12 @@ extension LatticeSetupWizard {
                 manualNumber("target", value: v, seed: model.stressTargetMPa ?? 10, unit: "MPa", step: 0.1, range: 0.1...500,
                              area: area, set: write)
                 if v == nil {
-                    captionLine(area ? "As the whole part." : structural ? "Auto: printed strength over your Safety margin."
+                    captionLine(area ? "As the whole part." : structural ? "Auto: strength ÷ Safety margin."   // ★ notes29
                                                                          : "Auto: the part's own stress.",
-                                info: "manual-target-line")
+                                info: "manual-target-line",
+                                area ? "This group uses the whole part's target stress."
+                                     : structural ? "Auto: the printed strength over your Safety margin."
+                                                  : "Auto: the part's own stress.")
                 }
             })
         case .skinBars:

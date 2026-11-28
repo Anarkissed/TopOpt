@@ -212,6 +212,12 @@ void emit_variant(std::string& out, const VariantReport& v,
            std::to_string(v.sealed_pockets) + ", \"volume_mm3\": " +
            num_json(v.sealed_pockets_volume_mm3) + ", \"largest_mm3\": " +
            num_json(v.sealed_pockets_largest_mm3) + "}";
+  // Stage 4 "member": the thinnest member, only when it is under 8 voxels through.
+  if (v.thin_member_reported)
+    out += ",\n" + in2 + "\"thin_member\": {\"thinnest_mm\": " +
+           num_json(v.thin_member_mm) + ", \"voxels_through\": " +
+           num_json(v.thin_member_voxels_through) + ", \"resolved\": false, " +
+           "\"resolution_needed\": " + std::to_string(v.thin_member_resolution_needed) + "}";
   if (v.finish.ran) out += ",\n" + in2 + "\"finish\": " + finish_json(v.finish);
   // CORE LIST items 41 + 47 — the rung's bodies (report.hpp), only when there is
   // more than one body, a speck or a lost anchor to report.

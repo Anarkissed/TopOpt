@@ -239,7 +239,9 @@ public enum LatticeDensityProxy {
     /// (the finite-block boundary correction is a few percent and shrinks with more
     /// cells — stated in the handoff, not hidden).
     public static func realTriangles(latticeID: String, cellMM: Double, volumeMM3: Double) -> Int {
-        guard let ref = realReferences[latticeID] ?? realReferences["octet"], cellMM > 0 else { return 0 }
+        // ★ notes28: a type with no measured reference (Kelvin, Rhombic, Re-entrant) has no count — never the octet's under
+        // its name (0: the legend says nothing)
+        guard let ref = realReferences[latticeID], cellMM > 0 else { return 0 }
         let cellRatioCubed = pow(ref.referenceCellMM / cellMM, 3)
         let volumeRatio = volumeMM3 / ref.referenceVolumeMM3
         return Int((Double(ref.referenceTriangles) * volumeRatio * cellRatioCubed).rounded())

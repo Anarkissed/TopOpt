@@ -1,0 +1,19 @@
+[loadcase] load-group 0: faces=1 |F|=30N voxels_tagged=432 status=ok
+[loadcase] load-group 1: faces=1 |F|=300N voxels_tagged=324 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] anchor-pad depth=3 anchor_faces=1 load_faces=2 voxels_frozen=2916 (structural pad, NOT a face protection)
+[mg] smoother check (S7): 2 levels, lambda_max(D^-1 A) per smoothed level: 3.140 ; omega=0.60 => safe <= 3.333 : safe
+[lattice] vf=1.00 certificate from what shipped: the law counted 20046.6 mm3, the file holds 18189.6; certified 13736.2 mm3 (4383 voxel(s) lowered to the file, 1499 of them held at the band floor 0.0161)
+[lattice] vf=1.00 volume check: 1 pocket(s), exported 18189.6 / certified 13736.2 mm3 (+32.42 %); lightest judged pocket 7776 voxels +32.42 % (heaviest +32.42 %); 0 pocket(s) under one cell not judged (0.0 / 0.0 mm3) (1990656 points, 0.00 s)
+[mg-safe] lambda_max(D^-1 A) per smoothed level (omega=0.60 => safe <= 3.33): 3.994 ; lambda_max(D_l1^-1 A): 0.829
+[mg-safe] solve 1: shipped stalled (300 cycles, rel res 2.947e-01) -> multigrid (l1 smoother) CONVERGED in 127 cycles, rel res 8.420e-09, 1152 ms ; tol 1e-08, no guess (cold) ; loose pieces at the floor: 0 of 0 pieces (0 vox, largest 0, 0 frozen) of 0 elements
+[mg-safe] solve 2: shipped stalled (300 cycles, rel res 3.844e-01) -> multigrid (l1 smoother) CONVERGED in 128 cycles, rel res 8.943e-09, 987 ms ; tol 1e-08, no guess (cold) ; loose pieces at the floor: 0 of 0 pieces (0 vox, largest 0, 0 frozen) of 0 elements
+[mg-safe] solve 3: shipped stalled (300 cycles, rel res 2.947e-01) -> multigrid (l1 smoother) CONVERGED in 127 cycles, rel res 8.420e-09, 872 ms ; tol 1e-08, no guess (cold) ; loose pieces at the floor: 0 of 0 pieces (0 vox, largest 0, 0 frozen) of 0 elements
+[mg-safe] solve 4: shipped latched off (0 cycles, rel res 0.000e+00) -> multigrid (l1 smoother) CONVERGED in 128 cycles, rel res 8.943e-09, 938 ms ; tol 1e-08, no guess (cold) ; loose pieces at the floor: 0 of 0 pieces (0 vox, largest 0, 0 frozen) of 0 elements
+[loadcase] load scenario "light down": 684 clamped nodes, 0 weak-spring nodes (anchors OFF), 559 load entries
+[loadcase] load scenario "heavy side": 684 clamped nodes, 0 weak-spring nodes (anchors OFF), 433 load entries
+[type law] sc       : lattice_voxels 7776, margin 0.0040, gated true, accepted false
+           law at rho 0.256: Kd 71.69 Kv 20.39 (octet's 31.19 19.16)
+           kfit.csv: 12 rows, every row reproduced exactly
+PASS: 20 checks, 0 failures

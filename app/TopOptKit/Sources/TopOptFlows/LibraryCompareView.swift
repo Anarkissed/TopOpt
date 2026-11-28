@@ -64,7 +64,7 @@ struct LibraryQuickLookView: View {
     let close: () -> Void
     let compare: (LibraryCompareRequest) -> Void
     @StateObject private var loader = LibraryResultsLoader()
-    @StateObject private var camera = OrbitCameraModel()
+    @StateObject private var camera = OrbitCameraModel(followsViewProjection: true)   // ★ notes29: the app's one projection
     /// B5: a result tile's tap opens Quick look on THAT result (nil = the version's shown one).
     @State var shown: Int? = nil
     @State private var details = false
@@ -199,8 +199,9 @@ struct LibraryDetailsTable: View {
     var body: some View {
         let rows: [(String, (CompareItem) -> String)] = [
             ("Plastic", { i in summary(i).map { String(format: "%.1f g · %@ of the part as drawn", $0.massGrams, LibraryStyle.percent($0.achievedVolumeFraction)) } ?? "—" }),
-            ("Strength margin", { i in summary(i).map { String(format: "%.2f (needs more than 1)", $0.worstCaseMargin) } ?? "—" }),
-            ("Verdict", { i in summary(i).map { $0.accepted ? "Strong enough" : "Not strong enough" } ?? "—" }),
+            // ★ notes30 (362's review): a load on bare vines has no valid margin — its words in both rows
+            ("Strength margin", { i in summary(i).map { $0.marginWords ?? String(format: "%.2f (needs more than 1)", $0.worstCaseMargin) } ?? "—" }),
+            ("Verdict", { i in summary(i).map { $0.marginWords ?? ($0.accepted ? "Strong enough" : "Not strong enough") } ?? "—" }),
             ("Goal", { i in (library.snapshots[i.folder]?.minimizePlastic ?? true) ? "Minimize plastic" : "Strengthen" }),
             ("Resolution", { i in "\((library.snapshots[i.folder]?.quality ?? .fast).resolution)" }),
             ("Material", { i in library.snapshots[i.folder]?.material ?? "—" }),
@@ -238,7 +239,7 @@ struct LibraryCompareView: View {
     /// ★ L3: Compare ended — back to the part page with this toast ("v1a chosen · 4 rejected").
     var finished: (String) -> Void = { _ in }
     @StateObject private var loader = LibraryResultsLoader()
-    @StateObject private var shared = OrbitCameraModel()
+    @StateObject private var shared = OrbitCameraModel(followsViewProjection: true)   // ★ notes29: the app's one projection
     @State private var own: [Int: OrbitCameraModel] = [:]
     @State private var session: CompareSession?
     @State private var three: ThreeUpSession?
@@ -326,7 +327,7 @@ struct LibraryCompareView: View {
             if let first = own[0] { shared.adopt(first.camera) }
             own = [:]
         } else {
-            own = Dictionary(uniqueKeysWithValues: (0..<3).map { ($0, OrbitCameraModel(camera: shared.camera)) })
+            own = Dictionary(uniqueKeysWithValues: (0..<3).map { ($0, OrbitCameraModel(camera: shared.camera, followsViewProjection: true)) })
         }
         linked = on
     }

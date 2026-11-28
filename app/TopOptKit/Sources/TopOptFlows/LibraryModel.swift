@@ -45,6 +45,8 @@ public struct LibraryResult: Identifiable {
     /// ★ notes27 (his print orientation, SPEC 2a): the way up it prints (its file's print frame, else its version's face or
     /// gravity), so a compared result stands on the bed as it prints; nil: drawn in the file's own frame.
     public var printUp: SIMD3<Float>? = nil
+    /// ★ notes30 (362's review): the words in its margin's place (a load on bare vines); nil: its margin shows.
+    public var marginWords: String? = nil
     public var id: Int { index }
 }
 
@@ -585,7 +587,8 @@ public final class LibraryModel: ObservableObject {
                         self.edit(folder) { v in
                             v.summary = results.map {
                                 ResultSummary(massGrams: $0.massGrams, worstCaseMargin: $0.margin,
-                                              accepted: $0.accepted, achievedVolumeFraction: $0.fraction, word: $0.word)
+                                              accepted: $0.accepted, achievedVolumeFraction: $0.fraction, word: $0.word,
+                                              marginWords: $0.marginWords)   // ★ notes30
                             }
                         }
                         self.settleComparePicks()   // ★ 11-22: its results are known now
@@ -647,12 +650,14 @@ public final class LibraryModel: ObservableObject {
                 let snap = store.snapshot(id: folder)
                 let up = PrintDraw.up(frame: PrintFrameTurn.of(report: o.reportJSON),
                                       orientation: BuildOrientation(plateUp: snap?.plateUp), gravity: snap?.force.gravity)
+                let marginWords = OrganicBareVines.marginWords(reportJSON: o.reportJSON)   // ★ notes30: a load on bare vines
                 return o.variants.enumerated().map { i, v in
                     LibraryResult(index: i,
                                   mesh: ViewerMesh(vertices: v.meshVertices, indices: v.meshIndices, faceIDs: [],
                                                    smoothShaded: true),
                                   massGrams: v.massGrams, margin: v.worstCaseMargin,
-                                  fraction: v.achievedVolumeFraction, accepted: v.accepted, word: words[i], printUp: up)
+                                  fraction: v.achievedVolumeFraction, accepted: v.accepted, word: words[i], printUp: up,
+                                  marginWords: marginWords)
                 }
             }()
             DispatchQueue.main.async { done(results) }
@@ -753,7 +758,8 @@ public final class LibraryModel: ObservableObject {
                                                                                isDirectory: true)
         Self.queue.async {
             let written = Result {
-                try ChosenExport.write(lines, format: format, title: title, into: dir) {
+                try ChosenExport.write(lines, format: format, title: title, into: dir,
+                                       params: { store.snapshot(id: $0.folder)?.printParams }) {   // ★ notes30
                     ChosenExport.mesh($0, store: store, original: original)
                 }
             }
@@ -851,7 +857,8 @@ public final class LibraryModel: ObservableObject {
         let keptMark = v.mark(for: picked)
         let keptSummary = [ResultSummary(massGrams: decodedPick.massGrams, worstCaseMargin: decodedPick.worstCaseMargin,
                                          accepted: decodedPick.accepted, achievedVolumeFraction: decodedPick.achievedVolumeFraction,
-                                         word: v.summary.flatMap { $0[safe: picked] }?.word)]   // ★ Q1: it keeps its word
+                                         word: v.summary.flatMap { $0[safe: picked] }?.word,   // ★ Q1: it keeps its word
+                                         marginWords: v.summary.flatMap { $0[safe: picked] }?.marginWords)]   // ★ notes30
         edit(folder) { v in
             v.marks = []
             v.setMark(ResultMark(result: 0, stars: keptMark.stars, printThis: keptMark.printThis, rejected: keptMark.rejected))

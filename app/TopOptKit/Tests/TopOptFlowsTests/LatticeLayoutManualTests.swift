@@ -181,6 +181,11 @@ final class LatticeLayoutManualTests: XCTestCase {
         p.lattice.boundary = .none
         XCTAssertFalse(LatticeLayoutPreview.settings(p).skin, "control: None, no skin")
         p.lattice.singleCellMembers = true
+        // ★ RE-PINNED (notes29, his 11-25: "there is NO single-cell available in structural"): single-cell members are
+        // Aesthetic's; a Structural (or unset) stage with the flag left on adds no skin
+        p.lattice.stageMode = .structural
+        XCTAssertFalse(LatticeLayoutPreview.settings(p).skin, "★ notes29: Structural ignores single-cell members")
+        p.lattice.stageMode = .aesthetic
         XCTAssertTrue(LatticeLayoutPreview.settings(p).skin, "★ single-cell members: Skin")
         // Stepped is Aesthetic only
         p.lattice.gradingMode = .full

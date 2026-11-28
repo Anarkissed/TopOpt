@@ -36,6 +36,7 @@ final class LatticeFileExportTests: XCTestCase {
         let job = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         XCTAssertEqual(job["mode"] as? String, "lattice_file")
         XCTAssertEqual(job["output"] as? String, LatticeFileJob.outputName, "a bare file name")
+        XCTAssertEqual(job["file_format"] as? String, "3mf", "★ notes29: a cell lattice's file is a 3MF too")
         let l = try XCTUnwrap(job["layout"] as? [String: Any])
         XCTAssertEqual(l["bars"] as? Bool, true, "★ a file needs its struts")
         XCTAssertEqual(l["small_cells_in_thin_walls"] as? Bool, true)
@@ -149,7 +150,10 @@ final class LatticeFileExportTests: XCTestCase {
         print("LATTICE-FILE cube via the CLI: \(r.line)")
         XCTAssertTrue(r.ok)
         XCTAssertGreaterThan(r.bars, 0)
-        XCTAssertGreaterThan((try Data(contentsOf: dir.appendingPathComponent("out/\(LatticeFileJob.outputName)"))).count, 84, "★ the file")
+        // ★ RE-PINNED (notes29, his rule 11-24: exports default to 3MF): the cell lattice's file is core's 3MF ("lattice.3mf",
+        // named by the report) — it was the job's own "lattice.stl", core's STL default for a cell lattice
+        XCTAssertTrue(r.isThreeMF, "★ a 3MF: \(r.fileName)")
+        XCTAssertGreaterThan((try Data(contentsOf: dir.appendingPathComponent("out/\(r.fileName)"))).count, 84, "★ the file")
     }
 
     /// ★ OPT-IN: the same through the real worker on this Mac (health, upload, poll, fetch).
@@ -187,7 +191,7 @@ final class LatticeFileExportTests: XCTestCase {
             try h.pickFromMenu("capsuleMenu", "Structural", what: "the stage menu")
             h.pump(1.5)
             if h.frames.all["view-Lattice preview-on"] == nil { try h.tap("view-Lattice preview", "the lattice preview", settle: 1.5) }
-            if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleSetup", "the page's Save", settle: 1.5) }
+            if h.frames.all["latticeSettingsPanel"] != nil { try h.tap("capsuleLattice", "the page's Save", settle: 1.5) }
             let end = Date().addingTimeInterval(60)
             while h.frames.all["new-engine-timing"] == nil, Date() < end { h.pump(0.5) }
             h.pump(1.5)

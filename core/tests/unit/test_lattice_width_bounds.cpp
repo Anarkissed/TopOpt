@@ -161,13 +161,104 @@ double distance_to_surface(TpmsKind kind, const V3& p, int n) {
   }
   return best;
 }
+// ── §6 helpers (notes29): the periodic cell on a voxel grid, N a side, every strut a round capsule. ──
+// Distance from each voxel's centre to the nearest strut axis (the cell's struts and their 26 neighbours' translates,
+// so the grid is periodic), in cell units; only within 0.75 of an axis (more than any limit read here).
+std::vector<float> voxel_distance(const StrutCell& c, int N) {
+  std::vector<Seg> segs;
+  for (int dz = -1; dz <= 1; ++dz)
+    for (int dy = -1; dy <= 1; ++dy)
+      for (int dx = -1; dx <= 1; ++dx)
+        for (const Seg& s : unit_struts(c))
+          segs.push_back({{s.a[0] + dx, s.a[1] + dy, s.a[2] + dz}, {s.b[0] + dx, s.b[1] + dy, s.b[2] + dz}});
+  std::vector<float> dist(static_cast<std::size_t>(N) * N * N, 1e9f);
+  const double h = 1.0 / N, reach = 0.75;
+  for (const Seg& s : segs) {
+    int lo[3], hi[3];
+    for (int k = 0; k < 3; ++k) {
+      lo[k] = std::max(0, static_cast<int>(std::floor((std::min(s.a[k], s.b[k]) - reach) / h)));
+      hi[k] = std::min(N - 1, static_cast<int>(std::ceil((std::max(s.a[k], s.b[k]) + reach) / h)));
+    }
+    V3 u;
+    for (int k = 0; k < 3; ++k) u[k] = s.b[k] - s.a[k];
+    const double uu = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
+    for (int z = lo[2]; z <= hi[2]; ++z)
+      for (int y = lo[1]; y <= hi[1]; ++y)
+        for (int x = lo[0]; x <= hi[0]; ++x) {
+          const V3 w{(x + 0.5) * h - s.a[0], (y + 0.5) * h - s.a[1], (z + 0.5) * h - s.a[2]};
+          const double t = std::clamp((w[0] * u[0] + w[1] * u[1] + w[2] * u[2]) / uu, 0.0, 1.0);
+          double d = 0.0;
+          for (int k = 0; k < 3; ++k) d += (w[k] - t * u[k]) * (w[k] - t * u[k]);
+          float& e = dist[(static_cast<std::size_t>(z) * N + y) * N + x];
+          e = std::min(e, static_cast<float>(std::sqrt(d)));
+        }
+  }
+  return dist;
+}
+// The void (voxels farther than r from every axis) runs through the lattice: a 6-connected void cluster of the
+// periodic grid reaches the same voxel again a whole period away (its unwrapped coordinates differ).
+bool void_runs_through(const std::vector<float>& dist, int N, double r) {
+  const std::size_t n = static_cast<std::size_t>(N) * N * N;
+  const int kNone = -(1 << 30);
+  std::vector<int> ux(n, kNone), uy(n, 0), uz(n, 0);
+  std::vector<std::size_t> stack;
+  static const int D[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+  for (std::size_t s0 = 0; s0 < n; ++s0) {
+    if (dist[s0] <= r || ux[s0] != kNone) continue;
+    ux[s0] = static_cast<int>(s0 % N);
+    uy[s0] = static_cast<int>((s0 / N) % N);
+    uz[s0] = static_cast<int>(s0 / (static_cast<std::size_t>(N) * N));
+    stack.assign(1, s0);
+    while (!stack.empty()) {
+      const std::size_t c = stack.back();
+      stack.pop_back();
+      for (const auto& d : D) {
+        const int x = ux[c] + d[0], y = uy[c] + d[1], z = uz[c] + d[2];
+        const std::size_t q =
+            (static_cast<std::size_t>(((z % N) + N) % N) * N + ((y % N) + N) % N) * N + ((x % N) + N) % N;
+        if (dist[q] <= r) continue;
+        if (ux[q] == kNone) { ux[q] = x; uy[q] = y; uz[q] = z; stack.push_back(q); }
+        else if (ux[q] != x || uy[q] != y || uz[q] != z) return true;
+      }
+    }
+  }
+  return false;
+}
+// Seen square-on to a cell face (each axis in turn), some line of sight through the cell is void all the way: the
+// periodic lattice repeats along the view, so one cell's depth is any whole number of cells.
+bool see_through_at(const std::vector<float>& dist, int N, double r) {
+  for (int ax = 0; ax < 3; ++ax)
+    for (int i = 0; i < N; ++i)
+      for (int j = 0; j < N; ++j) {
+        bool open = true;
+        for (int k = 0; k < N && open; ++k) {
+          int p[3];
+          p[ax] = k; p[(ax + 1) % 3] = i; p[(ax + 2) % 3] = j;
+          open = dist[(static_cast<std::size_t>(p[2]) * N + p[1]) * N + p[0]] > r;
+        }
+        if (open) return true;
+      }
+  return false;
+}
+// The diameter over cell at which `open_at` (given the radius) first fails, by bisection.
+template <class F>
+double closes_at(F open_at) {
+  double lo = 0.0, hi = 1.5;
+  for (int it = 0; it < 30; ++it) {
+    const double m = 0.5 * (lo + hi);
+    (open_at(0.5 * m) ? lo : hi) = m;
+  }
+  return 0.5 * (lo + hi);
+}
 }  // namespace
 
 int main() {
   // §1 every strut type's touch is the smaller of its two gaps, recomputed from its cell.
+  // (The tetragonal three since 2026-11-24: their cells are the family study's, laid by the new engine in Aesthetic.)
   for (LatticeTopology t : {LatticeTopology::Octet, LatticeTopology::SimpleCubic, LatticeTopology::Bcc,
                             LatticeTopology::Fcc, LatticeTopology::Diamond, LatticeTopology::Kelvin,
-                            LatticeTopology::Rhombic}) {
+                            LatticeTopology::Rhombic, LatticeTopology::Bccz, LatticeTopology::Fccz,
+                            LatticeTopology::Reentrant}) {
     const StrutCell& c = lattice_strut_cell(t);
     const double f = gap_face_view(c), q = gap_3d(c);
     const LatticeWidthBounds b = lattice_width_bounds(t);
@@ -212,13 +303,105 @@ int main() {
   check(dt <= 2.0 * saddle && dt > 2.0 * saddle - 0.002,
         "§4 schwarz_d: touch is at most twice the edge midpoint's clearance, and within 0.002 of it");
 
-  // §5 the tetragonal three have no cell: refused, by name.
-  for (LatticeTopology t : {LatticeTopology::Bccz, LatticeTopology::Fccz, LatticeTopology::Reentrant}) {
-    bool threw = false;
-    try { (void)lattice_width_bounds(t); } catch (const std::invalid_argument& e) {
-      threw = std::string(e.what()).find(lattice_topology_name(t)) != std::string::npos;
+  // §5 the tetragonal three: their numbers as lattice.hpp states them (bccz bcc's own 1/sqrt 2; fccz 1/2 in 3D,
+  // under fcc's 1/sqrt 3: a column passes nearer a leg than two legs pass; reentrant 1/3 in 3D, its face view 1/sqrt 5).
+  check(lattice_width_bounds(LatticeTopology::Bccz).touch == lattice_width_bounds(LatticeTopology::Bcc).touch,
+        "§5 bccz touches where bcc does");
+  check(std::fabs(gap_3d(lattice_strut_cell(LatticeTopology::Fccz)) - 0.5) < 1e-12 &&
+            std::fabs(gap_face_view(lattice_strut_cell(LatticeTopology::Fccz)) - 1.0 / std::sqrt(2.0)) < 1e-12,
+        "§5 fccz: 3D gap 1/2, face view 1/sqrt 2");
+  check(std::fabs(gap_3d(lattice_strut_cell(LatticeTopology::Reentrant)) - 1.0 / 3.0) < 1e-12 &&
+            std::fabs(gap_face_view(lattice_strut_cell(LatticeTopology::Reentrant)) - 1.0 / std::sqrt(5.0)) < 1e-12,
+        "§5 reentrant: 3D gap 1/3, face view 1/sqrt 5");
+  // §6 (notes29, his notes on release 20: "find the EXACT density and size at which each lattice type becomes a quilt
+  // and limit both when 'Allow quilt' is turned off"). Each strut type's three events, MEASURED on its own periodic
+  // cell at 128 voxels a side (VOXEL: a window shuts on the grid when no voxel centre in it is farther than the strut's
+  // radius from every axis, so a measured value is never above the exact one and at most two voxels under it), against
+  // lattice_quilt_limits' closed forms; touch recomputed exactly from the segments (§1's). Then the quilt's order
+  // (touch first), the open look under all three (Allow quilt off never fuses, closes or hides the view), and the two
+  // cells each limit gives the thinnest strut at a 0.45 mm line (two lines, 0.90 mm).
+  {
+    const int N = 128;
+    const double under = 2.0 / N, over = 0.25 / N;
+    std::printf("§6 where each strut type becomes a quilt (strut diameter / cell; VOXEL %d a side vs EXACT):\n", N);
+    std::printf("  %-9s %8s %8s %8s %8s %8s %8s %9s | %s\n", "type", "touch", "channels", "(voxel)", "see", "(voxel)",
+                "open", "open cell", "quilt cell (0.90 mm strut)");
+    for (LatticeTopology t : {LatticeTopology::Octet, LatticeTopology::SimpleCubic, LatticeTopology::Bcc,
+                              LatticeTopology::Fcc, LatticeTopology::Diamond, LatticeTopology::Kelvin,
+                              LatticeTopology::Rhombic, LatticeTopology::Bccz, LatticeTopology::Fccz,
+                              LatticeTopology::Reentrant}) {
+      const std::string name = lattice_topology_name(t);
+      const StrutCell& c = lattice_strut_cell(t);
+      const LatticeQuiltLimits q = lattice_quilt_limits(t);
+      const std::vector<float> dist = voxel_distance(c, N);
+      const double ch = closes_at([&](double r) { return void_runs_through(dist, N, r); });
+      const double see = closes_at([&](double r) { return see_through_at(dist, N, r); });
+      const double open_cell = lattice_open_cell_mm(t, 0.90), quilt_cell = lattice_quilt_cell_mm(t, 0.90);
+      std::printf("  %-9s %8.5f %8.5f %8.5f %8.5f %8.5f %8.5f %6.2f mm | %.2f mm\n", name.c_str(), q.touch, q.channels,
+                  ch, q.see_through, see, q.open_look, open_cell, quilt_cell);
+      check(q.touch == lattice_width_bounds(t).touch &&
+                std::fabs(q.touch - std::min(gap_face_view(c), gap_3d(c))) < 1e-12,
+            "§6 " + name + ": the quilt is the touch, recomputed from its own cell");
+      check(ch <= q.channels + over && ch >= q.channels - under,
+            "§6 " + name + ": the channels close where lattice_quilt_limits says (voxel)");
+      check(see <= q.see_through + over && see >= q.see_through - under,
+            "§6 " + name + ": the view closes where lattice_quilt_limits says (voxel)");
+      check(q.touch <= q.channels + 1e-12, "§6 " + name + ": the struts touch before (or as) the channels close");
+      check(q.open_look < q.touch && q.open_look < q.channels && q.open_look < q.see_through,
+            "§6 " + name + ": Allow quilt off (the open look) stays under all three");
+      check(std::fabs(open_cell - 0.90 / kLatticeOpenLookStrutPerCell) < 1e-12 &&
+                std::fabs(quilt_cell - 0.90 / q.touch) < 1e-12 && open_cell > quilt_cell,
+            "§6 " + name + ": the open cell and the quilt cell at 0.90 mm");
     }
-    check(threw, std::string("§5 ") + lattice_topology_name(t) + " is refused by name");
+    // RED CONTROL: the measurement tells a wrong limit. The octet's view stated 0.02 wider than it is would be caught
+    // (the voxel value lies more than two voxels under it), and so would its channels stated at its touch.
+    {
+      const LatticeQuiltLimits q = lattice_quilt_limits(LatticeTopology::Octet);
+      const std::vector<float> dist = voxel_distance(lattice_strut_cell(LatticeTopology::Octet), N);
+      const double see = closes_at([&](double r) { return see_through_at(dist, N, r); });
+      const double ch = closes_at([&](double r) { return void_runs_through(dist, N, r); });
+      check(!(see >= q.see_through + 0.02 - under), "§6 control: a view stated 0.02 too wide would be caught");
+      check(!(ch <= q.touch + over), "§6 control: channels stated at the touch would be caught");
+    }
+    bool sheet_refused = false;
+    try { (void)lattice_quilt_limits(LatticeTopology::Gyroid); } catch (const std::invalid_argument&) { sheet_refused = true; }
+    check(sheet_refused, "§6 a sheet type has no strut quilt: refused, never another type's");
+  }
+  // §7 (★ notes29b, his question on 2026-11-25: "Are you saying that no matter what happens, all Small cells in thin walls
+  // are going to be quilted?"): what Allow quilt off never passes is the QUILT, one printed line short of it: the widest
+  // strut is touch x cell - one line (lattice_quilt_off_strut_mm), the smallest cell for a strut (strut + line) / touch
+  // (lattice_quilt_off_cell_mm). Read on each type's own touch, recomputed from its segments: at the limit the closest
+  // struts (that share no node, or parallel ones seen square-on) are exactly one line width apart, never touching; the
+  // limit's cell lies between the quilt's cell and the open look's. RED CONTROL: a limit stated at the quilt's own cell
+  // (no line short of it) leaves no air between the struts, and is caught.
+  {
+    const double line = 0.45, strut = 0.90;
+    std::printf("§7 Allow quilt off's limit, one printed line (%.2f mm) short of the quilt, at a %.2f mm strut:\n", line,
+                strut);
+    std::printf("  %-9s %8s %10s %10s %10s %12s\n", "type", "touch", "quilt cell", "limit cell", "open cell",
+                "air at limit");
+    for (LatticeTopology t : {LatticeTopology::Octet, LatticeTopology::SimpleCubic, LatticeTopology::Bcc,
+                              LatticeTopology::Fcc, LatticeTopology::Diamond, LatticeTopology::Kelvin,
+                              LatticeTopology::Rhombic, LatticeTopology::Bccz, LatticeTopology::Fccz,
+                              LatticeTopology::Reentrant}) {
+      const std::string name = lattice_topology_name(t);
+      const StrutCell& c = lattice_strut_cell(t);
+      const double touch = std::min(gap_face_view(c), gap_3d(c));   // recomputed from the type's own segments
+      const double cell = lattice_quilt_off_cell_mm(t, strut, line);
+      const double air = touch * cell - strut;                       // between the closest struts, mm
+      std::printf("  %-9s %8.5f %7.2f mm %7.2f mm %7.2f mm %9.3f mm\n", name.c_str(), touch,
+                  lattice_quilt_cell_mm(t, strut), cell, lattice_open_cell_mm(t, strut), air);
+      check(std::fabs(air - line) < 1e-9, "§7 " + name + ": one line of air between the closest struts at the limit");
+      check(std::fabs(lattice_quilt_off_strut_mm(t, cell, line) - strut) < 1e-9,
+            "§7 " + name + ": the strut limit and the cell limit are one rule");
+      check(lattice_quilt_cell_mm(t, strut) < cell && cell < lattice_open_cell_mm(t, strut),
+            "§7 " + name + ": the limit's cell is under the open look's and over the quilt's");
+      check(std::fabs(lattice_quilt_off_strut_mm(t, 10.0, 0.0) - touch * 10.0) < 1e-9,
+            "§7 " + name + ": no line, no gap: the touch itself");
+      // RED CONTROL: the quilt's own cell as the limit leaves no air (the check above would fail on it).
+      check(!(std::fabs((touch * lattice_quilt_cell_mm(t, strut) - strut) - line) < 1e-9),
+            "§7 control: the quilt's cell as the limit is caught");
+    }
   }
   std::printf("%s: %d checks, %d failures\n", g_fail ? "FAIL" : "PASS", g_checks, g_fail);
   return g_fail ? 1 : 0;

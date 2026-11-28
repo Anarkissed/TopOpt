@@ -19,6 +19,8 @@ final class AppSettingsHostedTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
+        // ★ notes30: a centred pop-up an earlier class left up (AppPopups is shared) covers this sheet (its AppPopupLayer)
+        AppPopups.shared.current = nil
         suiteName = "AppSettingsHostedTests-\(UUID().uuidString)"
         suite = UserDefaults(suiteName: suiteName)
     }

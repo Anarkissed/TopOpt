@@ -107,6 +107,11 @@ extension MeshRenderer {
     /// coordinator's), restored when a loop stops driving it (batch B review).
     @discardableResult
     func applyFlexibleLattice(_ inputs: FlexibleLatticeLayerInputs?, device: MTLDevice?, baseScale: Float? = nil) -> Bool {
+        // ★ notes30 FF1: one of the Flexible page's main-thread phases (signposted; timed while a test records)
+        FlexibleMainPhases.measure("Flexible applyFlexibleLattice") { applyFlexibleLatticeNow(inputs, device: device, baseScale: baseScale) }
+    }
+
+    private func applyFlexibleLatticeNow(_ inputs: FlexibleLatticeLayerInputs?, device: MTLDevice?, baseScale: Float?) -> Bool {
         guard let inputs else {
             guard let old = flexibleLattice else { return false }
             releaseFlexibleLoop(old.loop, baseScale: baseScale)
@@ -125,8 +130,13 @@ extension MeshRenderer {
         }
         guard let pass = flexibleLattice else { return false }
         var changed = false
-        if pass.token != inputs.token {
-            pass.upload(inputs)
+        // ★ notes30 FF1: a NEW lattice whose volumes the page's picture worker is still making waits (its walls hidden) until
+        // they land with the picture — never made on the main thread; nothing animates, the walls appear with the picture
+        let waits = inputs.latticeGPUWaits && pass.token != inputs.token && inputs.latticeGPU?.generation != inputs.token
+        if waits {
+            if !pass.hidden { pass.hidden = true; changed = true }
+        } else if pass.token != inputs.token {
+            FlexibleMainPhases.measure("Flexible upload (a new lattice)") { pass.upload(inputs) }   // ★ notes30 FF1: its own interval
             changed = true
         } else if pass.facesToken != inputs.facesToken {
             // ★ ROUND 4 (D2): the player's pick — the same lattice, other faces squishing
@@ -135,7 +145,7 @@ extension MeshRenderer {
         }
         // ★ BATCH G: the squeeze groups' FE fields (once per feToken) and the loop's sequence
         if pass.feToken != inputs.feToken {
-            pass.uploadFE(inputs)
+            FlexibleMainPhases.measure("Flexible uploadFE") { pass.uploadFE(inputs) }   // ★ notes30 FF1: its own interval
             changed = true
         } else if pass.feSequence != inputs.feSequence {
             pass.setFESequence(inputs.feSequence)
@@ -151,8 +161,8 @@ extension MeshRenderer {
             pass.applyHeat(inputs.heatWalls)
             changed = true
         }
-        if pass.hidden != inputs.hidden {
-            pass.hidden = inputs.hidden
+        if pass.hidden != (inputs.hidden || waits) {   // ★ notes30 FF1: still hidden while it waits
+            pass.hidden = inputs.hidden || waits
             changed = true
         }
         if pass.loop !== inputs.loop {

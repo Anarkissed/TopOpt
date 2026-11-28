@@ -153,6 +153,10 @@ bool takes_in(const Layout& layout, const Domain::Probe& probe, std::size_t cell
 
 bool cell_holds_at(const Layout& layout, const Domain::Probe& probe, std::size_t cell, double a, double b, double c) {
   const Cell& x = layout.cells[cell];
+  // SHEETS (SPEC 1.5): the solid wall between two sheet regions is no cell's (an empty list for every strut layout).
+  if (!layout.membrane.empty() &&
+      sheet_membrane_at(layout, probe, -1, layout.frames[static_cast<std::size_t>(x.frame)].at(a, b, c)))
+    return false;
   const double q[3] = {a, b, c};
   bool other = false;
   if (own(layout, probe, x, q, &other)) return true;
@@ -163,6 +167,7 @@ bool cell_holds_at(const Layout& layout, const Domain::Probe& probe, std::size_t
 bool cell_holds(const Layout& layout, const Domain::Probe& probe, const Cell& cell, const Vec3& p) {
   double q[3];
   if (!in_cube(layout, cell, p, q)) return false;
+  if (!layout.membrane.empty() && sheet_membrane_at(layout, probe, -1, p)) return false;   // SHEETS: the solid wall
   bool other = false;
   if (own(layout, probe, cell, q, &other)) return true;
   if (!other || !layout.absorb || layout.cells.empty()) return false;
@@ -201,6 +206,9 @@ struct Pass {
   double base_mm = 0.0;             // this lay's own cell (S_base)
   double finest_mm = 0.0;           // the smallest cell its ladder allows (f)
   double floor_mm = 0.0;            // the smallest cell that may stand in this pass at all
+  // ★ notes29b: this pass lays a THIN wall (CellSpec::small_in_thin_walls): its one cell, under the open look's floor,
+  // never under Layout::thin_floor_cell_mm (floor_mm says so), and nothing else.
+  bool thin = false;
   double skin_most = 0.0;           // the deepest Protect skin or cover of the domain
   // D14c: the region's depth (a wall is never read deeper; 1e300 for the whole part), and, under a flat face, the
   // depth whose own cell prints (0 elsewhere: the cell there does not come from the depth).
@@ -352,6 +360,7 @@ struct Pass {
   }
   bool fine_allowed(const double lo[3], double s) const {
     if (s >= out->floor_cell_mm * (1.0 - 1e-9)) return true;
+    if (thin) return true;   // ★ notes29b: a thin wall's own cell (floor_mm holds it at the thin floor)
     if (!band_region) return false;
     return edge_distance(lo[0] + 0.5 * s, lo[1] + 0.5 * s, lo[2] + 0.5 * s) - 0.5 * s < spec->band_mm;
   }
@@ -1424,7 +1433,17 @@ double step_held(const CellSpec& spec) {
   return std::max(spec.max_step, spec.algorithm == Algorithm::DefaultGrade ? 2.0 : 1.0);
 }
 
-Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const AreaOwnMap* own) {
+namespace {
+// Auto's largest cell held under the type's own (auto_cell_cap_mm: a level strut's bridge must not reach past the print
+// rule's limit). A typed cell, and a type with no cap (the octet among them), are left as they are.
+CellSpec held_for_type(CellSpec cs) {
+  if (!(cs.cell_mm > 0.0)) cs.cell_max_mm = std::min(cs.cell_max_mm, auto_cell_cap_mm(cs.topology));
+  return cs;
+}
+}  // namespace
+
+Layout lay_cells(const Domain& domain, const CellSpec& asked, int threads, const AreaOwnMap* own) {
+  const CellSpec spec = held_for_type(asked);
   Layout out;
   const int thread_count =
       threads > 0 ? threads : std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
@@ -1439,6 +1458,11 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const 
   // C14, R2: the smallest cell is the one the thinnest strut leaves open; with Allow quilt
   // on, the one it draws without closing (the quilt's cell), on any wall that needs it.
   out.floor_cell_mm = min_strut / (spec.allow_quilt ? bounds.touch : bounds.open_look);
+  // ★ notes29b: Small cells in thin walls (Allow quilt off only): a thin wall's own cell may go down to the cell in which the
+  // thinnest strut stays a printed line short of touching (lattice_quilt_off_cell_mm), never under it.
+  out.thin_floor_cell_mm = spec.small_in_thin_walls && !spec.allow_quilt
+      ? std::min(out.floor_cell_mm, lattice_quilt_off_cell_mm(spec.topology, min_strut, ds.bead_mm))
+      : out.floor_cell_mm;
   out.bead_mm = ds.bead_mm;
   out.min_strut_mm = min_strut;
   out.topology = spec.topology;
@@ -1447,7 +1471,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const 
   std::map<int, CellSpec> resolved;
   if (own)
     for (const auto& [id, o] : *own)
-      if (id > 0 && o.any()) resolved.emplace(id, region_cells(spec, o));
+      if (id > 0 && o.any()) resolved.emplace(id, held_for_type(region_cells(spec, o)));
   const auto spec_of = [&](int region) -> const CellSpec& {
     const auto it = resolved.find(region);
     return it == resolved.end() ? spec : it->second;
@@ -1658,6 +1682,13 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const 
     pass.base_mm = base;
     pass.skin_most = domain.skin_most_mm();
     pass.floor_mm = std::max(spec.cell_min_mm, out.floor_cell_mm);
+    if (pass.thin) {
+      // ★ notes29b: a thin wall is laid with its own one cell and nothing smaller (no halves, no units): the cell that
+      // divides it, held at the thin floor.
+      pass.sizes = {base};
+      pass.divisors.clear();
+      pass.floor_mm = std::max(spec.cell_min_mm, out.thin_floor_cell_mm);
+    }
     pass.finest_mm = base;
     for (double a : pass.sizes) pass.finest_mm = std::min(pass.finest_mm, a);
     for (int n : pass.divisors)
@@ -2008,9 +2039,14 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const 
         area = st.entries.size() * WallMap::kPitch * WallMap::kPitch;
       }
       wall.cell = divide(spec, wall.width, &wall.layers);
+      // ★ notes29b, Small cells in thin walls (CellSpec::small_in_thin_walls): a wall the open look's cells cannot divide
+      // (its own cell under the smallest one, while the cell asked for is not) is a THIN wall, laid with its own one cell
+      // when that is at least the thin floor (the thinnest strut a printed line short of touching). Only such a wall.
+      wall.thin = spec.small_in_thin_walls && wall.cell < smallest && target >= smallest &&
+                  wall.cell >= std::max(out.thin_floor_cell_mm * (1.0 + 1e-9), spec.cell_min_mm);
       // A wall is a stretch wide enough for its own cells (two by two of them) whose
       // cell prints. Anything else is left to the pass below, cell by cell.
-      if (wall.cell < smallest || area < 4.0 * wall.cell * wall.cell) continue;
+      if ((wall.cell < smallest && !wall.thin) || area < 4.0 * wall.cell * wall.cell) continue;
       find_edges(*kept, which, domain, probe, spare, r, f);
       const FaceReadings::Stretch& st = kept->stretches[which];   // edged: no longer written
       wall.lo[0] = st.lo[0]; wall.lo[1] = st.lo[1];
@@ -2041,8 +2077,10 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const 
       // Centred on the wall's own stretch (C9, per wall).
       const double wlo3[3] = {wall.lo[0], wall.lo[1], wall.start};
       const double whi3[3] = {wall.hi[0], wall.hi[1], wall.start + wall.width};
+      pass.thin = wall.thin;   // ★ notes29b
       lay(pass, wall.cell, wlo3, whi3, true, keep);
     }
+    pass.thin = false;
     pass.wall = -1;   // what no wall holds: cell by cell from the region's own base
     lay(pass, base, lo, hi, true, keep);
     if (keep) keep_steps(lays, limit);
@@ -2088,7 +2126,7 @@ Layout lay_cells(const Domain& domain, const CellSpec& spec, int threads, const 
       const Where w = probe.where(f.at(q[0], q[1], q[2]));
       return w.lattice() && w.id == fit.region;
     };
-    const std::vector<StrutCellStrut> struts = strut_cell_closed_struts(lattice_strut_cell(fit.spec->topology));
+    const std::vector<StrutCellStrut> struts = cell_struts(fit.spec->topology, f);   // as lay_bars lays them
     const double most = target_of(*fit.spec);   // Max cell
     // Would stretching by `factor` along axis `a` lay any strut flatter (less rise over its length) than the cell does?
     const auto flatter = [&](int a, double factor) {

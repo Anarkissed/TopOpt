@@ -170,7 +170,7 @@ public final class OrbitCameraModel: ObservableObject {
 
     private func setOrientation(azimuth: Float, elevation: Float, roll: Float, animated: Bool) {
         let targetEl = OrbitCamera.clampElevation(elevation)
-        guard animated else {
+        guard animated, !AppSettings.skipAllAnimations else {   // ★ notes29: Skip all animations — the view jumps, never turns
             stopAnimation()
             camera.setOrientation(azimuth: azimuth, elevation: targetEl)
             camera.setRoll(roll)

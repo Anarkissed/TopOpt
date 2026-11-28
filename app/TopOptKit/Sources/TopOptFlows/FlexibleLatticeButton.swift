@@ -86,7 +86,7 @@ public enum FlexibleLatticeButton {
         case .building: return FlexibleMainStatus.building
         case .viewOff: return FlexibleMainStatus.deferred
         case .ready: return s.line == FlexibleMainStatus.ready ? readyLine : s.line
-        case .sending: return FlexibleCoreRun.sendingLine
+        case .sending: return runLine == FlexibleCoreRun.waitingLine ? runLine : FlexibleCoreRun.sendingLine   // ★ notes29: waits for a run
         case .sent: return runLine.count <= 44 ? runLine : designedLine
         case .refused:
             if runLine.hasPrefix("Core refused") { return refusedLine }

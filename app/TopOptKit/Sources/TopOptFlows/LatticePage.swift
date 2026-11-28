@@ -924,7 +924,12 @@ public struct LatticePage: View {
     /// ★★ LATTICE TYPES U1/U2 (2026-10-01): the same catalog the Lattice stage's chips read —
     /// every type in the round's order; only an offered one can be picked; a greyed row carries a
     /// mark, and ONE footnote per distinct reason says why (L14: never a per-row sentence).
-    private var topologyEntries: [LatticeTypeEntry] { LatticeTypeCatalog.entriesFromCore() }
+    /// ★ notes28: the old run's facts with the stage's Structural rules (the Aesthetic-only three, and a type whose measured
+    /// strength law credits none of the engine's struts yet — core's `structuralNote`), as the Lattice
+    /// stage reads them.
+    private var topologyEntries: [LatticeTypeEntry] {
+        LatticeTypeCatalog.stageEntries(structural: (project.lattice.stageMode ?? .structural) == .structural, newEngine: false)
+    }
     static let footnoteMarks = ["*", "†", "‡", "§", "¶"]
     /// The distinct reasons in row order, each with its mark.
     static func footnotes(_ entries: [LatticeTypeEntry]) -> [(mark: String, reason: String)] {
@@ -956,7 +961,10 @@ public struct LatticePage: View {
         return Button {
             // ★ only an offered type is ever written — a greyed one says why in its footnote
             guard e.offered else { return }
-            project.lattice.topologyID = e.id
+            // ★ notes28: the stored densities go with the type at the same place on the dial — never the old type's numbers
+            // under the new type's name (`LatticeTypeChange`)
+            project.lattice = LatticeTypeChange.applied(project.lattice, to: e.id,
+                                                        lineWidthMM: project.printParams.strutLineWidthMM)
         } label: {
             HStack(spacing: DS.Space.sm) {
                 // L14: the name on ONE line; a type core doesn't offer is GREYED with an orange

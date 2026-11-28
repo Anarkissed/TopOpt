@@ -1129,6 +1129,12 @@ std::string bridge_last_refusal();
 // The guard's own test hook: 0 → "answered"; 1 → a std::exception; 2 → a non-std
 // exception. 1 and 2 return "" with the reason in bridge_last_refusal().
 std::string bridge_guard_self_test(int kind);
+// ★ notes30 (his crash 11-26: the app logged on every render and per strut): how many lines the bridge has
+// written to the log this process — the tests' counting sink. A lookup's refusal (a per-type number, a limit, a
+// readiness) writes none; a press's refusal (import, run, lay) writes each different one once.
+long long bridge_log_line_count();
+// RED CONTROL (tests): every refusal written to the log, as before notes30.
+void bridge_set_control_log_every_refusal(bool on);
 
 // ---------------------------------------------------------------------------
 // Lattice certification limits (lattice mode UI, handoff 2026-07-29-lattice-mode-
@@ -1245,6 +1251,28 @@ double lattice_aesthetic_density_ceiling(const std::string& topology);
 /// only; 0 = no core law, 1 = the radius fills the cell). Core reply 5, 2026-09-20.
 double lattice_relative_density(const std::string& topology, double strut_radius_mm,
                                 double cell_size_mm);
+
+// ★ notes30 SA1 (Structural Auto, REMOVE.md; structural_auto_bridge.cpp): the strut law TURNED ROUND, over a whole
+// stress field (core's strut_size_field): per voxel
+// of a Voigt stress tensor field (6 per voxel, core's stress_tensor_field order, MPa) the lightest strut / cell whose law
+// margin reaches `target` (the Safety margin he set, x the sizing cushion) — the law the strength check judges a cell by —
+// written into the caller's arrays (`ratio_out`, `rho_out`, `short_out`, each tensor_count / 6 long; null skips one).
+// `ok` false with core's reason (an unknown type, a type with no law, a bad material) and nothing written.
+struct StrutSizeFieldSummary {
+  bool ok = false;
+  std::string reason;
+  std::size_t voxels = 0, loaded = 0, at_floor = 0, short_of_target = 0;
+  double rho_floor = 0.0, rho_ceiling = 0.0, ratio_floor = 0.0, ratio_ceiling = 0.0, highest_ratio = 0.0, rho_sum = 0.0;
+  double touch = 0.0, open_look = 0.0;   // the type's (lattice_width_bounds), strut / cell
+};
+StrutSizeFieldSummary lattice_strut_size_field(const std::string& topology, const double* tensor, std::size_t tensor_count,
+                                               double build_x, double build_y, double build_z, double yield_mpa,
+                                               double z_knockdown, double target, float* ratio_out, float* rho_out,
+                                               std::uint8_t* short_out);
+// The law's margin at one voxel and density (core's strut_law_margin_at, the check's formula). 0 with a refusal.
+double lattice_strut_law_margin(const std::string& topology, double rho, double vm, double pressure, double build_x,
+                                double build_y, double build_z, double yield_mpa, double z_knockdown);
+// ★ notes30 SA1 end
 
 // ★★ CORE'S LOCAL MEMBER THICKNESS, for the preview (task 2026-08-20).
 //

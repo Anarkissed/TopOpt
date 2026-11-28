@@ -245,6 +245,56 @@ void test_face_partly_near() {
   CHECK(!c.load_on_open_lattice && c.frame_nodes_loaded == 1, "held at the one strut end near the face, not failed");
 }
 
+void test_load_on_bare_lattice() {
+  // §7c the interim guard (the reviewer's ruling with the owner's approval, 2026-11-26). (a) §7's face: 11 loaded grid
+  // nodes on lattice voxels at x = 6, y = 0 to 5 mm, the strut's loose tip near one: all of the 0.55 N goes on the frame,
+  // so the load is on bare lattice; its place, the force-weighted mean of the loaded nodes touching lattice, is the
+  // patch's middle (6, 2.5, 0). (b) The same strut in lattice under a SOLID skin 1.5 mm deep (three voxels) on the top,
+  // loaded on the top face: nothing on the frame, the flag clear, and the check as before (nothing unheld, not open).
+  ll::Bars bars;
+  bars.bars.push_back(bar({0, 0, 0}, {6, 0, 0}, ll::Bar::End::Solid, ll::Bar::End::Loose));
+  {
+    Field f({-3.0, -3.0, -3.0}, 24, 24, 12);
+    for (int k = 0; k < f.grid.nz; ++k)
+      for (int j = 0; j < f.grid.ny; ++j)
+        for (int i = 0; i < f.grid.nx; ++i)
+          if (f.grid.origin.x + (i + 0.5) * f.grid.spacing > 1.0) {
+            f.mat.solid[f.grid.index(i, j, k)] = 0.0f;
+            f.mat.lattice[f.grid.index(i, j, k)] = 0.2f;
+          }
+    std::vector<ll::FrameVoxelSolve::Load> loads;
+    for (int b = 6; b <= 16; ++b) loads.push_back({f.node(18, b, 6), 2, -0.05});
+    const ll::FrameCheck c = run(bars, f, loads);
+    std::printf("§7c bare lattice: on the frame %.3f N of %.3f N (share %.3f), bare %d, open %d, at (%.3f, %.3f, %.3f)\n",
+                c.load_on_frame_n, c.load_total_n, c.load_share, c.load_on_bare_lattice, c.load_on_open_lattice,
+                c.load_on_lattice_at.x, c.load_on_lattice_at.y, c.load_on_lattice_at.z);
+    CHECK(c.load_on_bare_lattice && !c.load_on_open_lattice, "the load on the vines is on bare lattice (open lattice not)");
+    CHECK(std::fabs(c.load_on_lattice_at.x - 6.0) < 1e-9 && std::fabs(c.load_on_lattice_at.y - 2.5) < 1e-9 &&
+              std::fabs(c.load_on_lattice_at.z) < 1e-9,
+          "its place is the middle of the loaded patch");
+  }
+  {
+    Field f({-3.0, -3.0, -3.0}, 24, 24, 12);
+    for (int k = 0; k < f.grid.nz; ++k)
+      for (int j = 0; j < f.grid.ny; ++j)
+        for (int i = 0; i < f.grid.nx; ++i) {
+          const double x = f.grid.origin.x + (i + 0.5) * f.grid.spacing, z = f.grid.origin.z + (k + 0.5) * f.grid.spacing;
+          if (x > 1.0 && z < 1.5) {   // lattice below a solid skin three voxels deep (z 1.5 to 3)
+            f.mat.solid[f.grid.index(i, j, k)] = 0.0f;
+            f.mat.lattice[f.grid.index(i, j, k)] = 0.2f;
+          }
+        }
+    std::vector<ll::FrameVoxelSolve::Load> loads;
+    for (int a = 16; a <= 20; ++a) loads.push_back({f.node(a, 6, 12), 2, -0.1});   // the top face, x 5 to 7, y 0
+    const ll::FrameCheck c = run(bars, f, loads);
+    std::printf("§7c on solid: on the frame %.3f N of %.3f N (share %.3f), unheld %.3f, bare %d, open %d\n",
+                c.load_on_frame_n, c.load_total_n, c.load_share, c.load_unheld_n, c.load_on_bare_lattice,
+                c.load_on_open_lattice);
+    CHECK(!c.load_on_bare_lattice && c.load_on_frame_n == 0.0 && c.load_share == 0.0, "a load on a solid skin is not");
+    CHECK(c.solved && c.load_unheld_n == 0.0 && !c.load_on_open_lattice && !c.no_load_path, "and the check is as before");
+  }
+}
+
 void test_load_on_undriven_piece() {
   // §8: the strut of §1, and a loose strut (no end in the solid) 8 mm away with a load at its end.
   ll::Bars bars;
@@ -408,6 +458,7 @@ int main() {
   test_link_moves_as_one();
   test_load_on_open_lattice();
   test_face_partly_near();
+  test_load_on_bare_lattice();
   test_load_on_undriven_piece();
   test_bed_floor();
   std::printf("organic_frame: %d checks, %d failures\n", g_checks, g_failures);
