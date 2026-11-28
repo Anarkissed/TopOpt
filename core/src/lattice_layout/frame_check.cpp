@@ -740,6 +740,11 @@ FrameCheck check_frame(const FrameModel& f, const FrameVoxelSolve& vs, const Fra
   if (nf > 0) {
     SparseLdltOptions o;
     o.memory_limit_gb = s.solve_memory_gb;
+    // The frame is solved by Eigen's LDLT (AMD order, one thread), never Accelerate's: Accelerate's sparse
+    // factorisation does not repeat bit for bit from run to run (its sums are scheduled in parallel; measured
+    // 2026-11-26, organic_frame_repeat: the same job twice in one process gave weakest-strut forces and end
+    // displacements that differed in the tenth figure), and the strength result must be the same bytes every time.
+    o.backend = SparseLdltBackend::Eigen;
     SparseLdltResult r = sparse_ldlt_solve(K, rhs, o);
     out.factor_gb = r.factor_gb;
     out.residual = r.residual;

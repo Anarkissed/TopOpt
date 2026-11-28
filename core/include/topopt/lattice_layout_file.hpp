@@ -326,6 +326,27 @@ std::vector<float> lattice_voxel_margins(LatticeTopology topo, const LatticeCred
                                          const std::vector<double>& stress_tensor_field, const Vec3& build_dir,
                                          double yield_mpa, double z_knockdown);
 
+// C3: the break check's reading of one post (lattice_layout_break.hpp, class "post").
+// C10 (review 9): the posts step's room test. Is the level rectangle [x0, x1] x [y0, y1] inside the part at every height
+// in `zs`, read at its four corners and four edge midpoints (each a hair inside the rectangle)?
+bool post_rect_inside_part(const TriangleMesh& part, double x0, double x1, double y0, double y1, const std::vector<double>& zs);
+
+struct BreakPostReading {
+  double all = 0.0;          // its weakest point's multiple (0: none found)
+  bool all_resolved = false;  // that point is judged (3 voxels across or more)
+  double judged = 0.0;        // its weakest judged point's multiple (0: none)
+  double section = 0.0;       // its file section's multiple (0: not read)
+  double section_mm2 = 0.0;
+  bool first_break = false;   // the check's first judged break is in this post
+  // C9: the load-path rule names it (its share of the load over the limit and its shaft or an end not resolved: the
+  // reason post_load_path_not_resolved).
+  bool path_open = false;
+  // and what the rule read: its share of the load, and whether its shaft and its two ends are resolved
+  double path_share = 0.0;
+  bool path_shaft = true, path_foot = true, path_top = true;
+};
+using BreakPostReadings = std::vector<BreakPostReading>;
+
 // What the file job hands the check, once its file is made.
 struct StrengthAsk {
   const Session* session = nullptr;   // the one the outcome was laid by: its domain is the outcome's
@@ -348,6 +369,20 @@ struct StrengthAsk {
   // P4 (Phase 2): the print-orientation candidates' ups, in the job's frame (print_candidates); the check judges
   // each (StrengthDone::orientation). Empty: none.
   std::vector<Vec3> orientation_ups;
+  // C2, Organic strength CUT 1 (lattice_layout_break.hpp): the file as written (the job's frame) and its path, the
+  // posts' laid width, the file job's progress line and stop flag, and the folder the break check keeps its answers in
+  // (empty: no cache). The file job fills these for an Organic job; `print` null: no break check (a cell lattice).
+  const TriangleMesh* print = nullptr;
+  std::string print_path;
+  double post_mm = 0.9;
+  // C3: the posts step's wider posts (MeshSpec::post_wide), so the check classes each post by the box it was drawn as.
+  std::vector<MeshSpec::PostWide> post_wide;
+  void (*said)(const char*) = nullptr;
+  const std::atomic<bool>* stop = nullptr;
+  std::string break_cache;
+  // A TEST-ONLY argument (the oversize mark, plan section 5 mark 5): the break check's memory limit in bytes. The file
+  // job never sets it; 0 = 40 % of the machine's physical memory.
+  double break_memory_limit_bytes = 0.0;
 };
 struct StrengthDone {
   bool ok = false;
@@ -361,6 +396,15 @@ struct StrengthDone {
   // (print_orientation.hpp); the file job adds the bed and writes "print_orientation". Not known: the check made none
   // (the cube check, so far).
   OrientationStrengthsN orientation;
+  // C3 (CUT 1b, the posts step): the break check's verdict and its reading of each post (index = the file's post), for
+  // the file job to widen weak posts. Empty verdict: no break check was made.
+  std::string break_verdict;
+  double break_pass_line = 0.0;
+  BreakPostReadings break_posts;
+  // Review C2 A1: the file's answer, written into lattice_file.json as "strength_answer" (Organic only): which check
+  // gave it ("break", or "rod" when no break check was made), its verdict, and the not-checked reason (empty: none).
+  std::string break_reason;
+  std::string answer_by, answer_verdict, answer_reason;
 };
 // The check is the CLI's (run_job.cpp: lattice_file_strength_check): core's lattice layout is always built, and the
 // old check needs the solver and the importer. `before` reads the strength job (cheap; no solve) and may refuse it;
@@ -386,6 +430,10 @@ struct FileJob {
   // old Lattice run takes ("mode": "lattice_part"). run_file_job makes it a path beside the job; a caller of
   // make_lattice_file gives the path. Empty: no check, and the result names none (V2).
   std::string strength_job;
+  // C2 (key "break_cache"): a folder beside the job, by its bare name, where the Organic break check keeps its answers.
+  // Not given: no cache (review C2 A2: nothing outside the job decides an answer). run_file_job makes it a path beside
+  // the job.
+  std::string break_cache;
   // Organic, Traced (layout key "region_weave"): the stress tensor's file (key "tensor"), a bare name beside the job,
   // as "demand". Empty: none sent. run_file_job reads it into `tensor_field`; a caller of make_lattice_file puts the
   // field there itself. A job with a weave region and no field is refused (no_stress_result, OR14).
@@ -583,6 +631,12 @@ struct FileResult {
   bool strength_ran = false;
   bool strength_accepted = false;
   std::string strength_json;
+  // C3: the break check's verdict and post readings (StrengthDone), and the posts step's block (empty: it did not run).
+  std::string break_verdict;
+  double break_pass_line = 0.0;
+  BreakPostReadings break_posts;
+  std::string posts_step_json;
+  std::string answer_by, answer_verdict, answer_reason;   // review C2 A1 (StrengthDone): "strength_answer"
   // P4: the print orientation ranking and recommendation ("print_orientation"), when the check gave its numbers.
   std::string orientation_json;
   // P3: the part's own overhang places the print check found (its last pass), and what was painted for them in the

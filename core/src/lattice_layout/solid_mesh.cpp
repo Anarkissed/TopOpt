@@ -1032,6 +1032,35 @@ struct FloatPlaceHash {
     return (a * 0x9E3779B97F4A7C15ULL) ^ (b * 0xC2B2AE3D27D4EB4FULL) ^ (c * 0x165667B19E3779F9ULL);
   }
 };
+// A post as it is drawn: its box (post_mm at its axis, or its posts-step width and move), run 0.25 mm into what it
+// stands on and what it holds up. C9: a flared post (MeshSpec::PostWide::flare_mm) also has a foot and a head, each
+// the hull of its wide end (run 0.25 mm in, level) and the box's section `flare_mm` along the shaft: flat sloped
+// sides, a side with no reach (0) vertical. Every other post: the same box as before, bit for bit.
+Manifold post_solid(const MeshSpec& spec, const MeshSpec::Post& p) {
+  double w, cx, cy;
+  spec.post_box(p, w, cx, cy);   // C3: post_mm at its axis unless the posts step widened it
+  const Manifold box = Manifold::Cube({w, w, p.z_top - p.z_bottom + 0.5}).Translate({cx - 0.5 * w, cy - 0.5 * w, p.z_bottom - 0.25});
+  const MeshSpec::PostWide* f = spec.post_flare(p);
+  if (!f) return box;
+  const double hw = 0.5 * w, H = f->flare_mm;
+  const auto end = [&](const std::array<double, 4>& e, double z_wide, double z_in, double z_shaft) {
+    std::vector<manifold::vec3> pts;
+    for (const double z : {z_wide, z_in}) {
+      pts.push_back({cx + hw + e[0], cy + hw + e[2], z});
+      pts.push_back({cx - hw - e[1], cy + hw + e[2], z});
+      pts.push_back({cx + hw + e[0], cy - hw - e[3], z});
+      pts.push_back({cx - hw - e[1], cy - hw - e[3], z});
+    }
+    pts.push_back({cx + hw, cy + hw, z_shaft});
+    pts.push_back({cx - hw, cy + hw, z_shaft});
+    pts.push_back({cx + hw, cy - hw, z_shaft});
+    pts.push_back({cx - hw, cy - hw, z_shaft});
+    return Manifold::Hull(pts);
+  };
+  Manifold m = box + end(f->foot, p.z_bottom - 0.25, p.z_bottom, p.z_bottom + H);
+  m = m + end(f->head, p.z_top + 0.25, p.z_top, p.z_top - H);
+  return m;
+}
 }  // namespace
 
 bool mesh_available() { return true; }
@@ -1824,8 +1853,7 @@ void weave_bar_shells(const Domain& domain, const Layout& lay, const Bars& bars,
   // The posts, as build_mesh writes them.
   for (const MeshSpec::Post& p : spec.posts) {
     if (!(p.z_top > p.z_bottom)) continue;
-    const double w = spec.post_mm;
-    put(Manifold::Cube({w, w, p.z_top - p.z_bottom + 0.5}).Translate({p.x - 0.5 * w, p.y - 0.5 * w, p.z_bottom - 0.25}));
+    put(post_solid(spec, p));   // C3: post_mm at its axis unless the posts step widened it; C9: flared ends
     ++rep.posts;
     rep.posts_mm += p.z_top - p.z_bottom;
   }
@@ -1932,8 +1960,7 @@ TriangleMesh build_mesh(const PartMeasure& pm, const Domain& domain, const Layou
     // mid-air or reaching out held at one end only. It ties it down.
     for (const MeshSpec::Post& p : spec.posts) {
       if (!(p.z_top > p.z_bottom)) continue;
-      const double w = spec.post_mm;
-      solids.push_back(Manifold::Cube({w, w, p.z_top - p.z_bottom + 0.5}).Translate({p.x - 0.5 * w, p.y - 0.5 * w, p.z_bottom - 0.25}));
+      solids.push_back(post_solid(spec, p));   // C3: widened by the posts step; C9: flared ends
       centres.push_back({p.x, p.y, 0.5 * (p.z_top + p.z_bottom)});
       ++rep.posts;
       rep.posts_mm += p.z_top - p.z_bottom;

@@ -1,6 +1,7 @@
 #include "topopt/job.hpp"
 #include "topopt/lattice_file_strength.hpp"  // Install 3 (V4)
 #include "topopt/lattice_layout_frame.hpp"   // brief E2: the Organic check, a frame of beams
+#include "topopt/lattice_layout_break.hpp"   // C2: the Organic break check
 #include "topopt/gate_diagnosis_eval.hpp"     // diagnose_gate, for the check's diagnosis
 #include "topopt/strut_strength.hpp"
 #include "../flexible/json.hpp"   // the strength settings (Install 3), read by the always-built reader
@@ -36,6 +37,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <unistd.h>
 
 #include "topopt/analyze.hpp"
 #include "topopt/build_frame.hpp"
@@ -14040,6 +14042,273 @@ OrganicCheckRun organic_frame_check(StrengthSetup& S, const ll::Domain& ldomain,
   return R;
 }
 
+// ── C2, Organic strength CUT 1: the break check (lattice_layout_break.hpp) on the file as written, after the rod check.
+// The rod check's block is left exactly as it was; the break check ADDS "break" and "answer": "break" (the file's
+// verdict is the break check's: accepted only on "pass"). A check that cannot be made says "not_checked" with the
+// reason, and the file is KEPT (never the strength_failed path, which deletes it).
+namespace break_c2 {
+
+std::uint64_t fnv(std::uint64_t h, const void* p, std::size_t n) {
+  const unsigned char* b = static_cast<const unsigned char*>(p);
+  for (std::size_t i = 0; i < n; ++i) { h ^= b[i]; h *= 1099511628211ull; }
+  return h;
+}
+std::string g17(double v) {
+  char b[40];
+  std::snprintf(b, sizeof b, "%.17g", v);
+  return b;
+}
+std::string g17v(const Vec3& v) { return g17(v.x) + "," + g17(v.y) + "," + g17(v.z); }
+
+std::string not_checked_block(const std::string& code, const std::string& why, double pass_line) {
+  return "{\"verdict\": \"not_checked\", \"reason\": " + json_str(code) + ", \"why\": " + json_str(why) + ", \"pass_line\": " +
+         json_num(pass_line) + "}";
+}
+
+// Adds the break block and the answer key to the rod check's block (an object ending "\n  }").
+void add_break(ll::StrengthDone& done, const std::string& block) {
+  std::string& s = done.json;
+  std::size_t q = s.rfind("\n  }");
+  if (q == std::string::npos) q = s.rfind('}');
+  if (q == std::string::npos) return;
+  s.insert(q, ",\n    \"answer\": \"break\",\n    \"break\": " + block);
+}
+
+}  // namespace break_c2
+
+ll::StrengthDone with_break_check(const ll::StrengthAsk& ask, StrengthSetup& S, ll::StrengthDone done) {
+  using namespace break_c2;
+  JobDescription& job = S.job;
+  const double pass_line = S.options.margin_stop;
+  const auto refuse = [&](const std::string& code, const std::string& why) {
+    add_break(done, not_checked_block(code, why, pass_line));
+    done.accepted = false;
+    done.break_verdict = "not_checked";
+    done.break_reason = code;
+    return done;
+  };
+  // the job's hold and loads, as face ids of the strength job's part (the same frame as the file)
+  ll::BreakAsk b;
+  try {
+    if (!job.loads.present) return refuse("no_load", "the strength job states no load case (anchors and forces)");
+    if (!job.loads.anchor_region_ids.empty() || !job.loads.face_regions.empty())
+      return refuse("no_load", "the strength job names face regions, which the break check does not read yet");
+    for (const int f : resolve_selectors(S.model, job.loads.anchors, "anchors")) b.fixed_faces.push_back(f);
+    for (const int f : job.loads.anchor_face_ids) b.fixed_faces.push_back(f);
+    for (const JobLoadGroup& g : job.loads.groups) {
+      if (!g.region_ids.empty()) return refuse("no_load", "a load names face regions, which the break check does not read yet");
+      ll::BreakLoad L;
+      for (const int f : resolve_selectors(S.model, g.faces, "loads")) L.faces.push_back(f);
+      for (const int f : g.face_ids) L.faces.push_back(f);
+      L.force = g.force;
+      b.loads.push_back(L);
+    }
+  } catch (const std::exception& e) {
+    return refuse("no_load", std::string("the strength job's faces could not be read: ") + e.what());
+  }
+  // C10 (review 3): bearing anchors (compression only, sliding free) are not modelled by the check: not checked
+  b.anchors_bearing = job.loads.anchor_model == "bearing";
+  b.print = ask.print;
+  b.part = &S.model;
+  if (ask.bars)
+    for (std::size_t i = 0; i < ask.bars->bars.size(); ++i)
+      if (!ask.kept || (i < ask.kept->size() && (*ask.kept)[i]))
+        b.bars.push_back({ask.bars->bars[i].a, ask.bars->bars[i].b, ask.bars->bars[i].width});
+  if (ask.made)
+    for (const ll::MeshSpec::Post& p : ask.made->posts) {
+      // C3: the box the post was drawn as (post_mm at its axis, or the posts step's width and inward move)
+      ll::MeshSpec spec;
+      spec.post_mm = ask.post_mm;
+      spec.post_wide = ask.post_wide;
+      double w = 0.0, cx = 0.0, cy = 0.0;
+      spec.post_box(p, w, cx, cy);
+      b.posts.push_back({cx, cy, p.z_bottom, p.z_top, w});
+    }
+  b.youngs_mpa = S.material.youngs_modulus_mpa;
+  b.poisson = S.material.poisson;
+  b.yield_mpa = S.material.yield_strength_mpa;
+  b.z_knockdown = S.material.z_knockdown;
+  b.up = resolve_build_direction(S.options);
+  b.pass_line = pass_line;
+  b.frame = S.frame;
+  b.other_ups = S.ups;
+  b.memory_limit_bytes = ask.break_memory_limit_bytes;
+  b.said = ask.said;
+  b.stop = ask.stop;
+  // the cache key: the file's bytes, the part, the hold and loads, the bars and posts, the material, the pass line, the
+  // grid and the frame; the whole key text is kept in the entry and compared, so a changed input never reuses it
+  std::string key;
+  {
+    std::uint64_t hf = 1469598103934665603ull;
+    std::size_t nbytes = 0;
+    bool read_ok = false;
+    if (std::FILE* f = std::fopen(ask.print_path.c_str(), "rb")) {
+      char buf[65536];
+      std::size_t n;
+      while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) { hf = fnv(hf, buf, n); nbytes += n; }
+      read_ok = !std::ferror(f);
+      std::fclose(f);
+    }
+    if (read_ok) {
+      std::uint64_t hp = 1469598103934665603ull;
+      for (const Vec3& v : S.model.mesh.vertices) hp = fnv(hp, &v, sizeof v);
+      for (const auto& t : S.model.mesh.triangles) hp = fnv(hp, t.data(), sizeof(int) * 3);
+      for (const int f : S.model.triangle_face) hp = fnv(hp, &f, sizeof f);
+      std::uint64_t hb = 1469598103934665603ull;
+      for (const ll::BreakBar& x : b.bars) hb = fnv(fnv(fnv(hb, &x.a, sizeof x.a), &x.b, sizeof x.b), &x.width, sizeof x.width);
+      for (const ll::BreakPost& x : b.posts) hb = fnv(hb, &x, sizeof x);
+      char h[200];
+      std::snprintf(h, sizeof h, "file %016llx %zu\npart %016llx\nbars %016llx\n", static_cast<unsigned long long>(hf), nbytes,
+                    static_cast<unsigned long long>(hp), static_cast<unsigned long long>(hb));
+      // review C2 A4: the build's own fingerprint, not a hand-typed word (a changed law is a changed build)
+      key = "break-check build " + build_identity().fingerprint + " " + build_identity().build_time + " " + __DATE__ + " " + __TIME__ + "\n" + h;
+      key += "fixed";
+      for (const int f : b.fixed_faces) key += " " + std::to_string(f);
+      key += "\nloads";
+      for (const ll::BreakLoad& L : b.loads) {
+        key += " [";
+        for (const int f : L.faces) key += std::to_string(f) + " ";
+        key += "| " + g17v(L.force) + "]";
+      }
+      if (b.anchors_bearing) key += "\nanchors bearing";   // C10: only for such a job, so every other key is as before
+      key += "\nmaterial " + g17(b.youngs_mpa) + " " + g17(b.poisson) + " " + g17(b.yield_mpa) + " " + g17(b.z_knockdown) + "\npass " +
+             g17(b.pass_line) + "\nup " + g17v(b.up) + "\ngrid " + g17(b.voxel_mm) + " " + g17v(b.grid_shift) + " " + g17(b.smooth_mm) + " " +
+             std::to_string(b.min_voxels_across) + " " + g17(b.near_post_mm) + " " + g17(b.tolerance) + " " + std::to_string(b.max_rounds) +
+             " " + std::to_string(b.places_listed) + "\nframe " + (b.frame.on ? "on" : "off");
+      for (double r : b.frame.R) key += " " + g17(r);
+      key += " " + g17v(b.frame.t) + "\nups";
+      for (const Vec3& u : b.other_ups) key += " " + g17v(u);
+      key += "\n";
+    }
+  }
+  const std::string entry = key.empty() || ask.break_cache.empty()
+                                ? std::string()
+                                : ask.break_cache + "/" + [&] {
+                                    char n[40];
+                                    std::snprintf(n, sizeof n, "%016llx.json", static_cast<unsigned long long>(fnv(1469598103934665603ull, key.data(), key.size())));
+                                    return std::string(n);
+                                  }();
+  if (!entry.empty()) {   // a kept answer: the key text, then the verdict line, then the block; any fault: made again
+    std::ifstream f(entry, std::ios::binary);
+    ll::StrengthDone kept = done;
+    bool reused = false;
+    if (f) try {
+      std::stringstream ss;
+      ss << f.rdbuf();
+      const std::string t = ss.str();
+      if (t.size() > key.size() && t.compare(0, key.size(), key) == 0) {
+        const std::size_t nl = t.find('\n', key.size());
+        if (nl != std::string::npos) {
+          const std::string verdict = t.substr(key.size(), nl - key.size());
+          const std::size_t nl2 = t.find('\n', nl + 1);
+          if (nl2 != std::string::npos) {
+            bool good = true;
+            {   // C3: the post readings line: "posts N" then eleven numbers per post (C9: path_open, share, shaft, foot, top)
+              std::istringstream in(t.substr(nl + 1, nl2 - nl - 1));
+              std::string word;
+              std::size_t n = 0;
+              in >> word >> n;
+              good = in && word == "posts" && n == b.posts.size();
+              for (std::size_t q = 0; good && q < n; ++q) {
+                ll::BreakPostReading pr;
+                int res = 0, fb = 0, po = 0, sh = 0, ft = 0, tp = 0;
+                in >> pr.all >> res >> pr.judged >> pr.section >> pr.section_mm2 >> fb >> po >> pr.path_share >> sh >> ft >> tp;   // C9
+                good = !in.fail();
+                pr.all_resolved = res != 0;
+                pr.first_break = fb != 0;
+                pr.path_open = po != 0;
+                pr.path_shaft = sh != 0;
+                pr.path_foot = ft != 0;
+                pr.path_top = tp != 0;
+                kept.break_posts.push_back(pr);
+              }
+            }
+            std::string block = t.substr(nl2 + 1);
+            // review C2 A3: the stored block must parse and carry the same verdict, else it is not used
+            if (good) {
+              const sjson::Value doc = sjson::parse(block, "break cache");
+              const sjson::Value* v = sjson::find(doc, "verdict");
+              good = v && sjson::as_string(*v, "break cache.verdict") == verdict;
+            }
+            if (good) {
+              kept.break_verdict = verdict;
+              kept.break_pass_line = pass_line;
+              if (ask.said) ask.said("checking its strength: the same file was checked before");
+              block.insert(1, "\"cache\": \"reused\", ");
+              add_break(kept, block);
+              kept.accepted = verdict == "pass";
+              reused = true;
+            }
+          }
+        }
+      }
+    } catch (const std::exception&) {
+      reused = false;   // a faulty entry: made again
+    }
+    if (reused) return kept;
+  }
+  // C3 (a): the solver's thread count is a process-wide setting (fea_set_matfree_threads), which
+  // configure_production_options sets to the machine's count; the break check honours the job's --threads while it
+  // runs and puts the setting back after (the answer is bit-identical for any count, fea.hpp).
+  struct ThreadsFor {
+    int prev = -1;
+    explicit ThreadsFor(int n) { if (n > 0) prev = fea_set_matfree_threads(n); }
+    ~ThreadsFor() { if (prev >= 0) fea_set_matfree_threads(prev); }
+  };
+  const ll::BreakResult r = [&] {
+    const ThreadsFor threads_for(ask.threads);
+    return ll::organic_break_check(b);
+  }();
+  done.break_reason = r.not_checked;
+  // C3: the posts' readings for the posts step (class "post", in the order of the file's posts)
+  done.break_verdict = r.verdict;
+  done.break_pass_line = pass_line;
+  done.break_posts.assign(b.posts.size(), ll::BreakPostReading{});
+  for (const ll::BreakClass& c : r.classes) {
+    if (c.cls != "post" || c.post < 0 || static_cast<std::size_t>(c.post) >= b.posts.size()) continue;
+    ll::BreakPostReading& pr = done.break_posts[static_cast<std::size_t>(c.post)];
+    if (c.all.found) { pr.all = c.all.multiple; pr.all_resolved = c.all.resolved; }
+    if (c.resolved.found) pr.judged = c.resolved.multiple;
+    pr.section = c.section_multiple;
+    pr.section_mm2 = c.section_mm2;
+    pr.first_break = r.first_resolved.found && r.first_resolved.cls == "post" && r.first_resolved.post == c.post;
+  }
+  // C9: the posts the load-path rule names (break_check.cpp, step 8b: share over the limit, shaft or an end not resolved)
+  for (std::size_t q = 0; q < r.post_paths.size() && q < done.break_posts.size(); ++q) {
+    const ll::BreakResult::PostPath& pp = r.post_paths[q];
+    done.break_posts[q].path_open = pp.share > ll::kBreakLoadPathShare && !(pp.shaft && pp.foot && pp.top);
+    done.break_posts[q].path_share = pp.share;
+    done.break_posts[q].path_shaft = pp.shaft;
+    done.break_posts[q].path_foot = pp.foot;
+    done.break_posts[q].path_top = pp.top;
+  }
+  std::string block = r.json;
+  block.insert(1, "\"cache\": \"made\", ");
+  add_break(done, block);
+  done.accepted = r.ok && r.verdict == "pass";
+  if (r.ok && !entry.empty()) {   // only a made reading is kept (never a "not checked")
+    std::error_code ec;
+    std::filesystem::create_directories(ask.break_cache, ec);
+    // review C2 A3: a temporary name of this process's own; the write checked before the rename
+    const std::string tmp = entry + "." + std::to_string(static_cast<long long>(getpid())) + ".part";
+    bool written = false;
+    {
+      std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+      f << key << r.verdict << "\nposts " << done.break_posts.size();
+      for (const ll::BreakPostReading& pr : done.break_posts)
+        f << " " << g17(pr.all) << " " << (pr.all_resolved ? 1 : 0) << " " << g17(pr.judged) << " " << g17(pr.section) << " " << g17(pr.section_mm2)
+          << " " << (pr.first_break ? 1 : 0) << " " << (pr.path_open ? 1 : 0) << " " << g17(pr.path_share) << " " << (pr.path_shaft ? 1 : 0)
+          << " " << (pr.path_foot ? 1 : 0) << " " << (pr.path_top ? 1 : 0);
+      f << "\n" << r.json;
+      f.close();
+      written = !f.fail();
+    }
+    if (written) std::filesystem::rename(tmp, entry, ec);
+    if (!written || ec) std::filesystem::remove(tmp, ec);
+  }
+  return done;
+}
+
 ll::StrengthDone run_lattice_file_strength_organic(const ll::StrengthAsk& ask, const std::string& materials_path,
                                                    const std::string& rules_path) {
   if (!ask.bars || !ask.session || !ask.session->domain())
@@ -14047,8 +14316,28 @@ ll::StrengthDone run_lattice_file_strength_organic(const ll::StrengthAsk& ask, c
                        "the Organic check was asked with no bars");
   StrengthSetup S;
   if (ll::StrengthDone bad = strength_setup(ask, materials_path, rules_path, S); !bad.ok) return bad;
-  return organic_frame_check(S, *ask.session->domain(), *ask.bars, ask.kept, ask.light_width_mm, ask.out_dir,
-                             ask.threads).done;
+  const OrganicCheckRun cr = organic_frame_check(S, *ask.session->domain(), *ask.bars, ask.kept, ask.light_width_mm, ask.out_dir,
+                                                 ask.threads);
+  ll::StrengthDone done = cr.done;
+  // review C2 A1: the file's answer, for lattice_file.json's "strength_answer" (the rod's when no break check is made)
+  done.answer_by = "rod";
+  done.answer_verdict = cr.verdict;
+  // C2: the break check, on the file as written (a cell lattice, or a caller with no file, has none)
+  if (!done.ok || !ask.print) return done;
+  done.answer_by = "break";
+  try {
+    ll::StrengthDone d = with_break_check(ask, S, done);
+    d.answer_verdict = d.break_verdict;
+    d.answer_reason = d.break_reason;
+    return d;
+  } catch (const std::exception& e) {   // never a deleted file for a check that could not be made
+    break_c2::add_break(done, break_c2::not_checked_block("error", std::string("the break check stopped on an error: ") + e.what(),
+                                                          S.options.margin_stop));
+    done.accepted = false;
+    done.answer_verdict = "not_checked";
+    done.answer_reason = "error";
+    return done;
+  }
 }
 
 }  // namespace

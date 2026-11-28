@@ -120,7 +120,18 @@ int main() {
                                 std::to_string(static_cast<int>(voxels * 10));
         std::filesystem::create_directories(out);
         if (mode.empty()) unsetenv("TOPOPT_FACE_LOADS"); else setenv("TOPOPT_FACE_LOADS", mode.c_str(), 1);
-        const StrengthCheck check = lattice_file_strength_check(MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+        // Review C2 A2: this test reads the rod (frame) check; the break check (C2, a 0.2 mm solve) is not asked here:
+        // StrengthAsk::print left null, as for a cell lattice (plain ctest stays as light as before C2).
+        const StrengthCheck check = [] {
+          StrengthCheck c = lattice_file_strength_check(MATERIALS_JSON_PATH, SETTINGS_RULES_PATH);
+          const auto real = c.run_organic;
+          c.run_organic = [real](const StrengthAsk& a) {
+            StrengthAsk b = a;
+            b.print = nullptr;
+            return real(b);
+          };
+          return c;
+        }();
         const FileResult r = run_file_job(kDir + "/job.json", out, 0, nullptr, &check);
         unsetenv("TOPOPT_FACE_LOADS");
         const std::string json = slurp(out + "/" + kFileResultName);
