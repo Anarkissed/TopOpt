@@ -178,6 +178,11 @@ struct ProductionLoadCase {
   // default (0.45 mm); a negative outer width mirrors the inner. Only read when armed.
   int wall_loops = 0;
   double wall_line_width_mm = -1.0;          // inner; < 0 = core default (0.45 mm)
+  // The user's typed (Manual) pad depth in mm, from the job's loads.pad_mm: > 0 is
+  // the fixed pad, as TOPOPT_PAD_MM=<number> gives; < 0 (the default) = today's
+  // behaviour (TOPOPT_PAD_MM if set, else the automatic pad). Given with
+  // TOPOPT_PAD_MM, the job's value wins and one stderr line says so.
+  double pad_mm = -1.0;
   double wall_line_width_outer_mm = -1.0;    // outer; < 0 = mirror inner
 
   // Optional design-domain expansion (the "add material" feature). When

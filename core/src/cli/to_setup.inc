@@ -53,6 +53,7 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
     // the bridge calls. The CLI and app therefore produce the same design for the
     // same STEP + load case + resolution.
     lc = production_loadcase_from_job(job, model);
+    lc.pad_mm = job.loads.pad_mm;  // the user's typed pad (loads.pad_mm)
     S.fixture_face_ids = lc.anchor_face_ids;
 
     ProductionRunSetup setup;

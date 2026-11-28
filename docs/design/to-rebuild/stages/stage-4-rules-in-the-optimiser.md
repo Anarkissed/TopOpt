@@ -94,3 +94,16 @@ THE MAINTAINER, the same morning, asked the literal question: "I think just repo
 `thin_member(...)` in `part_scale.hpp`, on the same member-width measure the thin-member rule reads. Per accepted version, when the thinnest member is under 8 voxels through: report block `"thin_member": {"thinnest_mm", "voxels_through", "resolved", "resolution_needed"}` and one stderr line. It changes nothing else: not the resolution, not the verdict (the ruling above). On the 15 mm bracket at res 48 every version reads: thinnest 0.625 mm = 2 voxels through; resolution 192 would resolve it. Unset: today's bytes; on: the same four files, the block added.
 LIMITS OF THE NOTICE: the width measure reads even voxel counts only (3 through reads 4; 7 would read 8 and pass); and it names the thinnest member anywhere, which here is probably the finish's own wall floor, not necessarily a member that carries load. To be useful in the readout it must name thin members that are LOADED (a later step, with the section-force reading).
 
+### Section-force stress on a STATICALLY INDETERMINATE case (the reviewer's first item for 4a's measuring); 2026-11-28 05:00; print-only rows in `to_strength_cut_skin`
+
+Two parallel members, 2.5 and 6.5 voxels thick (cut faces off the voxel boundaries, real stiffness), joined by stiff end blocks and SHARING the load; each cut at mid-span. Percent against the same assembly 4 x finer (835 000 voxels):
+
+| case, member | section forces, the section from the MODEL'S OWN fills | section forces, the true section handed in | the per-voxel peak | the surface carry |
+|---|---|---|---|---|
+| tension, 2.5 voxels | +0.0 | +1.1 | -1.4 | +0.0 |
+| tension, 6.5 voxels | +0.1 | +1.4 | -2.0 | -0.1 |
+| bending, 2.5 voxels | +0.4 | +5.1 | -6.6 | +0.0 |
+| bending, 6.5 voxels | +0.1 | +2.9 | -4.7 | -0.6 |
+
+The load SHARE between the members is right at the base grid (member 1 carries 0.382 of the tension against 0.383 at 4 x; axial forces within 0.5 %). Each member's own bending moment about the TRUE centroid is not (the thin member's +48 %): the coarse model's stiffness centre sits elsewhere; taking the section from the model's own fills removes it, and then the reading is within 0.4 % at 2.5 voxels through. So section-force stress with the model's own section HOLDS THE BAR on this indeterminate case, where the per-voxel peak is 1 to 7 % low. (The surface carry also holds here, within 0.6 %: these members are straight.) Still to do before it can be the reading under 8 voxels through: FINDING the members and their cut planes on a general shape (a skeleton), and a member that is curved or tapers.
+

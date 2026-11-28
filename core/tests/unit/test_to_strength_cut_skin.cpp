@@ -264,6 +264,233 @@ Out bend(int core, double fill, double skin_density, double penalty, bool tensio
   return o;
 }
 
+// ── THE STATICALLY INDETERMINATE CASE (the reviewer's ruling: first in stage 4a's
+// measuring; print only). Two parallel members of DIFFERENT true thickness, t1 = 2.5
+// and t2 = 6.5 base voxels, a gap of 6 voxels between them, joined by solid end
+// blocks 6 voxels long; length and width as the beam above. Cut faces sit a quarter
+// voxel off the grid: member 1 spans y = 0.75..3.25 voxels, member 2 y = 9.25..15.75,
+// the blocks y = 0.75..15.75. Every voxel's fill is its share of the true shape
+// (exact here: the shape is a union of boxes), real stiffness E x fill. Loaded
+// self-equilibrated on the two end faces (traction x fill on each voxel face):
+// tension = uniform; bending = linear about the end face's own centroid. How the load
+// SPLITS between the members is set by their stiffness in the model: that split is
+// what this exposes. The reference is the same shape at 4x the resolution.
+namespace ind {
+
+constexpr double kY1a = 0.75, kY1b = 3.25, kY2a = 9.25, kY2b = 15.75;  // base voxels
+constexpr int kBlock = 6, kNy = 17;
+
+struct Model {
+  VoxelGrid g;
+  std::vector<double> density;
+  std::vector<NodalLoad> loads;
+  std::vector<DirichletBC> bcs;
+  int s = 1;
+  double h = kH;
+};
+
+double overlap(double a0, double a1, double b0, double b1) {
+  return std::max(0.0, std::min(a1, b1) - std::max(a0, b0));
+}
+
+Model build(int s, bool tension) {
+  Model md;
+  md.s = s;
+  md.h = kH / s;
+  VoxelGrid& g = md.g;
+  g.nx = kLength * s;
+  g.ny = kNy * s;
+  g.nz = kWidth * s;
+  g.spacing = md.h;
+  g.origin = Vec3{0.0, 0.0, 0.0};
+  const std::size_t n = static_cast<std::size_t>(g.nx) * g.ny * g.nz;
+  g.tags.assign(n, topopt::VoxelTag::Empty);
+  md.density.assign(n, 0.0);
+  const double vb = 1.0 / s;  // a voxel, in base voxels
+  for (int i = 0; i < g.nx; ++i) {
+    const bool block = i < kBlock * s || i >= (kLength - kBlock) * s;
+    for (int j = 0; j < g.ny; ++j) {
+      const double y0 = j * vb, y1 = (j + 1) * vb;
+      const double f = block ? overlap(y0, y1, kY1a, kY2b) / vb
+                             : (overlap(y0, y1, kY1a, kY1b) + overlap(y0, y1, kY2a, kY2b)) / vb;
+      if (!(f > 0.0)) continue;
+      for (int k = 0; k < g.nz; ++k) {
+        const std::size_t v = g.index(i, j, k);
+        g.tags[v] = topopt::VoxelTag::Interior;
+        md.density[v] = f;
+      }
+    }
+  }
+  // The end face's centroid (fill-weighted), for the bending traction.
+  double fa = 0.0, fy = 0.0;
+  for (int j = 0; j < g.ny; ++j) {
+    const double f = md.density[g.index(0, j, 0)];
+    fa += f;
+    fy += f * (j + 0.5) * md.h;
+  }
+  const double yc = fy / fa;
+  for (int j = 0; j < g.ny; ++j)
+    for (int k = 0; k < g.nz; ++k) {
+      const double f = md.density[g.index(0, j, k)];
+      if (!(f > 0.0)) continue;
+      const double t = tension ? 1.0 : ((j + 0.5) * md.h - yc);  // MPa (any scale)
+      const double q = 0.25 * md.h * md.h * f * t;
+      for (int dk = 0; dk < 2; ++dk)
+        for (int dj = 0; dj < 2; ++dj) {
+          md.loads.push_back({topopt::fea_node_index(g, g.nx, j + dj, k + dk), 0, q});
+          md.loads.push_back({topopt::fea_node_index(g, 0, j + dj, k + dk), 0, -q});
+        }
+    }
+  const int jb = 8 * s;  // a node inside the block
+  const int a = topopt::fea_node_index(g, 0, jb, 0);
+  const int b = topopt::fea_node_index(g, g.nx, jb, 0);
+  const int c = topopt::fea_node_index(g, 0, jb, g.nz);
+  md.bcs = {{a, 0, 0.0}, {a, 1, 0.0}, {a, 2, 0.0}, {b, 1, 0.0}, {b, 2, 0.0}, {c, 1, 0.0}};
+  return md;
+}
+
+struct Member {
+  double N = 0.0, M_true = 0.0;  // section forces; M about the TRUE centroid
+  double model_section = 0.0;    // (1) section from the model's own fills on the cut
+  double true_section = 0.0;     // (2) the true section handed in
+  double peak = 0.0;             // (3) per-voxel peak at mid-span in the member
+  double carry = 0.0;            // (4) stress_carried_to_surface(.., 1), member mid-span
+};
+
+struct Result {
+  bool ok = false;
+  Member m[2];
+};
+
+Result measure(const Model& md) {
+  const VoxelGrid& g = md.g;
+  const std::size_t n = g.voxel_count();
+  topopt::Material mat;
+  mat.youngs_modulus_mpa = kE;
+  mat.yield_strength_mpa = 55.0;
+  mat.density_g_cm3 = 1.24;
+  mat.z_knockdown = 1.0;
+  mat.poisson = 0.33;
+  mat.family = "fdm";
+  topopt::SimpParams params;
+  params.youngs_modulus = kE;
+  params.poisson = mat.poisson;
+  params.penalty = 1.0;  // real stiffness: E x fill
+  topopt::KnockdownSpec knockdown;
+  knockdown.record_material_stress = true;
+  Result r;
+  const topopt::FixedDesignAnalysis res = topopt::analyze_fixed_design(
+      g, params, md.density, md.bcs, md.loads, mat, Vec3{0.0, 0.0, 1.0}, 1e-9, 60000,
+      topopt::SolverKind::MultigridCG_Matfree, 0.0, knockdown, true, static_cast<double>(n));
+  if (res.non_convergent || !(res.max_von_mises > 0.0)) return r;
+  const topopt::SimpCompliance own = topopt::simp_compliance(
+      g, params, md.density, md.bcs, md.loads, 1e-9, 60000, nullptr, nullptr,
+      topopt::SolverKind::MultigridCG_Matfree);
+  std::vector<double> youngs(n, 0.0);
+  for (std::size_t v = 0; v < n; ++v)
+    if (g.tags[v] != topopt::VoxelTag::Empty) youngs[v] = topopt::simp_youngs(params, md.density[v]);
+  const int i_cut = g.nx / 2;
+  VoxelGrid left = g;
+  for (int k = 0; k < g.nz; ++k)
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = i_cut; i < g.nx; ++i) left.tags[g.index(i, j, k)] = topopt::VoxelTag::Empty;
+  const std::vector<double> Ku = topopt::fea_matfree_apply(left, youngs, params.poisson, own.solution.u);
+  const double h = md.h, width = g.nz * h;
+  const double ya[2] = {kY1a * kH, kY2a * kH}, yb[2] = {kY1b * kH, kY2b * kH};  // mm
+  const bool have_mat = res.von_mises_material_field.size() == n;
+  for (int q = 0; q < 2; ++q) {
+    Member& mb = r.m[q];
+    const int jlo = static_cast<int>(std::floor(ya[q] / h + 1e-9));
+    const int jhi = static_cast<int>(std::ceil(yb[q] / h - 1e-9)) - 1;  // voxels jlo..jhi
+    // Section forces at the cut nodes of this member (nodes jlo..jhi+1).
+    double N = 0.0, Fy = 0.0;
+    for (int k = 0; k <= g.nz; ++k)
+      for (int j = jlo; j <= jhi + 1; ++j) {
+        const double F = Ku[3 * static_cast<std::size_t>(topopt::fea_node_index(g, i_cut, j, k))];
+        N += F;
+        Fy += F * j * h;
+      }
+    // (2) the TRUE section.
+    const double t = yb[q] - ya[q], yt = 0.5 * (ya[q] + yb[q]);
+    const double At = t * width, It = width * t * t * t / 12.0;
+    mb.N = N;
+    mb.M_true = Fy - N * yt;
+    mb.true_section = std::fabs(N) / At + std::fabs(mb.M_true) * (0.5 * t) / It;
+    // (1) the section FROM THE MODEL'S OWN FILLS on the cut (the voxel slab at i_cut):
+    // area = sum fill x voxel area; centroid and second moment of each voxel's fill
+    // smeared over its height; the extreme fibre = the outermost voxel's inner edge
+    // plus its fill x h (the fill taken against the material).
+    double A = 0.0, Ay = 0.0;
+    for (int j = jlo; j <= jhi; ++j)
+      for (int k = 0; k < g.nz; ++k) {
+        const double f = md.density[g.index(i_cut, j, k)];
+        A += f * h * h;
+        Ay += f * h * h * (j + 0.5) * h;
+      }
+    const double ym = Ay / A;
+    double I = 0.0;
+    for (int j = jlo; j <= jhi; ++j)
+      for (int k = 0; k < g.nz; ++k) {
+        const double f = md.density[g.index(i_cut, j, k)];
+        const double d = (j + 0.5) * h - ym;
+        I += f * h * h * (d * d + h * h / 12.0);
+      }
+    const double ftop = md.density[g.index(i_cut, jhi, 0)], fbot = md.density[g.index(i_cut, jlo, 0)];
+    const double top = jhi * h + ftop * h, bot = (jlo + 1) * h - fbot * h;
+    const double cm = std::max(top - ym, ym - bot);
+    const double Mm = Fy - N * ym;
+    mb.model_section = std::fabs(N) / A + std::fabs(Mm) * cm / I;
+    // (3) and (4): mid-span, inside the side margin, this member's voxels only.
+    std::vector<double> mf(have_mat ? n : 0, 0.0);
+    for (int k = 2 * md.s; k < g.nz - 2 * md.s; ++k)
+      for (int j = jlo; j <= jhi; ++j)
+        for (int i = g.nx / 4; i < 3 * g.nx / 4; ++i) {
+          const std::size_t v = g.index(i, j, k);
+          if (v < res.von_mises_field.size()) mb.peak = std::max(mb.peak, res.von_mises_field[v]);
+          if (have_mat) mf[v] = res.von_mises_material_field[v];
+        }
+    if (have_mat) mb.carry = topopt::stress_carried_to_surface(g, mf, md.density, 1).peak;
+  }
+  r.ok = true;
+  return r;
+}
+
+void run() {
+  std::printf("[indeterminate] two parallel members (true 2.5 and 6.5 base voxels through, gap 6) joined by end blocks; "
+              "fills from the true shape, E x fill. Base readings as %% against the 4x model read by (2), "
+              "the true section at its own cut.\n");
+  for (bool tension : {true, false}) {
+    const char* cname = tension ? "tension" : "bending";
+    const Result base = measure(build(1, tension));
+    const Result fine = measure(build(4, tension));
+    if (!base.ok || !fine.ok) {
+      std::printf("[indeterminate] %s: DID NOT SOLVE (base %d, 4x %d)\n", cname, base.ok ? 1 : 0, fine.ok ? 1 : 0);
+      continue;
+    }
+    auto pct = [](double x, double ref) { return ref != 0.0 ? 100.0 * (x / ref - 1.0) : 0.0; };
+    for (int q = 0; q < 2; ++q) {
+      const Member& b = base.m[q];
+      const Member& f = fine.m[q];
+      const double ref = f.true_section;
+      std::printf("[indeterminate] %s member %d (t %.1f): ref 4x (2) %.4f MPa, 4x (4) carry %.4f (%+.1f %%) | base: "
+                  "(1) model section %+.1f %%  (2) true section %+.1f %%  (3) per-voxel peak %+.1f %%  (4) carry %+.1f %%\n",
+                  cname, q + 1, q == 0 ? kY1b - kY1a : kY2b - kY2a, ref, f.carry, pct(f.carry, ref),
+                  pct(b.model_section, ref), pct(b.true_section, ref), pct(b.peak, ref), pct(b.carry, ref));
+    }
+    auto share = [](double a, double b) { return std::fabs(a) + std::fabs(b) > 0.0 ? std::fabs(a) / (std::fabs(a) + std::fabs(b)) : 0.0; };
+    std::printf("[indeterminate] %s load share: N1 base %.4f 4x %.4f, N2 base %.4f 4x %.4f; member 1's share of |N| base %.3f 4x %.3f\n",
+                cname, base.m[0].N, fine.m[0].N, base.m[1].N, fine.m[1].N,
+                share(base.m[0].N, base.m[1].N), share(fine.m[0].N, fine.m[1].N));
+    std::printf("[indeterminate] %s moments (about each member's true centroid): M1 base %.4f 4x %.4f, M2 base %.4f 4x %.4f; "
+                "member 1's share of |M| base %.3f 4x %.3f\n",
+                cname, base.m[0].M_true, fine.m[0].M_true, base.m[1].M_true, fine.m[1].M_true,
+                share(base.m[0].M_true, base.m[1].M_true), share(fine.m[0].M_true, fine.m[1].M_true));
+    std::fflush(stdout);
+  }
+}
+
+}  // namespace ind
+
 }  // namespace
 
 int main() {
@@ -341,5 +568,7 @@ int main() {
     }
   }
   std::printf("[cut skin] measure only: %d failure(s)\n", failures);
+  std::fflush(stdout);
+  ind::run();  // print only: the statically indeterminate case
   return failures == 0 ? 0 : 1;
 }
