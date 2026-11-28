@@ -92,6 +92,11 @@ enum class PlsmSensWeight { Continuum, Discrete };
 // direction or a knockdown posture is.
 struct PlsmMarginProbe {
   double margin = 0.0;        // the worst-case margin, as certified
+  // TO rebuild stage 1 (ledger P-15): the same margin read WITHOUT the voxels a
+  // load or an anchor sits on. Those voxels are frozen, so when one of them sets
+  // the certified margin it never moves and the stop rule sees a plateau from the
+  // first probe. 0 = not supplied: the rule watches `margin`, as before.
+  double design_margin = 0.0;
   bool load_path_ok = false;  // ★ a severed design measures ~zero stress and
                               //   therefore an enormous, meaningless margin
   bool non_convergent = false;  // the certification solve did not converge

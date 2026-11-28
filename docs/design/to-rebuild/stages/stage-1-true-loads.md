@@ -1,0 +1,414 @@
+# Stage 1: true loads, anchors and protection depth (TOReview)
+
+Branch `claude/topopt-review-rebuild-3c317f`. Status: IN PROGRESS. Nothing here is released; everything is behind ONE switch, `TOPOPT_FACE_LOADS` (`to_stage_switch.hpp`): unset or `voxel` = today, unchanged; `face` = loads, anchors and depths from the drawn face; `face_spring` = the same with anchors held by springs in proportion to area. `TOPOPT_PAD_MM` sets the pad depth (default 3 mm).
+
+## THE STAGE REPORT (sent to the reviewer 2026-11-26 08:50)
+
+**What changes for him.** A force lands on the face he picked, over that face's real area, wherever the grid falls; a face he fixed is held on that face; a protected skin is as deep as the millimetres he typed. Today all three depend on where the voxel grid happens to sit.
+
+**The evidence, one line each (tables below).**
+1. Loaded area and centre, 18 grid alignments: today up to 13 % off and nothing loaded at all in 6 of 18; new, exact in 18 of 18. Protection depth: today up to a whole voxel off; new within 0.05 voxel.
+2. Base as drawn, res 48 to 192: today 0.67 / 0.18 / 0.40 / 0.17 / 0.30 / 0.08 (a factor of eight, up and down); new 0.79 / 0.66 / 0.45 / 0.37 / 0.37 / 0.32. Pressing and Top Motor Mount, whose faces sit well in the grid, do not move (the control). PillowBlock reads LOWER than today at every resolution: today's one-voxel-thick clamp flattered it.
+3. Bolt bearings on Base: today 0.56 / 0.04 / 0.27 at res 48 / 64 / 96; new 0.64 / 0.50 / 0.33.
+4. Optimised at full resolution, drawn faces with the corrected clamp and a 3 mm pad (lock run 2026-11-26 06:24 to 08:43, build 28b95d3c). The stand, res 128: today 2.41 / 86.55 g, new 2.60 / 87.99 g; 508 s today, 509 s new (rule P: the same). Top Motor Mount, res 96, four versions: today 1.64 / 1.65 / 1.67 / 1.69 at 105.3 / 103.0 / 100.6 / 98.9 g; new 1.65 / 1.66 / 1.67 / 1.68 at 105.4 / 103.1 / 100.9 / 99.0 g: it does not move (the control, optimised). The pad depth is no longer a fixed-number sweep: the maintainer chose an automatic pad (square-root rule, engineers may type one), which stays behind `TOPOPT_PAD_MM=auto` until he picks its one number; the default stays 3 mm, which is what today's three layers come to on his parts.
+5. The same job twice gives the same bytes, switch off and on (test K).
+6. The lattice strength check (LatticeReview's final statement): the laid lattice never moves; solid and regular lattice sound; Organic steadier or no worse and stricter or equal on its jobs; stage 1 may flip for Organic as for the rest.
+
+**What it does NOT fix, said plainly.** The margin still falls as the grid gets finer (Base 0.79 to 0.32): that is the stress READING, stage 2. A design in many pieces can still stall the solver and lose a version (demo part, 17 pieces): stage 5 and the optimiser.
+
+**Mistakes of mine on the way, all corrected and re-measured.** The `face` path in a job still clamped whole voxels until LatticeReview caught it (every `face` number before 2026-11-25 19:45 was "new loads, old clamp"); the simple-job path ignored the switch at first; a first control table described my test, not a job.
+
+**What must land in the same release as the flip (ruling 2d).**
+- #362: hand-over items 1 to 3 below (the bridge's tag and depth previews; the two self-weight tagging sites of the lattice strength check in run_job.cpp).
+- `lattice_depth_tie` section 0a and `test_print_frame.cpp:721` in their `face` forms; 721 moves because of the frame's load rule, not the loader.
+- LatticeReview's interim guard (13b28529 on claude/organic-engine): a structural Organic job whose load lands on bare lattice is refused with one pop-up offering Skin or Solid.
+- Scenario jobs: since 2026-11-25 23:50 their anchors follow the same rule (the drawn face's own nodes are held when the anchor is on in a scenario, and carry the weak springs when it is off), so the voxel path can be deleted for them too. Run 2026-11-26 00:08 (build 6bfb8151) on the repository's two scenario tests, switch off and `face`: `test_scenario_fields` passes both ways (54 checks off, 40 on) and `test_scenarios_strengthen` passes both ways (20 off, 18 on). With `face` each scenario holds one node plane where today holds two ("both pushed": 162 clamped nodes for 324; "B off": 81 clamped and 81 weak-spring nodes for 162 and 162), and the test's own independent re-check of every scenario (its supports, its weak springs, its loads, on the stored design) agrees with the run. Fewer checks run with `face` (40 for 54, 18 for 20) because one version fewer is made: on the plain growth run the smallest addition (rung 1.10) is REFUSED with `face` ("anchored piece detached: 1 anchored piece (128 voxels) holds no load in this design"), where today's path ships it (margin 127.9 -> 126.5). The two larger additions ship both ways. So with the anchors held on their faces, the lightest bridge between the two blocks did not form at that rung, and the run said so and refused it, which is the rule working, not a fault; but it is a version he would get today and not after the flip on this made part. Separated 2026-11-26 00:47 (two runs of the same test with `face`): it is the PAD, not the clamp. With `TOPOPT_PAD_MM=3.75` (what three voxel layers come to on this part's 1.25 mm grid) all 54 checks run and all six versions ship, the smallest included; at the default 3.0 mm the smallest is refused; at 4.5 mm two versions fewer are made. So on this small made part the outcome turns on three quarters of a millimetre of pad. That is the pad question the plan already asks (2 / 3 / 4.5 mm on the stand, queued), now with a second reason to settle it: today's pad is three voxel LAYERS, so it is 3.75 mm deep at res 24 and under 1 mm at res 192 on the same part, and no single mm value reproduces it at every resolution.
+- Rule P (run time within 10 %): met on the stand at res 128 (508 s today, 509 s new, both under the lock).
+
+**Asked of the reviewer.** Flip the default to `face` (glued anchors on the face's own nodes; bearings by drawn area) and delete the voxel path and the switch, in the release that carries the list above. `face_spring` (every anchor an area spring) is NOT proposed as the default: it changes what "fixed" means and has only the as-drawn tables behind it; keep it as a later option or drop it, his call.
+
+## What is built
+
+| item | what | where |
+|---|---|---|
+| V-01 | A face hands its own area to the voxels it lies on; a load is force x each node's share of that area. Total force and its centre are the drawn face's, whatever the grid alignment. A face that touches the part never comes back with nothing loaded. | `face_loads.hpp/.cpp`, `loadcase.cpp` |
+| L-03 | Protection and pad depth by true distance in mm from the drawn face, not whole voxel layers. | `mask_face_depth_mm`, `mask_region_depth_mm` |
+| P-04 (for stage 3) | The same freezes handed on as geometry: triangles, cuts, depth in mm. | `frozen_sets.hpp`, `MinimizePlasticOptions::frozen_sets` |
+| P-15 | The stop rule watches the margin of the DESIGN, without the Load and Fixture voxels. | `plsm.cpp`, `minimize_plastic.cpp` |
+| R-07 | A version's file is checked BEFORE the app is told about it; a refused file is never announced. | `to_run.inc` |
+| A-05 | When no version passes, the report says how the part as drawn stands: `"as_drawn": {margin, required, passes}`. | `to_run.inc`, `report.cpp` |
+| simple jobs | The self-weight path (`job.fixture_faces`) goes through the same switch. | `tag_face_by_stage`, `to_setup.inc`, `to_analyze.inc` |
+
+Moved to stage 2: R-08 (one accept rule for loop, certificate and file check).
+
+## Tests
+
+| test | rule | today | with the switch on | ctest |
+|---|---|---|---|---|
+| C loaded area and centre, 18 alignments | exact | up to 13 % off; nothing loaded in 6 of 18 | exact in 18 of 18 | measures (gate for the new path inside) |
+| D protection depth | 0.05 voxel | up to 1 voxel off | within 0.05 voxel (per-voxel share) | same |
+| K same job twice, demo part | same bytes | 14 files, 0 differ | 11 files, 0 differ (the 0.30 version is refused, see below) | `ctest -C Long`, gate |
+| E ring under pressure (needs this loader) | 5 % of textbook, 10 % across resolutions | cannot be loaded | loaded area exact (0.00 % off); stress 6 to 7 % under the textbook, 4 to 7 % across resolutions; today's cut-voxel rule reads 76 % high (stage 2) | measures |
+
+## Measured: the part as drawn (strength check only, no optimisation)
+
+Effective margin; same binary, same job, only the switch changed.
+
+| part | res | today | drawn face | drawn face + springs |
+|---|---|---|---|---|
+| Base | 48 / 64 / 96 / 128 / 160 / 192 | 0.67 / 0.18 / 0.40 / 0.17 / 0.30 / 0.08 | 0.97 / 0.81 / 0.51 / 0.39 / 0.38 / 0.33 | 1.07 / 0.87 / 0.56 / 0.41 / 0.40 / 0.35 |
+| Pressing | 48 / 64 / 96 / 128 | 0.75 / 0.51 / 0.35 / 0.35 | 0.75 / 0.51 / 0.35 / 0.35 | 0.75 / 0.51 / 0.36 / 0.35 |
+| PillowBlock (left) | 48 / 64 / 96 / 128 | 1.85 / 1.48 / 1.07 / 0.78 | 1.80 / 1.39 / 1.11 / 0.91 | 1.85 / 1.47 / 1.18 / 0.92 |
+| Original stand | 96 / 128 | 4.47 / 2.93 | 4.59 / 3.15 | 4.71 / 3.15 |
+| Top Motor Mount | 96 / 128 | 1.64 / 1.33 | 1.65 / 1.33 | 1.65 / 1.33 |
+| Stand v4 | 96 / 128 | 1.94 / 2.12 | 2.46 / 2.02 | 2.18 / 2.11 |
+
+Reading: Base is the part V-01 hurts. Today its margin jumps up and down by a factor of four with the resolution (0.67, 0.18, 0.40, 0.17, 0.30, 0.08), because where the grid falls decides how much of the loaded face is loaded. From the drawn face it falls steadily as the grid resolves the stress (0.97 to 0.33). Parts whose loaded faces happen to sit well in the grid (Pressing, Top Motor Mount) do not change, which is the control: the new loader changes the answer only where the old one was wrong. The remaining fall with resolution is the stress reading itself (stage 2), not the loads.
+
+### The same table RE-MADE with the corrected clamp (build 4d495dd6, 2026-11-25 19:45 to 20:25; `face`, a glued anchor holds the drawn face's own nodes)
+
+| part | res | today | drawn face, corrected |
+|---|---|---|---|
+| Base | 48 / 64 / 96 / 128 / 160 / 192 | 0.67 / 0.18 / 0.40 / 0.17 / 0.30 / 0.08 | 0.79 / 0.66 / 0.45 / 0.37 / 0.37 / 0.32 |
+| Pressing | 48 / 64 / 96 / 128 | 0.75 / 0.51 / 0.35 / 0.35 | 0.75 / 0.51 / 0.36 / 0.35 |
+| PillowBlock (left) | 48 / 64 / 96 / 128 | 1.85 / 1.48 / 1.07 / 0.78 | 1.32 / 1.10 / 0.90 / 0.74 |
+| Original stand | 96 / 128 | 4.47 / 2.93 | 4.83 / 3.15 |
+| Top Motor Mount | 96 / 128 | 1.64 / 1.33 | 1.65 / 1.33 |
+| Stand v4 | 96 / 128 | 1.94 / 2.12 | 2.32 / 1.96 |
+
+The reading stands: Base stops jumping with resolution (a factor of eight today; a steady fall here), and the parts whose faces sit well in the grid do not move. What the corrected clamp changed against the first, wrong table: the coarse-resolution margins are lower (Base 0.79 for 0.97 at res 48; PillowBlock 1.32 for 1.80), because a face held on its own nodes concentrates the reaction where a slab one voxel thick spread it; from res 128 up the two agree within 5 %. PillowBlock now reads LOWER than today at every resolution: today's one-voxel-thick clamp was flattering it.
+
+### Bolt-bearing anchors (`loads.anchor_model` = "bearing"), the part as drawn (build 5e671a24, 2026-11-25 20:40)
+
+The first run of the bearing branch (bf4aa356). Springs / effective margin / peak MPa.
+
+| part | res | today | drawn face |
+|---|---|---|---|
+| Base | 48 | 24 springs / 0.56 / 23.9 | 90 / 0.64 / 20.9 |
+| Base | 64 | 64 / **0.04 / 309** | 156 / 0.50 / 26.8 |
+| Base | 96 | 100 / 0.27 / 49.4 | 290 / 0.33 / 40.6 |
+| PillowBlock | 48 | 488 / 1.39 / 9.7 | 950 / 1.62 / 8.3 |
+| PillowBlock | 64 | 803 / 1.09 / 12.3 | 1,501 / 1.30 / 10.4 |
+| PillowBlock | 96 | 1,669 / 0.90 / 14.9 | 2,955 / 1.02 / 13.2 |
+
+Reading: V-01 in its bearing form. On Base at res 64 today's path reads a margin of 0.04 (a 309 MPa peak) between 0.56 at res 48 and 0.27 at res 96: the bolt's springs land on the few voxel faces the alignment happens to tag. From the drawn face the same part reads 0.64 / 0.50 / 0.33, a steady fall. The drawn-face path carries two to four times as many springs (every node the face has a share of, where today takes only the exposed voxel faces within reach) and reads 12 to 22 % higher on these parts. One difference from today is left on purpose: today a bolt loses its springs wherever a loaded face takes the same voxel ("a load over it wins"), because a voxel can carry only one tag; on the face path each face keeps its own nodes' areas, so a node on the shared edge of a bolt face and a loaded face is both held and loaded, which is what the drawing says.
+
+## Measured: optimised
+
+| run | today | drawn face |
+|---|---|---|
+| Demo part (self-weight), version 0.70 / 0.50 / 0.30 margin | 965 / 301 / 70 | 1,176 / 437 / refused |
+| Original stand, res 128 (one lock hold, same binary 956766db) | 1 version at 74.3 % material: margin 2.40 (file re-check 2.41), 86.6 g, peak 5.61 MPa, 885 s | 1 version at 75.6 %: margin 2.68 (file 2.68), 88.0 g, peak 5.02 MPa, 1,238 s |
+
+The stand: the same single version either way, as in the baseline (ledger D: 1 version, 2.40, 86.6 g, so today's path is unchanged to the digit). With the drawn-face path the margin is 12 % higher and the part 1.4 g heavier: the loaded and held faces now carry their true area, so the peak beside them is lower (5.02 against 5.61 MPa), and the pad is 3 mm of true distance where it was three voxel layers. The run took 40 % longer on the clock (1,238 s against 885 s), but did the same work: 47 solves each, 8,343 multigrid cycles against 8,197 (+2 %), 40 design steps each. The same cycles took 750 s where they had taken 458 s, so the difference is the shared machine during the second run, not the method. Rule P (time within 10 %) is to be re-read on a quiet machine before the stage report. No solve fell back to the slow solver in either run.
+
+The refused 0.30 version: at solve 19 the design is in 17 separate pieces; the multigrid solve grows its error and the Jacobi-CG fallback hits its cap at residual 0.092. Today's path goes through 8 to 11 pieces and lands inside the cap. Not the loader: the optimiser breaks the part up (stage 3/4 boundary) and the solver cannot settle a broken part quickly (stage 5). Which side of the cap a run lands on is luck until those land.
+
+## Reviewer's rulings on stage 1 (TORebuildGroup, 2026-11-26 01:37Z)
+
+- The lattice region mask follows the mm depth through the same function as the protection: APPROVED. The protected skin keeps the distance band; the old lattice mask is not reshaped (its path is retiring).
+- Cubes that are both or neither at a skin's inner boundary: recorded for stage 7, not stage 1.
+- The FLIP is ruled on the stage 1 report, which must carry: hand-over item 3 for #362 in the same release; `lattice_depth_tie` 0a and `test_print_frame.cpp:721` in their `face` forms, each with a note naming the frame's load rule as the cause of 721's move; and LatticeReview's interim guard (a structural Organic job whose load lands on bare lattice is refused with one plain pop-up offering Skin or Solid on that face, until the reference study lands).
+- The env switch never makes anything he is shown and never makes a release.
+
+For the stage report (ruling 2d), from LatticeReview 2026-11-26 02:27Z: the interim guard is on `claude/organic-engine` at 13b28529 (one commit on the released b393d12b; #362 takes it into organic-1). An Organic strength check fails with the reason "load_on_bare_lattice" when the vines would get more than 1 % of the load, and no strengthening round follows. Expected on the jobs here: the turned-box C and the bare-top job refused; the chamfered C unchanged (its share is 0.001 to 0.006).
+
+## The automatic pad, first numbers (a measuring arm; 2026-11-26 02:10; the default is still a fixed 3 mm)
+
+Rule under discussion with the maintainer: pad = max(two wall-line widths, sqrt(strength x thickness of material behind the face)). `face_backing_thickness_mm` gives the thickness (16.00 / 32.00 / 12.0 mm read to a quarter of a millimetre on known shapes at three resolutions). `TOPOPT_PAD_MM=auto[:strength]`.
+
+The small scenario part (two 10 mm blocks, `test_scenario_fields` with `face`; the backing thickness reads 10.00 mm):
+
+| pad | how it was set | result |
+|---|---|---|
+| 2.50 mm | auto, strength 0.625 | 40 of 54 checks: a version lost |
+| 3.00 mm | fixed (the present default) | 40: the smallest version refused, an anchored block left detached |
+| 3.16 mm | auto, strength 1.0 | all 54: every version ships |
+| 3.74 / 3.75 mm | auto, strength 1.4 / fixed (today's three voxel layers here) | all 54 |
+| 4.47 / 4.5 mm | auto, strength 2.0 / fixed | 40: versions lost |
+
+So on a 10 mm block there is a window, about 3.2 to 3.8 mm (a third of the thickness), in which every version forms; under it the bridge does not reach the anchored block, over it the pad leaves the design too little room. One made part; the stand at 2 / 3 / 4.5 mm (lock) is the second.
+
+The stand CANNOT inform the pad (2026-11-26 02:35, res 64, six pad settings from 2 to 4.5 mm and three automatic strengths): every run gives the same single version to the last digit (margin 4.161 -> 4.201, 90.55 g). The run says why itself: "SATURATED: it asked for 0.68 of the part, but the frozen material alone is 0.773 of it". His 211 keep regions freeze three quarters of the stand, so the optimiser has almost nothing to decide and the pad is lost in what is already frozen. The stand runs at pad 2 and 4.5 mm at res 128 are therefore dropped from the lock queue (forty minutes of lock for nothing). What the stand does show: the automatic rule's reading of a real part. Behind its anchored and loaded faces it measures 3.5 mm (a thin tab) and 10.9 to 12.9 mm, and at the medium strength gives pads of 1.9 mm and 3.3 to 3.6 mm.
+
+Base, Pressing and PillowBlock cannot inform it either (02:45): as drawn they stand at 0.45, 0.36 and 0.90 against a required 1.5, so a reduction run makes NO version of them at any pad (Base at res 96, pad 2 and 3 mm: 0 versions; the sweep was stopped). They are Strengthen parts, not carving parts. A useful side result: this is the first real run of A-05. The run printed "[as drawn] no version passed; the part as drawn stands at 0.45 against 1.5" and the report carries `"as_drawn": {"margin": 0.4498, "required": 1.5, "passes": false}`.
+
+So of his six reference parts only Top Motor Mount is carved by a reduction run (four versions today). The pad is being measured there, at res 64 to keep each run short: fixed 2 / 3 / 4.5 mm and the automatic rule at the medium strength.
+
+## The made sample bracket, optimised (first results, 2026-11-26 06:50)
+
+Sample bracket A (226 g solid; as drawn 4.33 against 1.5). Picture: `stage-1-pics/sample_a_res96_pad3.png`.
+
+| run | versions (margin after the file check, grams solid) |
+|---|---|
+| res 96, drawn-face loads, pad fixed 3 mm (build 6bfb8151) | 0.68: 4.33, 161.6 g; 0.52: 4.29, 128.1 g; 0.38: 3.81, 98.9 g; 0.26 rejected by the loop (margin under the stop) |
+| res 64, TODAY's path, nothing switched on (the trial build) | 0.68: 4.71, 160.6 g; 0.52: 4.72, 129.1 g; 0.38: 4.82, 101.4 g; 0.26: 3.79, 77.8 g |
+
+- This part does what his own parts could not: the optimiser carves it into a real shape (a sloped web from the loaded boss down to the base, with a window through it), from 226 g down to 99 g and below.
+- A pad finding, seen in the run's own words and in the picture: on both the 0.52 and 0.38 versions the export "BRIDGED back into one piece (1 bridge, 749 voxels) ... bridge 13.5 mm". The thin fixed TAB (4 mm thick, pad 3 mm) was left cut off from the body by the optimiser, and the export's straight-bridge fallback joined it again; the boxy block beside the tab in the picture is that bridge. So at 3 mm the tab's pad does not keep the tab attached. This is exactly the case the automatic pad has to get right, and the res-64 sweep (pad 3 mm against the automatic rule) will show whether the rule cures it.
+- The two rows are not a before/after pair (different resolutions); the res-64 runs with the switch on are in progress.
+
+### The bracket at res 64, today against the drawn-face path at pad 3 mm (07:10; picture `stage-1-pics/sample_a_res64_today_vs_face.png`)
+
+| run | versions | bridges |
+|---|---|---|
+| today (nothing switched on) | 0.68: 4.71, 160.6 g; 0.52: 4.72, 129.1 g; 0.38: 4.82, 101.4 g; 0.26: 3.79, 77.8 g | none |
+| drawn-face loads, pad fixed 3 mm | 0.68: 5.29, 159.0 g; 0.52: 5.29, 126.0 g; 0.38: 4.66, 97.0 g; 0.26: 3.69, 72.2 g | ALL FOUR "BRIDGED back into one piece" (one bridge, 17.2 mm) |
+
+What the picture shows: the same carved web both ways; with the drawn-face path the thin fixed tab is joined to the base by a boxy block (the export's straight bridge), where today's path leaves it joined by the base itself.
+
+Why, worked out from the geometry (not yet confirmed by a run): the tab sits 3 to 7 mm above the bed, off the end of a 10 mm base whose underside is the other fixed face. Today's pads are three voxel LAYERS, 4.7 mm at this resolution: the base's pad reaches from the bed up to 4.7 mm and so overlaps the tab's height, and the two frozen blocks touch. At a true 3 mm the base's pad stops at 3 mm, exactly where the tab begins, the tab's own pad covers only the tab, and the material that joins them is free to go.
+
+And why the optimiser takes it: the base's underside already holds the part, so the tab's fixed face carries almost nothing. To the optimiser it is a spare support, and material joining it to the body does no work. The run's own word for this case elsewhere is "anchored piece detached: holds no load in this design".
+
+So this is NOT at root a question of pad depth. It is: **must every face he fixed stay joined to the part, even when the part does not need it for strength?** A person who draws a bolt tab expects it to still be there. Today the answer is "yes, by luck of the pad's thickness, and by a straight bridge when the luck runs out". A deeper pad makes the luck more likely; it does not make it a rule. For him in the morning.
+
+### The sample beam (B) at res 64 TODAY'S way: the job is refused, with nothing loaded (found 2026-11-26 08:45)
+
+The beam carries 600 N on the top of a 20 x 20 x 3 mm boss. At res 64 (1.9 mm voxels) today's path tags NO voxels for that face and stops the job: "the declared load case produced NO external load ... each face is smaller than one voxel at this grid spacing; raise the resolution". The face is 20 x 20 mm, more than ten voxels across; it is the boss's 3 mm height that falls between voxel centres. This is test C's "nothing loaded in 6 of 18 alignments" met on a real job, with a message that sends the user the wrong way. The drawn-face path at the same resolution and a fixed 3 mm pad (10:05, the lead's build): the job RUNS and gives three versions, 0.68: 6.13, 76.6 g; 0.52: 5.13, 60.2 g; 0.38: 2.73, 45.9 g (the 0.26 version stopped on the in-loop margin rule). Against the everything-on run below (pads of 11 and 5.2 mm): 5 to 10 g lighter a version and stronger at each.
+
+### The bracket at res 64 with EVERYTHING ON in the trial build (drawn-face loads, automatic pad at 1.0, TOSurface's smooth surface; scratch merge d88e3e33, never pushed)
+
+| version | today | drawn faces, pad 3 mm | everything on |
+|---|---|---|---|
+| 0.68 | 4.71, 160.6 g | 5.29, 159.0 g | 5.29, 165.1 g |
+| 0.52 | 4.72, 129.1 g | 5.29, 126.0 g | 5.10, 136.0 g |
+| 0.38 | 4.82, 101.4 g | 4.66, 97.0 g | 4.80, 110.3 g |
+| 0.26 | 3.79, 77.8 g | 3.69, 72.2 g | REFUSED (3.14, 88.7 g): "After finishing, a piece is loose" |
+
+Read plainly: with everything on each version is 4 to 13 g HEAVIER than the drawn-face path alone at about the same margin, and the lightest version is refused for a loose piece. SEPARATED 09:25: it is the pad. The same job on the lead's own build (no smooth surface), automatic pad at 1.0: 0.68: 5.29, 166.5 g; 0.52: 5.29, 137.8 g; 0.38: 5.01, 112.8 g; no 0.26 version at all. That is as heavy as the everything-on column or heavier, so the smooth surface adds no weight; the pad at 1.0 (8.6 and 7.1 mm behind the thick faces, 9526 frozen voxels against 3702 at 3 mm) costs 7 to 16 g a version and the lightest version. The loose piece in the everything-on 0.26 version is still unexplained (the lead's build never reached 0.26 to compare). The run took 7313 s against 1492 s today, but it was paused for the lock run for part of that, so the time says nothing.
+
+### The beam at res 64 with EVERYTHING ON (09:05; picture `stage-1-pics/sample_b_res64_everything_on.png`)
+
+Where today's path refuses the job (above), the trial build makes four versions in 841 s: 0.68: 5.25, 81.8 g; 0.52: 4.22, 67.7 g; 0.38: 2.33, 55.8 g; 0.26: 2.25, 45.2 g. The automatic pad at strength 1.0 gave 10.95 mm behind each end face (120 mm of beam behind it) and 5.21 mm under the boss: in the picture they are the two solid end blocks, a tenth of the beam each. Two things to look at with him: the blocks are far deeper than a held face needs (the strength is too high, as on the bracket), and the two halves of a symmetric part under a centred load come out different (left a broad web, right a thin strut), which is the optimiser, not this stage.
+
+### A2: the bracket at res 64, the pad three ways (09:50; picture `stage-1-pics/sample_a_res64_pad_three_ways.png`, the 0.38 version)
+
+Pad behind the thin tab / the base / the upright's face, then margin and grams per version (drawn-face loads, the lead's build):
+
+| pad | depths (mm) | frozen voxels | 0.68 | 0.52 | 0.38 | 0.26 |
+|---|---|---|---|---|---|---|
+| fixed 3 mm | 3.0 / 3.0 / 3.0 | 3702 | 5.29, 159.0 g | 5.29, 126.0 g | 4.66, 97.0 g | 3.69, 72.2 g |
+| automatic, strength 0.2 | 0.9 / 3.2 / 3.8 | 3808 | 5.29, 158.6 g | 5.30, 125.7 g | 4.85, 96.7 g | 3.82, 72.0 g |
+| automatic, strength 0.4 | 1.25 / 4.5 / 5.4 | 5674 | 5.28, 160.5 g | 5.29, 129.0 g | 4.91, 101.3 g | 3.76, 77.6 g |
+| automatic, strength 1.0 | 2.0 / 7.1 / 8.6 | 9526 | 5.29, 166.5 g | 5.29, 137.8 g | 5.01, 112.8 g | none |
+
+Read plainly. At 0.2 the automatic pad is the fixed 3 mm pad on the thick faces and a thin one (two wall lines, the floor) behind the thin tab: every version is as light or lighter and as strong or stronger than at a fixed 3 mm. At 1.0 the base and the upright's foot stay as thick slabs (the picture's right column) and each version carries 7 to 16 g more. In the picture the thin tab hangs on by a small block in the first two columns and by the thick base slab in the third: the "must every fixed face stay joined" question is the same at every pad. Strength 0.4 (10:34) sits between: 2 to 6 g heavier a version than 0.2 for no gain in margin worth the name. On this part the lower the strength the better, down to where the thick faces get about 3 mm. The beam and the hook at 0.2 follow.
+
+### The hook (C) at res 64 today's way (10:05, for the trial build's comparison)
+
+Four versions: 0.68: 4.77, 43.7 g; 0.52: 4.60, 34.0 g; 0.38: 4.32, 25.4 g; 0.26: 3.75, 18.1 g. Its everything-on run and the pad sweep's hook runs follow.
+
+### The beam at res 64, automatic pad at 1.0, the lead's build (10:25): one END comes away
+
+Two versions (0.68: 6.60, 81.6 g; 0.52: 3.15, 67.5 g) and two REFUSED: "rung 2 (vf 0.38) was REJECTED, anchored piece detached. 1 anchored piece(s) (1248 voxels; anchor face(s): 10) hold no load in this design", the same for 0.26. The beam is held at BOTH ends; one end is enough to carry the load as a cantilever, so at the lighter versions the optimiser cuts the other end's block off, and the existing rule (CORE LIST item 47, made for his Carriage Arms' bolt holes) refuses the version. With the fixed 3 mm pad the 0.38 version kept both ends (2.73, 45.9 g). In the trial build the same two versions were ACCEPTED with the smooth surface on (2.33 and 2.25): the picture's thin strut on the right is that end only just hanging on. So the fixed-face question is now seen on two made parts, and the code already has an answer for one form of it: a fixed face that comes away refuses the version. What is missing is that the optimiser is never told, so it spends its lightest versions finding out.
+
+### A2: the beam at res 64, the pad three ways (11:05; picture `stage-1-pics/sample_b_res64_pad_three_ways.png`)
+
+Pad behind each end face / under the boss, then margin and grams per version (drawn-face loads, the lead's build; today's path refuses this job):
+
+| pad | depths (mm) | frozen voxels | 0.68 | 0.52 | 0.38 | 0.26 |
+|---|---|---|---|---|---|---|
+| fixed 3 mm | 3.0 / 3.0 | 1248 at the ends | 6.13, 76.6 g | 5.13, 60.2 g | 2.73, 45.9 g | stopped on margin |
+| automatic, strength 0.2 | 4.9 / 2.3 | 1348 | 6.32, 77.7 g | 5.06, 61.8 g | 3.68, 48.0 g | 1.87, 36.1 g |
+| automatic, strength 1.0 | 11.0 / 5.2 | (not read) | 6.60, 81.6 g | 3.15, 67.5 g | REFUSED: one end came away | REFUSED: one end came away |
+
+Read plainly. Strength 0.2 is the only setting that gives all four versions; its 0.38 version is a third stronger than the fixed pad's for 2 g more, and no end comes away. At 1.0 the two 11 mm end blocks leave so little to carve that the optimiser lets go of one end. Both sample parts now say the same thing: the strength wants to be low, about 0.2 (a thick face then gets 3 to 5 mm, a thin one two wall lines). The hook at 0.2 is running; the strength 1.4 runs were stopped as pointless.
+
+### The beam's two halves differ: measured (11:50; for the optimiser's stage, goal G2, not this one)
+
+The beam and its load are mirror-symmetric along and across, on a grid that is symmetric too (64 voxels, the boss on voxels 26.7 to 37.3). Every version made tonight comes out lopsided to the eye (a broad web one side, a strut the other, an S seen from above). Measured on the files: the centre of volume sits within 1.6 mm of the middle along the beam (58.6 to 61.6 against 60) and within 0.4 mm across (14.9 to 15.4 against 15), at every pad setting and in the trial build. So the weight is balanced and the shape is not mirrored: the optimiser settles into one of two equal twisted answers. Whether a mirrored answer is as light, and whether "looks designed" should ask for the symmetry the part has, is a question for the optimiser's stage; noted here because these pictures are the first place it shows. Nothing built.
+
+### The hook at res 64 with EVERYTHING ON in the trial build (13:09): three versions, then the JOB STOPS
+
+Automatic pad at 1.0 (8.9 mm behind the fixed top face, 5.9 mm under the loaded tip), drawn-face loads, the smooth surface. Three versions were made (in-loop margins 12.3 / 10.7 / 7.5 at 0.68 / 0.52 / 0.38); on the 0.26 version the run ended with an error: "stopped: the solver did not converge ... Jacobi-CG ran 106592 iterations in 2700 s ... past its 2700 s time limit". The log says why: at that solve the design was in pieces, "3 of 5 pieces (7285 vox, largest 7279)" loose at the floor, more than a quarter of the part: the hook had come apart, and instead of refusing the version the job spent 45 minutes and died. Twice earlier in the run multigrid diverged and the slow fallback took 20 and 33 minutes. Today's path on the same part made four versions with no fallback. Read plainly: this is not the loads or the surface; it is what the stage report said stage 1 does NOT fix (a design in pieces stalls the solver and loses the job), now seen at its worst, with a pad deep enough (1.0) to leave little to carve. Sent to TOSolver as a replay case. The hook at 0.2 and at 1.0 on the lead's own build are still running.
+
+### FLIP ITEM 2(d): the hook at res 64, drawn-face loads, the automatic pad (0.2), nothing else on: PASSES (15:00)
+
+One thread, alone, through the memory gate (free 43 %): three versions in 684 s, 0.68: 4.76, 43.6 g; 0.52: 4.57, 33.8 g; 0.38: 4.17, 25.2 g; NO fallback to Jacobi-CG, nothing refused. Pads 4.0 mm behind the fixed top face (80 mm of stem) and 2.65 mm under the loaded tip. Today's path made a fourth version (0.26: 3.75, 18.1 g) and the fixed 3 mm pad three (4.75 / 4.58 / 3.98 at 43.4 / 33.6 / 24.8 g). So the hook's death in the trial build came from the 1.0 pad and the pieces it left, not from the drawn-face loads. The reviewer's pass mark (versions made, no fallback) is met.
+
+### FLIP ITEM 2(c): Top Motor Mount at res 64, the automatic pad (0.2) against the fixed 3 mm: UNMOVED (15:27)
+
+One thread, alone, through the gate; no fallback, nothing refused, four versions each way.
+
+| pad | depths | 0.68 | 0.52 | 0.38 | 0.26 |
+|---|---|---|---|---|---|
+| fixed 3 mm | 3.0 mm | 2.338, 105.1 g | 2.342, 102.9 g | 2.333, 101.1 g | 2.345, 98.9 g |
+| automatic 0.2 | 1.5 to 1.8 mm (12 to 16 mm of material behind each face) | 2.338, 105.1 g | 2.339, 103.1 g | 2.355, 101.0 g | 2.346, 99.0 g |
+
+Margins within 1 %, grams within 0.2 g. On his part the automatic pad is half as deep as the fixed one and the result does not move. With the two made parts (A2 above) that completes 2(c).
+
+### FLIP ITEM 2(a), first half: the lattice check (jobs A to D) at the AUTOMATIC pad (2026-11-27 00:30, tip f11b95d7; test `to_stage1_lattice_check`, passes, 0 failures)
+
+Worst-case margin, switch off -> `face`, at the automatic pad (1.79 mm on these jobs), against the fixed 3 mm pad recorded above:
+
+| job | at 3 mm (recorded) | at the automatic pad | laid lattice |
+|---|---|---|---|
+| A, the control | 790.5 -> 895.1 | 790.51 -> 895.06 | 480 / 480 bars |
+| B, off the grid | 709.6 -> 941.2 | 709.61 -> 941.19 | 2,978 / 2,978 bars |
+| C, Organic | 618.2 -> 971.9, weakest strut 888.7 -> 870.0 | 618.16 -> 971.92, weakest strut 888.73 -> 870.04 | 7,692 / 7,692 bars, file hash identical |
+
+THE SAME to the digits recorded: the pad does not reach the lattice strength check on these jobs, which is what LatticeReview's own sweep found (item 2(b)). The same-job-twice gate at the automatic pad PASSED too (1 of 1, 1938 s). Owed to finish 2(a): the 3 mm pair run by the same script (in progress), then the table to LatticeReview and the reviewer.
+A slip of mine on the way: I ran this test by hand from the folder my queued lock job was using at that moment; my hand run at 3 mm collided with it ("the lattice file could not be saved") and is discarded. The automatic-pad run above finished before the collision (rc 0, 0 failures) and the queued job's own results are the ones that count. Not again: nothing runs from a build folder a lock job is using.
+
+### FLIP ITEM 2(a) COMPLETE (2026-11-27 01:04, tip f11b95d7)
+
+The lattice check re-run ALONE at the fixed 3 mm pad (after my collision spoiled the queued run): 0 failures. `face` worst-case margins, 3 mm against the automatic pad: A 895.0555646 / 895.0555646; B 941.187225 / 941.187225; C 971.9236292 / 971.9236292, weakest strut 870.0431599 / 870.0431599; D (Organic with the load on the lattice) 1443.955099 / 1443.955099, weakest strut 22.55735191 / 22.55735191. IDENTICAL to every digit printed, and the laid lattice identical in every job. The same-job-twice gate passes at both pads (1938 s automatic, 2100 s at 3 mm). So on the lattice jobs the automatic pad changes nothing, and the flip's evidence at 3 mm stands for it.
+
+## Still owed before the stage report
+
+- The original stand optimised both ways (queued), then Top Motor Mount; three settings; pad 2 / 3 / 4.5 mm.
+- DONE (see "LatticeReview's FINAL statement" below). Kept for the record: the lattice strength check before and after (reviewer), on the set LatticeReview named (TORebuildGroup, 2026-11-25), three MADE jobs, none of his files:
+  - A. All-lattice box, axis-aligned, loads and anchors on whole flat faces, a depth that is a whole number of voxels. The control: no change beyond rounding.
+  - B. A block whose loaded face is not on the grid (tilted or cylindrical, part of a face), protected skin 1.3 mm, regular cells.
+  - C. Job B with Organic (Traced), so the frame-of-beams check runs.
+  - Per job, switch off against `face`: per load group the applied force summed over nodes and the reaction (both must equal the job's force), loaded and anchored area; the verdict and its reason; load connected; load landing on lattice; the solid's margin and where its worst cube is; the worst strut's margin and place and how many struts are under the margin; cubes protected / lattice / solid; infill to certify; the bar count and the lay hash, which must be IDENTICAL off and on (the switch must not move the laid lattice).
+  - His stand, run in place on his real project, is a welcome fourth, not a substitute.
+- `region_lattice_mask` now follows the mm depth with the switch on, through the SAME function the protection is frozen with (`mask_region_by_stage`), so bar R5 stays structural (LatticeReview's position; for the reviewer to rule; LatticeReview reviews the diff). Proof owed on job B: no cube both protected and lattice, none that is neither along the inner boundary; job A unchanged. Not mine: `flexible/job_block.cpp:374` also calls `region_depth_layers` (#362's).
+- Test K again with the switch on once stage 5 removes the solver luck.
+
+## Measured: the lattice strength check, switch off against `face` (LatticeReview's jobs A to C)
+
+`core/tests/validation/test_to_stage1_lattice_check.cpp` (`ctest -C Long -R to_stage1_lattice_check`), run 2026-11-25 on a side build of the tip, 37 s. 20 N on each job.
+
+| job | laid lattice (bars; file bytes) | verdict | worst-case margin | what else moved |
+|---|---|---|---|---|
+| A, box on the grid, whole faces (the control) | 480 / 480; IDENTICAL | accepted / accepted | 790.5 -> 891.6 | peak stress 0.0439 -> 0.0330 MPa; the re-solve's solid margin 1,223 -> 1,519. 5 of 20 values. |
+| B, box turned 17 / 9 degrees, loaded side face with a 1.3 mm protected skin | 356 / 356; IDENTICAL | not accepted / not accepted (same reason both ways) | 134.1 -> 166.5 | interlayer margin 551 -> 628; load landing on cells with no credit 9.63 -> 9.32 N; re-solve solid margin 212 -> 386. 12 of 246 values. |
+| C, job B with a weave (frame-of-beams check), a made uniform stress result | 902 / 902; IDENTICAL | accepted / accepted | 51.9 -> 58.1 | weakest strut 44.6 -> 67.8; frame nodes loaded 15 -> 31; load on the frame 1.19 -> 1.41 N of 20; the list of weakest struts reorders. 123 of 477 values. |
+
+Reading:
+- The rule held: the switch does not move the laid lattice. Bars and file bytes are identical in all three.
+- The control is NOT unchanged: 13 % on the margin with everything on the grid. So the difference is not grid alignment. Likely cause, not yet shown: today's path holds every node of the bottom layer of VOXELS (two node planes, a one-voxel-thick clamp) and spreads the load over every exposed face of the tagged voxels, sides included; the drawn-face path holds and loads the nodes of the face itself. To be confirmed by printing the held and loaded node counts both ways before the stage report.
+- Every margin rises, by 9 to 24 % (52 % for the weakest strut in C). These jobs carry tiny loads, so the margins are in the hundreds; the direction and size are what matter.
+- Not yet counted, from LatticeReview's list: applied force and reaction summed per load group, loaded and anchored area, cubes protected / lattice / solid, and on job B "no cube both protected and lattice, none that is neither along the inner boundary". The test prints the strength block only; these need the masks, which the block does not carry.
+
+### The control explained, and the jobs remade (2026-11-25, later)
+
+Job A's box, res 40 (`test_to_true_loads`, table "[control]"):
+
+| path | nodes held | node planes | nodes loaded | of them on the sides | force on the sides | total |
+|---|---|---|---|---|---|---|
+| today | 3,362 | 2 (the whole bottom voxel layer) | 1,841 | 160 | 0.909 N of 20 | -20.000 N |
+| drawn face | 1,681 | 1 (the face's own nodes) | 1,681 | 0 | 0 | -20.000 N |
+
+So the control moves for a real reason: today's path clamps a slab one voxel thick and pushes 4.5 % of the load onto the side faces of the loaded voxels. Found on the way: the new clamp left a face's four corner nodes out (the quarter-area threshold was met exactly); the default is now 0.2 and the count is 41 x 41.
+
+Jobs B and C remade on a 56 x 56 x 24 mm box (seven cells across) at LatticeReview's word. Laid lattice identical again (B 1,240 bars; C 3,053 bars, compared on the bar list: a weave writes a 3MF with random ids, so the first run's "bytes identical" for C compared nothing). B: margin 379.1 -> 537.5, interlayer margin 1,254 -> 5,577, still no credited cell (0 of 64), asked. C: margin 474.4 -> 503.1, but the weakest strut 84.5 -> 47.5: LOWER on the face path, the opposite of the small box. The direction is not the same everywhere.
+
+### Jobs B and C as LatticeReview asked for them (2026-11-25, 19:45; side build of bf4aa356 plus the test's own fixes)
+
+A 56 x 56 x 32 mm box ON the grid with one top edge chamfered (9 in, 7 down, about 38 degrees; the mesh importer joins faces under 35 degrees, so a shallower chamfer merges into the top). The chamfer is loaded (20 N) and carries a 1.3 mm protected skin; the lattice region is the top face, three 8 mm cells deep.
+
+| job | laid lattice | verdict | worst-case margin | what else moved |
+|---|---|---|---|---|
+| A (unchanged) | 480 / 480, identical | accepted / accepted | 790.5 -> 891.6 | as before |
+| B, regular cells: 126 cells credited, none without credit | 2,978 / 2,978 bars, bytes identical | pass / pass | 709.6 -> 933.6 | peak stress 0.0484 -> 0.0148 MPa; interlayer margin 24,573 -> 24,056; re-solve solid margin 735 -> 1,319. 7 of 20 values. |
+| C, the same with a weave | 7,692 / 7,692 bars, bar list identical | accepted / accepted | 618.2 -> 948.9 | weakest strut 888.7 -> 886.9 (the load is on the solid chamfer, not on the weave, so the frame's load rule hardly acts here). 87 of 477 values. |
+
+Reading: with the loaded face a real off-grid face, the peak stress beside it falls to a third (0.048 to 0.015 MPa) and the margin rises 32 to 54 %. Today's path, on a 38-degree face, tags a staircase of voxels and loads their exposed faces, sides included; the drawn-face path loads the chamfer's own area along its own outline. The earlier turned-box versions of B and C (above) stay on record: they are where the frame's load rule was seen to move the weakest strut both ways.
+
+### CORRECTION (LatticeReview, 2026-11-25 19:40): what a job held on the `face` path
+
+The "[control]" table above counts the TEST's own call to `face_clamp_bcs`. No job called it: on `face`, a glued anchor still clamped all eight corners of every voxel the face lies on (two node planes on job A). So every `face` number above (the as-drawn tables, the stand, jobs A to C) was made with today's one-voxel-thick clamp and the new LOADS only, and the 13 % on job A is the loads alone (the 4.5 % of the force that today lands on the side faces), not the thinner clamp. Fixed in the commit after 3d13ced9: with `face`, a glued anchor holds the drawn face's own nodes (scenario jobs keep the voxel clamp). EVERY `face` measurement in this file is to be re-made on that build before the stage report; until then read them as "new loads, old clamp". `face_spring` rows were already held by the face's own nodes.
+
+### Jobs A to C re-made with the corrected clamp (build 4d495dd6, 2026-11-25 19:43)
+
+Laid lattice identical in all three (480, 2,978 and 7,692 bars). Worst-case margin, off -> `face`: A 790.5 -> 895.1 (was 891.6 with the old clamp); B 709.6 -> 941.2 (was 933.6); C 618.2 -> 971.9 (was 948.9), weakest strut 888.7 -> 870.0. So on these jobs the clamp's own share of the change is small (under 3 %) and the loads carry the rest. On a part held on a small face it is not small: Base as drawn at res 48 reads 0.79 with the face's own nodes held, against 0.97 with the old clamp and the new loads (table being re-made).
+
+### LatticeReview's FINAL statement on stage 1 and the lattice strength check (TORebuildGroup, 2026-11-25 20:14; measured on tip 4d495dd6, strength grid 40, made jobs)
+
+1. The laid lattice never moves: bars identical in every run, switch off or on, at five grid resolutions.
+2. Solid and regular lattice: sound. The check reads the held nodes and the loads only, never the frozen mask.
+3. Organic (frame of beams): the frame's number is ALREADY unsteady today, before stage 1. Weakest strut at grid 36 / 38 / 40 / 42 / 44, switch off: turned-box C 45.4 / 95.5 / 84.5 / 63.2 / 78.7 (a factor 2.10); a job loaded on a bare lattice top 1.88 / 1.80 / 3.43 / 1.10 (fail) / refused. With `face`: turned C 54.0 / 52.8 / 47.5 / 41.2 / 53.7 (factor 1.31, at or below today's reading at four of five); the bare-top job 1.88 / 1.80 / 3.43 / 1.18 (fail) / 1.48 (fail), no refusal. So the switch makes the Organic number steadier or no worse on these, and stricter or equal. LatticeReview withdrew its own by-force rule (it failed its own pass marks) and WITHDREW ITS HOLD: stage 1 need not wait on it. How load gets from the grid onto the vines has no checked basis; that is a separate, older fault in the lattice check, for the reviewer (a reference solve of printed struts on one coupon, about 2 days).
+4. Two lattice tests go red with the switch on and need their `face` form at the flip: `lattice_depth_tie` section 0a (it pins effective depth = layers x spacing; with `face` the run reports the mm asked, by design) and `test_print_frame.cpp:721` (the same job turned: weakest strut 5.904 against 3.283, outside its 25 %; the frame's load rule again).
+5. Protected against lattice cubes on chamfered job B (`test_to_stage1_lattice_masks.cpp`, LatticeReview's test, cherry-picked): cubes that are BOTH protected and lattice 40 with the switch off and the same 40 on; NEITHER along the inner boundary 400 off, 240 on. So "none both, none neither" holds on neither path and the switch did not cause it; no strength number reads it; it is stage 7's. Job A: no change.
+
+LatticeReview's position: stage 1 may flip for Organic as for the rest, with the two tests in 4 and hand-over item 3 for #362 landing in the same release.
+
+## Measured: the sideways lip (LatticeReview's question)
+
+A face that is PART of a flat side (a 20 x 20 mm patch in a 60 x 40 mm top; `test_to_true_loads`, table "[lip]"). Frozen voxels with their centre outside the prism under the patch:
+
+| res (voxel mm) | depth mm | today, by layers: inside / outside | by true distance: inside / outside, farthest reach |
+|---|---|---|---|
+| 48 (1.25) | 2 / 4 / 10 | 512 / 170, 768 / 461, 2,048 / 4,038 | 512 / 188 (1.9 mm), 1,024 / 674 (4.0), 2,048 / 4,486 (10.0) |
+| 96 (0.625) | 2 / 4 / 10 | 2,048 / 572, 5,120 / 3,179, 15,360 / 31,300 | 3,072 / 1,055 (1.95), 6,144 / 4,460 (3.96), 16,384 / 33,643 (9.98) |
+
+Reading: the lip is NOT new. Today's layer walk already spreads sideways under the neighbouring face (at 10 mm deep, twice as many voxels outside the prism as inside). True distance adds 7 to 85 % more outside voxels and reaches exactly the depth. Whether a region should be a prism under its outline (as the new lattice engine lays it) or a distance band is a question for the reviewer, for both paths.
+
+## The pad on screen (proposal for #362 and the maintainer; his decisions of 2026-11-26; nothing built in the app)
+
+His words: "it should be automatic first, with a warning/notice explaining what happens when if you manually do it and get it wrong", and his help-text rule (a caption of at most five words; long reading behind a link or an (i); errors as centred pop-ups).
+
+- Beginner (Auto, the default): nothing on screen. The pad follows the thickness behind each fixed or loaded face.
+- Engineer: one line in the anchors' and loads' settings, "Pad depth", showing "Auto" with the depths it chose listed behind the (i) (one line per face: "12.4 mm behind this face, pad 3.5 mm"). Tapping it lets him type a depth in mm for that face.
+- Caption under a typed depth (five words): "Too thin or thick risks failure." with an (i):
+  "The pad is the solid material kept behind a fixed or loaded face so it stays joined to the part. Too thin: the face can end up attached by too little, and a version may be refused. Too thick: material the optimiser could have removed stays, and on a small part there may be no room left to make a version at all. Auto picks a depth from the thickness behind the face and your wall line width."
+- When a run refuses a version because an anchored or loaded piece came away, and the pad on that face was typed by hand: one centred pop-up, "A fixed face came loose. The pad depth you typed for it may be too thin." with two buttons, "Use Auto" and "Keep mine".
+- What the core gives the app for this: per face, the thickness measured and the pad used (today printed as "[loadcase] automatic pad: ..."; to become a report value when the rule is settled).
+
+## Too small for the nozzle (core side written 2026-11-26 04:50; his decision; the pop-up is #362's)
+
+His words: "Definitely a pop-up for when a part is too small for the nozzle with a recommendation for either a different nozzle size or to switch to resin printing."
+
+- The rule (`part_scale.hpp`): the smallest printable thing is a wall two lines wide; to cut anything out of a section and leave something printable needs two such walls and a gap as wide, six line widths in all (2.7 mm at 0.45 mm). A part whose THICKEST section is under that is too small.
+- What the run gives the app, only when it is too small (with the stage's switch on): the report's top-level `"too_small": {"thickest_mm", "needed_mm", "line_width_mm", "nozzle_that_fits_mm"}`. `nozzle_that_fits_mm` is the largest of 0.6 / 0.4 / 0.25 / 0.2 mm on which the part would have room, or 0 when none does.
+- Checked on its arithmetic: thickest 0.8 mm: too small, no nozzle (resin); 1.5 mm: a 0.2 mm nozzle; 2.0 mm: 0.25 mm; 2.71 mm and up: fine at 0.4 mm. NOT yet run on a job (owed: one made thin part).
+- RUN in a build 2026-11-26 08:00 (tip 2e9aac2e, the made sample bracket shrunk in scratch, res 48, drawn-face loads). At 4 % size (4 x 2 x 2.9 mm, thickest section 2.00 mm): `[too small] the part's thickest section is 2.00 mm; a 0.45 mm line needs 2.70 mm to leave room for a cut. A 0.25 mm nozzle would fit.` and the report carries `too_small`. At 8 % size (thickest about 4 mm): no notice, no key, as it should be. The first runs found TWO faults, both fixed before this: the measure took the outside of the part's bounding box as solid, so a small part lying against the box read as thick and was never flagged; and voxels thicker than the measure's reach were skipped, so a part thick everywhere would have read as 0 mm and been flagged.
+- The pop-up, proposed wording for #362 (centred, his rule): "This part is too small for a 0.4 mm nozzle. Its thickest section is 2.0 mm; the optimiser needs 2.7 mm to make a cut it can print. Try a 0.25 mm nozzle." with buttons "Change nozzle" and "Run anyway". When no nozzle fits: "... Its thickest section is 0.8 mm. No common nozzle leaves room. Resin printing would."
+- Open, for him: the six-line-widths threshold is my reading of "room to cut"; and the advice is on the thickest section only, so a part with one thick lump and thin arms everywhere else is not flagged.
+
+## Automatic resolution (the rule written 2026-11-26 05:15; his decision; not wired into any job yet)
+
+His words: "The automatic resolution from part size is also great", and "these settings (resolution/pad thickness) should be manually adjustable if in 'Manual' mode."
+
+- The rule (`auto_resolution` in `part_scale.hpp`): one voxel per wall-line width along the part's longest side, so the smallest printable wall (two lines) is two voxels across at any part size; capped at 192 and floored at 32.
+
+| longest side | resolution | voxel |
+|---|---|---|
+| 8 mm | 32 (floored) | 0.25 mm |
+| 20 mm | 45 | 0.44 mm |
+| 40 mm | 89 | 0.45 mm |
+| 73 mm | 163 | 0.45 mm |
+| 100 mm | 192 (capped) | 0.52 mm |
+| 160 mm | 192 (capped) | 0.83 mm |
+| 250 mm | 192 (capped) | 1.30 mm |
+
+- What it would change for him: his jobs run at 96 or 128 today. Under this rule every part over 86 mm runs at 192, which is 8 times the voxels of 96 and far more time and memory; a 40 mm part runs at 89. So "voxel = line width" is the honest target and the CAP is what decides most of his parts. The cap is the real decision: 192 is the finest his reference runs have used, not a measured limit of the Mac or the iPad.
+- Not wired: the job's `resolution` is a number the app sends. For #362 with the flip: Auto sends the number this function gives (or the job carries "auto" and the core resolves it; a schema change, his and #362's call); Manual sends the typed number as today.
+- For him in the morning: what the cap should be on the iPad and on the Mac worker (time and memory against detail), and whether Auto should pick a COARSER voxel than one line width (two line widths would halve the resolution and cut the voxels by eight).
+
+## For #362 (handed over with the switch flip; not edited by me)
+
+Until these land, with the switch on, the app's previews count voxels the old way while the run freezes by true distance.
+
+1. `app/TopOptKit/Sources/TopOptBridge/bridge.cpp`, `tag_step_face` (about line 1013). Replace
+
+        return static_cast<int64_t>(topopt::tag_step_face(g, model, face_id, tag));
+
+   with
+
+        return static_cast<int64_t>(topopt::tag_face_by_stage(g, model, face_id, tag));
+
+2. Same file, `mask_step_face` (about line 1029) and `face_slab_preview` (about line 1057). The bridge passes voxel layers only; the run now needs the depth in mm. In `face_slab_preview` replace the `mask_step_face(g, model, fid, FrozenSolid, depth_vox, one)` call with
+
+        topopt::mask_face_by_stage(g, model, fid, topopt::MaskValue::FrozenSolid,
+                                   depth_vox, depths_mm[i], one)
+
+   and in `mask_step_face` pass `depth_voxels * g.spacing` as the mm depth the same way. (`#include "topopt/loadcase.hpp"`.)
+
+3. `core/src/cli/run_job.cpp`, the two fixture-face tagging sites in the lattice strength-check code (about lines 11337 and 12647): replace the `model_is_mesh ? tag_mesh_face(...) : tag_step_face(...)` expression with `tag_face_by_stage(<same grid>, <same model>, f, VoxelTag::Fixture)`.
+
+4. The report key `"as_drawn"` (top level, present only when no version passed on a reduction run): the app shows its centred pop-up offering Strengthen (agreed 2026-11-25).
+
+5. Two lattice tests go red with the switch on and need their `face` form in the same release (LatticeReview, 2026-11-25): `lattice_depth_tie` section 0a (it pins effective depth = layers x spacing; with `face` the run reports the mm asked, by design) and `test_print_frame.cpp:721` (the same job turned; the frame's load rule). The first is LatticeReview's to re-pin, the second waits on its ruling about the frame's load.
+
+6. ADDED 2026-11-26 (all additive, each absent unless its switch is on; the wording on screen is #362's and follows his rules: centred pop-ups, positive words, five-word captions, detail behind an (i)):
+   - `"pads": [{"face_id" | "region_id", "thickness_mm", "pad_mm", "automatic"}]` (top level): the pad each fixed or loaded face got. Auto = the automatic pad (his yes, 2026-11-26); Manual = a typed depth in mm, sent as `TOPOPT_PAD_MM` today and to become a job key of #362's choosing. `thickness_mm` 0 = not measured (a typed pad).
+   - `"too_small": {"thickest_mm", "needed_mm", "line_width_mm", "nozzle_that_fits_mm"}` (top level, only when the part is too small): one pop-up recommending the nozzle that fits (0.6 / 0.4 / 0.2 mm only) or resin when it is 0. "Too small" = the thickest section under three line widths.
+   - A refused version whose `rejection_reason` is "the load has no path to a mount" (the connection rule, `TOPOPT_CONNECTION=support`): its design left a loaded piece joined to no fixed face. Plain words wanted on screen; it is not a solver failure.
+   - `"strength_reading": {"size_mm", "voxel_mm", "needs_voxel_mm", "over_size"}` and `"drawn_part"` (stage 2, `TOPOPT_STRENGTH=size`): which form of the strength reading the job used, and the printed grams of the part as drawn; each version's finish `mass_grams` is then printed grams.
+   - WANTED IN THE JOB from the app's print settings (his word: they are entered at every import and must travel with the job and into the exported file): top and bottom solid layers (count or mm). The printed-grams figure assumes 1.0 mm top and 0.6 mm bottom until the job carries them. Key names are #362's.
+
+When the switch flips and the old path is deleted, `tag_face_by_stage` / `mask_face_by_stage` keep their names and lose the old branch, so these lines do not change again.

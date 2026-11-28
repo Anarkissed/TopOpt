@@ -877,6 +877,11 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   VoxelGrid grid = std::move(setup.grid);
   std::vector<DirichletBC> bcs = std::move(setup.bcs);
   MinimizePlasticOptions options = std::move(setup.options);
+  // TO rebuild stage 2: the user's solid top / bottom skins travel with the job
+  // (loads.top_solid_mm / bottom_solid_mm, #362's notes30 keys; -1 = not stated) to
+  // the printed grams. No solve reads them.
+  options.top_skin_mm = job.loads.top_solid_mm;
+  options.bottom_skin_mm = job.loads.bottom_solid_mm;
   ProductionLoadCase lc = std::move(setup.lc);
   std::string loadcase_receipt = std::move(setup.loadcase_receipt);
   result.fixture_face_ids = std::move(setup.fixture_face_ids);
@@ -1902,6 +1907,10 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // E1: each streamed version's slim finish (reused by the re-check), and the latticed
   // companions each version wrote (withdrawn with it if finishing refuses it).
   std::map<double, StreamedFinish> streamed_finish;
+  // TO rebuild stage 1 (ledger R-07): on the stage 1 path a version's FILE is
+  // checked when it is made, before the version is shown; (e) below reuses the
+  // verdict instead of checking again after the whole ladder.
+  std::map<double, VersionFinish> early_finish;
   const bool strengthen_run = job.loads.present && job.loads.redesign == "strengthen";
   // ── THE DESIGN CONTAINER, PUBLISHED AS THE LADDER GOES (task
   //    2026-08-03-variant-postprocessing-fix, defect 1) ────────────────────────
@@ -2006,8 +2015,31 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         sf.mesh = variant_export_model_mesh(v, job.output, solved_grid, run_printed_iso(options),
                                             &result.model, job.keep_regions, &fin, &sf.fb,
                                             &sf.raw);
+        const TriangleMesh* shipped = &sf.mesh;
+        if (to_stage1_on()) {
+          const DesignMask* clearance =
+              !options.clearance_void.empty() &&
+                      options.clearance_void.size() == solved_grid.voxel_count()
+                  ? &options.clearance_void
+                  : nullptr;
+          VersionFinish& f = early_finish[v.requested_volume_fraction];
+          f = finish_and_recheck(
+              v, job, job_dir, solved_grid, run_printed_iso(options), &result.model, fin,
+              clearance, material.density_g_cm3, materials, rules,
+              join_path(out_dir, "finish_check"), v.report.margin_effective,
+              v.report.margin_required, &sf);
+          if (!f.refusal.empty()) {
+            // Never shown: no file, no VARIANT line, no FINISH line. (e) records it.
+            std::fprintf(stderr,
+                         "[finish] version vf %.2f refused before it was shown: %s\n",
+                         v.requested_volume_fraction, f.refusal.c_str());
+            streamed_finish.erase(v.requested_volume_fraction);
+            return;
+          }
+          if (f.fb.finish_fallback) shipped = &f.mesh;  // the safe finish is what ships
+        }
         p = export_variant_mesh(v, out_dir, job.output, solved_grid, run_printed_iso(options),
-                                &result.model, job.keep_regions, &fin, &sf.mesh);
+                                &result.model, job.keep_regions, &fin, shipped);
       }
       streamed_paths.push_back(p);
       // The analytic design, written BESIDE the mesh into out_dir (S1(d)).
@@ -2065,6 +2097,9 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // than relying on a caller having set it at the right moment.
   if (obs.mg_rearm_period > 0)
     fea_matfree_set_mg_rearm_period(obs.mg_rearm_period);
+  // E-01 (TO rebuild stage 5): the run's solver-settings value follows the
+  // overrides above, so the value and the switches agree.
+  if (options.simp.use_solver_settings) options.simp.solver_settings = fea_current_solver_settings();
   // The run_info written up front recorded the PRE-override posture; re-read it
   // now so the artifact says what the run actually did. Without this an armed
   // arm reports `mg_algebraic_level1: false` and reads as a null result.
@@ -2457,6 +2492,26 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         i < result.pipeline.rung_non_convergent_residual.size()
             ? result.pipeline.rung_non_convergent_residual[i]
             : 0.0;
+    // The tolerance the failed solve really ran at (the optimiser's loose or tight
+    // one), not the configured default, which is what this line used to print.
+    const double nc_tol =
+        i < result.pipeline.rung_non_convergent_tolerance.size() &&
+                result.pipeline.rung_non_convergent_tolerance[i] > 0.0
+            ? result.pipeline.rung_non_convergent_tolerance[i]
+            : options.simp.cg_tolerance;
+    // The connection rule (TOPOPT_CONNECTION=support): the same path, a different
+    // fact. No solve stalled; the design left a loaded piece with no way to a mount.
+    if (v.report.rejection_reason == kLoadUnheldReason) {
+      std::fprintf(stderr,
+                   "WARNING: rung %zu (vf %.2f) was REJECTED — %s. This version's design "
+                   "left a piece that carries a load but is joined to no fixed face, so "
+                   "it was refused before any solving. No mesh, stress analysis or margin "
+                   "is reported for it; the run completed and every already-accepted "
+                   "variant is unaffected. See report.json rejected_variants.\n",
+                   i, v.requested_volume_fraction, kLoadUnheldReason);
+      std::fflush(stderr);
+      continue;
+    }
     std::fprintf(stderr,
                  "WARNING: rung %zu (vf %.2f) was REJECTED — %s. A linear solve did "
                  "not reach the CG tolerance %.3g: it stalled at residual %.3g after "
@@ -2465,7 +2520,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                  "already-accepted variant is unaffected. See report.json "
                  "rejected_variants and run_info.json rung_non_convergent.\n",
                  i, v.requested_volume_fraction, kRungNonConvergentReason,
-                 options.simp.cg_tolerance, nc_resid, nc_iter);
+                 nc_tol, nc_resid, nc_iter);
     std::fflush(stderr);
   }
 
@@ -2578,11 +2633,15 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     for (MinimizePlasticVariant& v : result.pipeline.evaluated) {
       if (!v.accepted) continue;
       const auto streamed = streamed_finish.find(v.requested_volume_fraction);
-      VersionFinish f = finish_and_recheck(
-          v, job, job_dir, sg, run_printed_iso(options), &result.model, fin, clearance,
-          material.density_g_cm3, materials, rules, check_dir, v.report.margin_effective,
-          v.report.margin_required,
-          streamed != streamed_finish.end() ? &streamed->second : nullptr);
+      const auto early = early_finish.find(v.requested_volume_fraction);
+      VersionFinish f =
+          early != early_finish.end()
+              ? std::move(early->second)  // stage 1: checked when the file was made
+              : finish_and_recheck(
+                    v, job, job_dir, sg, run_printed_iso(options), &result.model, fin,
+                    clearance, material.density_g_cm3, materials, rules, check_dir,
+                    v.report.margin_effective, v.report.margin_required,
+                    streamed != streamed_finish.end() ? &streamed->second : nullptr);
       FinishBlock& fb = f.fb;
       if (!f.refusal.empty()) {
         fb.verdict_changed = true;
@@ -2701,6 +2760,122 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                     path.c_str(), why.empty() ? "" : " reason=", why.c_str());
       }
       std::fflush(stdout);
+    }
+  }
+
+  // TO rebuild stage 1 (ledger A-05): a reduction run that accepted nothing says
+  // how the part AS DRAWN stands against the load, so "nothing passed" is not read
+  // as "nothing to optimise". One analysis solve, on this path only; the same
+  // call Strengthen makes for its reference. Never takes the run down.
+  if (to_stage1_on() && job.loads.present && job.loads.redesign != "strengthen" &&
+      !result.pipeline.growth_ladder) {
+    bool any_accepted = false;
+    for (const MinimizePlasticVariant& v : result.pipeline.evaluated)
+      any_accepted = any_accepted || v.accepted;
+    if (!any_accepted) {
+      try {
+        const std::string drawn_dir = join_path(out_dir, "as_drawn_check");
+        const AnalyzeJobResult drawn =
+            analyze_job(job, job_dir, drawn_dir, materials, rules, "", {});
+        result.pipeline.report.as_drawn.evaluated = true;
+        result.pipeline.report.as_drawn.margin = drawn.analysis.margin_effective;
+        result.pipeline.report.as_drawn.required = drawn.margin_required;
+        std::error_code rm;
+        std::filesystem::remove_all(drawn_dir, rm);
+        std::fprintf(stderr, "[as drawn] no version passed; the part as drawn stands at "
+                     "%.3g against %.3g\n",
+                     drawn.analysis.margin_effective, drawn.margin_required);
+      } catch (const std::exception& e) {
+        std::fprintf(stderr, "[as drawn] could not be checked: %s\n", e.what());
+      }
+    }
+  }
+
+  // TO rebuild stage 1: the pad each fixed or loaded face got, for the app.
+  for (const PadReceipt& p : options.pad_receipts)
+    result.pipeline.report.pads.push_back(
+        {p.face_id, p.region_id, p.thickness_mm, p.pad_mm, p.automatic});
+
+  // TO rebuild (the maintainer, 2026-11-26): say so when the part is too small for
+  // the nozzle to leave the optimiser any printable room, with the nozzle that
+  // would fit, or resin. Advice only: the run is not changed. With the stage's
+  // switch, so today's report bytes are untouched.
+  if (to_stage1_on()) {
+    try {
+      const double thickest = thickest_section_mm(grid, AnalysisKnobs{}.thickness_cap_voxels);
+      const PartScale ps = part_scale(thickest, options.wall_line_width_mm);
+      if (ps.too_small) {
+        result.pipeline.report.too_small.evaluated = true;
+        result.pipeline.report.too_small.thickest_mm = ps.thickest_mm;
+        result.pipeline.report.too_small.needed_mm = ps.needed_mm;
+        result.pipeline.report.too_small.line_width_mm = ps.line_width_mm;
+        result.pipeline.report.too_small.nozzle_that_fits_mm = ps.nozzle_that_fits_mm;
+        if (ps.nozzle_that_fits_mm > 0.0)
+          std::fprintf(stderr,
+                       "[too small] the part's thickest section is %.2f mm; a %.2f mm line needs "
+                       "%.2f mm to leave room for a cut. A %.2g mm nozzle would fit.\n",
+                       ps.thickest_mm, ps.line_width_mm, ps.needed_mm, ps.nozzle_that_fits_mm);
+        else
+          std::fprintf(stderr,
+                       "[too small] the part's thickest section is %.2f mm; a %.2f mm line needs "
+                       "%.2f mm to leave room for a cut, and no common nozzle fits. Resin "
+                       "printing would.\n",
+                       ps.thickest_mm, ps.line_width_mm, ps.needed_mm);
+      }
+    } catch (const std::exception& e) {
+      std::fprintf(stderr, "[too small] could not be checked: %s\n", e.what());
+    }
+  }
+
+  // TO rebuild stage 2 (the reviewer's ruling 2026-11-26, item 6): say which form of
+  // the strength reading this job used, and why. One line and one report key.
+  if (strength_mode() == StrengthMode::Size || strength_mode() == StrengthMode::Surface) {
+    auto& sr = result.pipeline.report.strength_reading;
+    sr.evaluated = true;
+    sr.size_mm = options.stress_reading_mm;
+    sr.voxel_mm = grid.spacing;
+    sr.needs_voxel_mm = sr.size_mm > 0.0 ? sr.size_mm / kStressSizeSwitchVoxels : 0.0;
+    sr.over_size = stress_is_read_over_size(sr.size_mm, sr.voxel_mm);
+    if (sr.over_size)
+      std::fprintf(stderr,
+                   "[strength] the stress is read over %.2f mm (the material's length), on "
+                   "real stiffness; the check voxel is %.2f mm.\n",
+                   sr.size_mm, sr.voxel_mm);
+    else if (sr.size_mm > 0.0)
+      std::fprintf(stderr,
+                   "[strength] one-voxel reading, as today: reading over %.2f mm needs a check "
+                   "voxel of %.2f mm or finer, and this job's is %.2f mm.\n",
+                   sr.size_mm, sr.needs_voxel_mm, sr.voxel_mm);
+    else
+      std::fprintf(stderr,
+                   "[strength] one-voxel reading, as today: no published length for this "
+                   "material.\n");
+  }
+
+  // TO rebuild stage 2 (ledger M-07): what the part AS DRAWN would take on the
+  // printer at this job's walls and infill, beside its solid grams, so a version's
+  // printed grams can be read as a saving against the real thing. No solve: the
+  // wall-and-core model on the part's own voxels.
+  if (to_stage2_on()) {
+    try {
+      std::vector<double> drawn(grid.voxel_count(), 0.0);
+      for (std::size_t idx = 0; idx < drawn.size(); ++idx)
+        if (grid.tags[idx] != VoxelTag::Empty) drawn[idx] = 1.0;
+      const KnockdownSpec kd = knockdown_spec_for(options);
+      // The same shell model the strength check uses for a version's grams
+      // (skins as for a part printed along the grid's z).
+      const PrintedMass pm = printed_mass_shell(
+          grid, drawn, 0.5, kd.wall_thickness_mm,
+          kd.top_skin_mm >= 0.0 ? kd.top_skin_mm : kStage2TopSkinMm,
+          kd.bottom_skin_mm >= 0.0 ? kd.bottom_skin_mm : kStage2BottomSkinMm,
+          kd.infill_percent, materials.at(job.material).density_g_cm3);
+      result.pipeline.report.drawn_part.evaluated = true;
+      result.pipeline.report.drawn_part.printed_grams = pm.grams;
+      result.pipeline.report.drawn_part.solid_grams = pm.solid_grams;
+      std::fprintf(stderr, "[drawn part] %.2f g printed of %.2f g solid (wall share %.3f)\n",
+                   pm.grams, pm.solid_grams, pm.wall_share);
+    } catch (const std::exception& e) {
+      std::fprintf(stderr, "[drawn part] printed grams could not be worked out: %s\n", e.what());
     }
   }
 

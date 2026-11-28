@@ -15,6 +15,7 @@
 #include "topopt/plsm.hpp"               // PlsmOptions / PlsmMode (default Off)
 #include "topopt/build_orientation.hpp"  // BuildOrientationReport
 #include "topopt/fea.hpp"        // DirichletBC
+#include "topopt/frozen_sets.hpp"  // FrozenFaceSet (TO rebuild stage 1)
 #include "topopt/lattice_density_field.hpp"  // LatticeRegionSpec, LatticeBetaKnots
 #include "topopt/materials.hpp"  // Material
 #include "topopt/mesh.hpp"       // Vec3
@@ -113,6 +114,13 @@ struct DensitySnapshotEvent {
 // Inputs that shape one minimize_plastic run (beyond the part, material, BCs
 // and rule table passed to minimize_plastic()).
 struct MinimizePlasticOptions {
+  // TO rebuild stage 2, TOPOPT_STRENGTH=surface only (empty otherwise, and empty =
+  // none): the DRAWN part's fill per voxel of the PART grid build_job_setup made
+  // (file_fill_fractions of the model's mesh, 8 per voxel edge). minimize_plastic
+  // solves and reads the margin probe's and the certificate's stress on the drawn
+  // faces at these fills (its stress view); nothing else reads it.
+  std::vector<double> drawn_fill;
+
   // The volume-fraction ladder to walk, in the order given. Must be non-empty and
   // STRICTLY DESCENDING (heaviest/strongest first), and it is one of exactly two
   // KINDS — mixing them is refused, because one run reduces plastic against the
@@ -177,6 +185,15 @@ struct MinimizePlasticOptions {
   // not cover is reported there as "other". Empty (the default) attributes the
   // whole mask to "other".
   std::vector<FrozenSourceCount> frozen_mask_sources;
+  // TO rebuild stage 1: the same freezes as drawn-face geometry (frozen_sets.hpp).
+  // Empty unless stage 1 is on; the mask stays the authority for the solve.
+  std::vector<FrozenFaceSet> frozen_sets;
+  // TO rebuild stage 1: the pad each fixed or loaded face got (frozen_sets.hpp).
+  std::vector<PadReceipt> pad_receipts;
+  // TO rebuild stage 2: the size in mm the deciding stress is read over; 0 = one
+  // voxel, as today. Set by the job's reader from the material (material_length.hpp)
+  // only when TOPOPT_STRENGTH=size.
+  double stress_reading_mm = 0.0;
   // CORE LIST item 47 — WHICH ANCHOR a Fixture voxel came from: per anchor face
   // (or region), the part-grid voxels its own tagging made Fixture. Read only to
   // NAME the faces of an anchored piece a rung let go of (kAnchorDetachedReason);
@@ -501,6 +518,13 @@ struct MinimizePlasticOptions {
   // is the common 0.4 mm-nozzle default and the value 191/192 measured with. Only read
   // when width_aware_knockdown is armed AND wall_loops > 0. Must be >= 0.
   double wall_line_width_mm = 0.45;
+  // TO rebuild stage 2 (the maintainer, 2026-11-26: the print settings the user set
+  // travel with the part): the solid top and bottom skins the slicer lays, in mm, for
+  // the PRINTED GRAMS only (no solve reads them). < 0 = not stated: the usual 1.0 mm
+  // top and 0.6 mm bottom (printed_mass.hpp). Set by the CLI from the job's
+  // loads.top_solid_mm / bottom_solid_mm (#362's notes30 keys).
+  double top_skin_mm = -1.0;
+  double bottom_skin_mm = -1.0;
   // The slicer extrusion/line width (mm) of the single OUTER wall loop. Bambu Studio /
   // OrcaSlicer expose the outermost perimeter's width SEPARATELY from the inner loops
   // (users routinely run a narrower outer for surface quality, a wider inner for
@@ -1070,6 +1094,13 @@ inline constexpr const char* kRungNonConvergentReason =
 // line's "bodies" block names the anchored faces. Below the connectivity reason
 // in precedence, above the margin.
 inline constexpr const char* kAnchorDetachedReason = "anchored piece detached";
+
+// THE CONNECTION RULE (TOPOPT_CONNECTION=support; the reviewer's ruling 2026-11-26):
+// the rung's design left a piece that carries an APPLIED load and reaches no
+// support, so the solve refused it before any iteration (fea.hpp FeaLoadUnheld).
+// Reported like a rung whose solve did not converge (no analysis, no inheritance,
+// the ladder goes on), with this reason in its place.
+inline constexpr const char* kLoadUnheldReason = "the load has no path to a mount";
 
 // REAL BOLTS (bearing anchors; the reviewer's ruling of 2026-10-25 21:45): more than
 // kAnchorsSlidingShare (analyze.hpp) of the anchors' total reaction is carried by the weak sliding
@@ -1731,6 +1762,9 @@ struct MinimizePlasticResult {
   std::vector<char> rung_non_convergent;
   std::vector<int> rung_non_convergent_iteration;
   std::vector<double> rung_non_convergent_residual;
+  // The tolerance that failed solve ran at; 0 when not recorded (the strength
+  // check's own solve). Same length and order as the three above.
+  std::vector<double> rung_non_convergent_tolerance;
   // Task 2026-08-03-preflight-feasibility-and-divergence (bar P6: THE GUARDS ARE
   // OBSERVABLE) — the per-rung outcome of the two DIVERGENCE guards, filled with
   // the same finalize-only discipline and always parallel to `evaluated`. Every

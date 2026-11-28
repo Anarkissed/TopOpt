@@ -225,3 +225,168 @@ Listed now so the bar is applied when it happens: candidate 1 of 3a (certified s
 - **Aage 2017, a billion voxels.** Detail such as curved spars and thin walls appears only at very high resolution (1.1 billion voxels, 1 to 5 days on 8,000 processors). Bearing on 3e: resolution is a design choice with a cost, not something a phone or a Mac buys; this supports deriving the part resolution from the smallest feature asked for.
 - **Groen 2021, coarse answer drawn as a fine lattice.** A coarse run with oriented cells, then the real geometry drawn by an implicit modeller; within about 5 % of the fine-run stiffness at about a thousandth of the cost, on a workstation. It confirms the "priced by a law" route in 3c for stiffness; it has no strength limit, so on its own it does not meet his margin rule.
 
+## Added 2026-11-25: the material length for the strength reading (stage 2), from published values
+
+The maintainer's word (2026-11-25): use published values; his own rig is not ready.
+
+Read (free copies, saved text searched for the numbers): Ahmed and Susmel, "A material length scale-based methodology to assess static strength of notched additively manufactured polylactide (PLA)", Fatigue Fract Eng Mater Struct 41 (2018) 2071-2098, `10.1111/ffe.12746` (eprints.whiterose.ac.uk/123322); Susmel, review chapter on notched additively manufactured ABS and PLA (2022; eprints.whiterose.ac.uk/194145).
+
+- The length: L = (1/pi) (K_Ic / strength)^2, with strength = the plain material's tensile strength for these (brittle-acting) printed polymers. The stress is read at L/2 from the surface (point method), averaged over a line 2L long (line method), or over a half-disc of radius L (area method).
+- Printed PLA (100 % infill, any raster angle): tensile strength 42.9 MPa, E 3,479 MPa, K_Ic 3.7 MPa m^0.5 (thick specimens; thinner ones gave 3.5). The formula gives 2.4 mm; the authors could not trust the toughness test and calibrated L = 4.6 mm from sharp-notch tests. Point and area methods then predicted every notched test (tension and bending, blunt to sharp, three raster angles) within about 20 %.
+- Printed ABS: tensile strength 23 MPa, K_Ic 2.6 MPa m^0.5, L = 4.1 mm.
+- PETG: filament as received 2.11 to 2.54 MPa m^0.5 (Guessasma et al., Polymers 11 (2019) 1220); no printed value found. With 45 MPa: about 0.8 mm. PC, PA12, PP, HIPS, the filled grades, resins: no printed value found yet.
+
+What it means here:
+1. The length is millimetres, not tenths: 2 to 5 mm for PLA and ABS. That is the size of the walls this optimiser makes. A peak read on one voxel (0.5 to 2 mm) is not what breaks a printed part; the stress over a few millimetres is. This is why the per-voxel peak is both too harsh and unsteady.
+2. Tests E agree in kind: read over a fixed 1.8 to 3.6 mm, the plate's number moves 6 to 8 % across resolutions and the ring's 2 to 8 %, against 12 to 24 % for the per-voxel peak.
+3. Open, for discussion with the maintainer before any of it is built: the published method predicts BREAKING against tensile strength; this app certifies against YIELD with a safety factor. And the layer direction has its own, lower strength and toughness (no published L across layers found). A cautious first form: read over a size tied to the line width and never larger than the published L for the material, with the knockdowns as today.
+
+### Second search, 2026-11-25 evening: the published lengths disagree, and most materials have none
+
+- Printed ABS again: Cicero, Martinez-Mata, Arrieta et al., "Analysis of notch effect in 3D-printed ABS fracture specimens containing U-notches", Materials 13 (2020) 4716, `10.3390/ma13214716` (read from PubMed Central, tables 1 to 3). Strong prints (tensile strength 52 to 61 MPa, toughness 3.5 to 4.1 MPa m^0.5, three raster angles, 33 notched bending tests). The formula gives 1.4 to 1.5 mm; the length that best FITS the tests is 0.46 to 0.92 mm (averaged over a line) and 0.28 to 0.44 mm (read at a point). The authors say the fitted and formula values differ "significantly" because the material is not fully brittle. Susmel's 4.1 mm was for a weak print (23 MPa).
+- So for one material the published length runs from 0.3 to 4.1 mm depending on the print and the method. The table (`material_length.hpp`) takes the lowest value that matches how we read (averaged over a size): ABS 0.46 mm, PLA 2.4 mm, PETG 0.7 mm (filament data). With his half rule: 0.23, 1.2 and 0.35 mm.
+- No printed value found for PC, PA12, PP, HIPS, ASA, the filled grades or the resins (searched: fracture toughness and critical distance, each material, printed specimens). A printed short-fibre polyamide study reports toughness "slightly higher" than neat polyamide without a number in reach.
+- What this does to the proposal: at half of 0.46 mm the reading is smaller than a voxel on every job, so for ABS the new number IS today's peak (with cut voxels at their real stiffness). The steadiness measured in tests E came from 1.8 mm and up. The honest position: the published data support a length of the order of a millimetre for printed plastics but do not pin it per material; his rig has to. Until then the choice between "cautious and unsteady" (small length) and "steady and less proven" (about 1 to 2 mm for every material) is his.
+
+
+### The maintainer's source: CNC Kitchen (Stefan Hermann), read 2026-11-25
+
+Four articles read: comparing PLA, PETG and ASA (2020-02-03); Prusament PC Blend (2021-06-12); Essentium PCTG (2021-05-29); carbon-fibre nylon PA6 against PA12 (2025-08-17). His own caveat: none of it on calibrated equipment; specimens per value mostly not stated.
+
+- No fracture toughness or critical distance anywhere, so nothing here sets the length directly.
+- Layer strength, standing against lying (his hooks and mini-specimens): PLA 55 %, PETG 46 %, ASA 29 % (34 % in a warm enclosure), PC Blend 50 to 63 %, PCTG 75 %. Our `materials.json` (the maintainer's data, not edited): PLA 0.55, PETG 0.70, ASA 0.60, PC 0.60. PETG and ASA are well above what he measured.
+- Notched impact (Izod), lying: PLA 5, PETG 8.6, ASA 18, PCTG 24, PC Blend 27 kJ/m2. STANDING: PC Blend about 2, PCTG 1.5 kJ/m2. So across the layers the notched toughness is 13 to 16 times lower than in the plane, while the strength is only 1.3 to 2 times lower. By the length's own formula that makes the length across layers roughly a fifth of the in-plane one. This bears on the decision "same length across layers".
+- Carbon-fibre nylon: PA6 loses 44 % of its strength and two thirds of its stiffness once it has taken up moisture; PA12 loses 10 to 15 %. A dry-strength number for a nylon is not the strength of the part in use.
+- A cross-check only, NOT a published value: a rough toughness from his impact energy and bending stiffness, K about sqrt(E x G), gives PLA 4.1 MPa m^0.5, beside the published 3.7. The same sum gives PETG 4.0, ASA 6.4, PC 7.7. Impact energy overstates the true fracture energy, so these are upper guides at best.
+
+### Decided by the maintainer, 2026-11-25
+
+"Let's go with the lowest published value for each." So: PLA 2.4 mm, ABS 0.46 mm, PETG 0.7 mm, halved by his earlier rule (1.2, 0.23, 0.35 mm). Open: the nine materials with no published value.
+
+### PA12, the material of every reference part of his (B6, 2026-11-26 04:30)
+
+Read from PubMed Central (the tables verbatim):
+
+- Zolfagharian, Khosravani and Kaynak, "Fracture resistance analysis of 3D-printed polymers", Polymers 12 (2020) 302, `10.3390/polym12020302`. Nylon 12 FILAMENT printed on a Fortus 450mc (100 % infill, raster 0 degrees) against PA12 POWDER by Multi Jet Fusion. Table 1: fracture toughness K_c 0.92 MPa m^0.5 (printed filament) and 0.58 (MJF); tensile strength 44.79 and 34.91 MPa; modulus 493 and 780 MPa. The paper puts K_c in the table "instead of" the plane-strain toughness and does not state how it was measured; its printed yield stresses (3.61 and 7.21 MPa) look wrong. Treat as indicative.
+- Stoia, Marsavina and Linul, "Mode I fracture toughness of polyamide and Alumide samples obtained by selective laser sintering", Polymers 12 (2020) 640, `10.3390/polym12030640`. Laser-sintered PA2200 (EOS), bending specimens to ASTM D5045, five per orientation: K_Ic 2.18 to 2.90 at 0 degrees (mean 2.69), 1.80 to 2.28 at 45 degrees (mean 2.03), 1.91 to 2.74 at 90 degrees (mean 2.35) MPa m^0.5. No tensile data in the paper.
+- Not opened (paywalled or embargoed): Crespo et al. 2019, "Failure of polyamide 12 notched samples manufactured by selective laser sintering" (uses the theory of critical distances directly; should hold a length for sintered PA12); Avanzini et al., Engineering Fracture Mechanics 2024 (MJF PA12, strain-energy criterion). Titles for the maintainer if he wants them.
+
+The length by the formula, L = (1/pi)(K / tensile strength)^2:
+
+| source | toughness, strength | L |
+|---|---|---|
+| printed nylon 12 filament (the only FILAMENT-printed value found) | 0.92, 44.8 MPa | 0.13 mm |
+| MJF PA12 | 0.58, 34.9 MPa | 0.09 mm |
+| laser-sintered PA2200, lowest orientation (strength 48 MPa from the maker's sheet, not from the paper) | 2.03, 48 MPa | 0.57 mm |
+| laser-sintered PA2200, highest orientation | 2.69, 48 MPa | 1.00 mm |
+
+What it means: by "the lowest published value for each" PA12's length is 0.13 mm, and half of it 0.07 mm: far under a voxel at any resolution he runs. So for his parts the reading stays one voxel whichever way the table is filled. PA12 is NOT added to `material_length.hpp` tonight, on purpose: a published length makes the code switch on real stiffness for cut voxels, and real stiffness with a one-voxel reading is the pairing the reviewer's bar found unsafe (6 to 18 % low on the plate). Whether a material whose length is under a voxel gets the middle stiffness (E x fill^2, the one pairing that passed) or keeps today's solve is part of the ruling already asked of the reviewer. Held for the maintainer in the morning.
+
+## Added 2026-11-26: keeping every fixed face joined to the part (desk research for the morning question; nothing built)
+
+The problem, seen on two made sample parts (stage 1 file): when a part is held in more places than it needs, the optimiser cuts the spare support off (the beam's second end; the bracket's thin tab), and the app either refuses the version (the Carriage Arms rule) or the export bridges it back with a bar. The optimiser is never told a fixed face has to stay joined.
+
+What the literature offers, in the order of how much it would change:
+
+1. A connectivity rule inside the optimiser. Coola, Aage and Sigmund, "A practical review on promoting connectivity in topology optimization" (arXiv 2501.09402, 2025, for Structural and Multidisciplinary Optimization) compares five such rules on one problem. The best known is the "virtual temperature" method: a second, cheap, heat-like solve in which material conducts and air does not; an island (or a cut-off support) shows up hot, and a limit on the hottest point keeps everything joined. Cost: one extra scalar solve per step (far cheaper than the strength solve) and one more limit for the optimiser to honour. Opened: the review's abstract and summary only.
+2. "Fail-safe" optimisation: the part must still carry its loads with a piece missing (Zhou and Fleury, "Fail-safe topology optimization", Struct Multidisc Optim 2016, DOI 10.1007/s00158-016-1507-1; MIT, "Volumetric topology optimization under redundancy constraints"). Turned to our case: add a load case per fixed face in which that face is left out, or in which it alone holds the part. Then every support does real work and the optimiser keeps it joined by itself, and the result means something to the user ("it still holds with one bolt out"). Cost: one more strength solve per fixed face per step, so it is only affordable for a few fixed faces, and it makes parts heavier. I did not find a paper that does exactly this for supports; the fail-safe papers remove material, not supports.
+3. What the app does today: refuse the version after the fact (cheap, loses the lightest versions), or bridge it back at export (keeps the version, with a bar the optimiser never checked).
+
+A cheaper engineering route that needs no paper, to weigh beside these: have the rule that refuses the version ALSO stop the removal step that would cut the support off (the level-set update is rolled back where it would separate a fixed face's pad from the body). It keeps the versions, costs a flood fill per step, and adds no new physics; its risk is a thin thread left hanging on, which the minimum-width rule of stage 3 would then have to thicken.
+
+For the discussion with him: (1) is the general answer and fits the plan's stage on the optimiser; (2) is the only one that makes the kept support worth having; the cheap route gets most of the benefit soonest. No lean taken before he has seen the pictures.
+
+## Added 2026-11-26: PA6 (the maintainer plans to print it), for the stage 2 reading length
+
+Looked for a published toughness of FILAMENT-PRINTED nylon 6. Found little, and none I would put in the table:
+
+- Toughness: one paper on printed engineering plastics gives about 3.0 MPa m^0.5 for "pure PA" and 1.72 for glass-filled PA (Yang et al., "Study on the Fracture Toughness of 3D Printed Engineering Plastics", J. Materials Engineering and Performance; a correction was issued, and a published Comment disputes its values, Springer 10.1007/s11665-025-11260-z). The summary read does not say the PA is PA6. Not opened in full.
+- Strength, printed: Stratasys FDM Nylon 6, conditioned: 67.6 MPa flat (XZ), 36.5 MPa across the layers (ZX). Vendor PA6-CF: 115 MPa dry, 55 MPa wet in the layer plane: nylon loses about half its strength when it has taken up moisture.
+- By the formula L = (1/pi)(K / strength)^2 with 3.0 and 67.6: 0.63 mm; after his half rule 0.31 mm. Under a voxel on most of his jobs, as with PA12.
+- A lead not opened: Cicero, Ibanez-Gutierrez and others (Univ. of Cantabria) apply the theory of critical distances to MOULDED PA6 with 0 to 50 % short glass fibre, with and without moisture, 125 specimens; their papers should hold a calibrated length for plain PA6. Moulded, not printed.
+
+What it means for him: there is no good printed-PA6 number yet; the one found comes from a disputed paper. PA6 is NOT added to `material_length.hpp`; a PA6 job keeps the one-voxel reading. Two things matter more for PA6 than this length: moisture (dry or conditioned strength differ by half) and the across-layer strength (about half the in-plane value). If he prints a few PA6 test bars when the rig is ready, that beats anything published.
+
+## Reading stress at the true surface on a voxel grid (desk research 2026-11-27, for stage 4 and the one-judge ruling)
+
+Asked because of the measurements of 2026-11-27 (stage 2 file, last sections; ledger A-06, A-07, A-08). Marks: [R] the full text was opened and read; [A] abstract, catalogue record or citation only; [M] from memory, NOT checked; PW = paywalled. Nothing here has been run by us; every figure is the source's.
+
+**Cut-cell and immersed methods**
+- [R] Nadal, Ródenas, Albelda, Tur, Tarancón, Fuenmayor 2013, "Efficient finite element methodology based on Cartesian grids", Abstract and Applied Analysis, doi:10.1155/2013/953786 (open). Says low accuracy along the boundary is the known drawback of such grids. Their fix: a patch fit (SPR-CD) with the boundary's tractions and internal equilibrium imposed. On a thick cylinder, four-node elements: raw stress error falls as O(h), recovered as about O(h^2); peak boundary stress from the recovered field "usually very accurate". 2D, exact integration in the cut elements (not fill x E).
+- [A] Nadal, Bordas, Ródenas, Tarancón, Tur 2010, "Accurate stress recovery for the 2D fixed-grid FEM", Civil-Comp Proceedings 93, paper 256, doi:10.4203/ccp.93.256.
+- [A, PW] Zhang, Aragón 2022, Int J Numer Meth Eng, doi:10.1002/nme.6825: cut elements with small physical parts OVER-estimate stress; patch recovery fixes it. (Our E x fill^3 over-read on the loaded ring is this family of failure.)
+- [A, PW] Parvizian, Düster, Rank 2007, "Finite cell method", Comput Mech 41:121-133, doi:10.1007/s00466-007-0173-y; Schillinger, Ruess 2015, Arch Comput Methods Eng 22:391-455, doi:10.1007/s11831-014-9115-y. O(h) stress for linear elements in the energy norm; no pointwise boundary figure found.
+- [M] Burman, Claus, Hansbo, Larson, Massing 2015, "CutFEM: discretizing geometry and partial differential equations", Int J Numer Meth Eng 104:472-501 (DOI unverified). Without a stabilising term small cut fractions make stresses unstable.
+
+**Stress in topology optimisation**
+- [R, pages 1-8] da Silva, Beck, Sigmund 2019, CMAME 354:397-421, doi:10.1016/j.cma.2019.05.046, summarising [A] their CMAME 344:512-537, doi:10.1016/j.cma.2018.10.020: stresses at jagged edges are over-estimated and oscillate or are under-estimated, by the relaxation; they keep a smooth intermediate layer at least one element thick, a relaxed stress interpolation, and CHECK on a body-fitted re-mesh.
+- [A, PW] Svärd 2015, "Interior value extrapolation", Struct Multidisc Optim 51:613-629, doi:10.1007/s00158-014-1171-2: boundary stresses extrapolated from interior values. This is the carry we measured; its accuracy figures were not reachable.
+
+**Voxel models of bone (the same problem, well documented)**
+- [A, PW] Guldberg, Hollister, Charras 1998, J Biomech Eng 120:289-295, doi:10.1115/1.2798314: bending needs at least 3 to 4 voxels through the section. (Our A-06 table says more than that for 10 %.)
+- [A, PW] Charras, Guldberg 2000, J Biomech 33:255-259 (DOI unverified): refining a voxel mesh does NOT reduce the local maximum error; boundary-specific filtering does.
+- [A, PW] Camacho, Hopper, Lin, Myers 1997, J Biomech 30:1067-1070, doi:10.1016/S0021-9290(97)00073-0: smoothing the surface lowers the surface stress error.
+
+**Small notches**
+- No published "elements per notch radius" rule found; one industry example converged at about 12 elements per radius [A]. Our 20 to 37 % low under 3 voxels of radius is consistent.
+- [A, book] Taylor 2007, The Theory of Critical Distances, Elsevier, ISBN 978-0-08-044478-9: failure at a notch is predicted from the stress a material-specific distance L / 2 IN from the notch, not at the surface. Where that distance is a voxel or more, the sub-voxel surface peak stops mattering. THIS IS STAGE 2's SIZE FORM (the stress read over the material's own length): the research already in this file, arrived at again from the notch side. It says the answer to A-08 for plastics may be the size form, not a sharper surface reading; it needs L for the material (PLA published; PA6 to find or test).
+
+**What the evidence supports for a solver that stays on its grid, in order**
+1. Never a power above 1 on the cut voxels FOR THE STRESS READING (real stiffness, or a relaxed interpolation with a layer at least a voxel thick). Free. Agrees with our measurements.
+2. Boundary-aware patch recovery (fit over full voxels with zero traction imposed on the true free surface): the only method found VALIDATED on non-fitted grids, and only in 2D with exactly integrated cut elements. A small least-squares fit per surface patch.
+3. The straight-line carry (Svärd): what we measured; within 9 % on gentle faces, fails under 3 voxels of radius.
+4. At notches: the size form (critical distance), where the material's length is a voxel or more; otherwise flag it, or re-analyse the flagged spot finer.
+Not found: any validation in 3D on voxels with fill-scaled stiffness. If we build (2) we validate it ourselves on the ring, the beam and the ellipse.
+
+Paywalled items for the maintainer to fetch if wanted (title and DOI above): Zhang and Aragón 2022; Svärd 2015; Guldberg, Hollister, Charras 1998; Charras and Guldberg 2000; da Silva, Beck, Sigmund 2019 (CMAME 344).
+
+## The twelve papers the maintainer fetched on 2026-11-27, READ IN FULL (three readers, in place in `agent-scratch/toreview/papers`; nothing copied; a reader's own inference is marked "(reader)"; I read Taylor 2006 pages 1 to 3 myself)
+
+**A. Reading stress at the surface of a voxel model**
+- Svärd 2015 (doi:10.1007/s00158-014-1171-2): "interior value extrapolation" is our carry. 2D, FIRST PRINCIPAL stress at element centres; the normal from the centre of gravity of the material in a disc; a STRAIGHT LINE fitted over 1.75 to 3.5 elements behind the edge (the first 1.75 are skipped); evaluated at the boundary element's centre, not the true surface. Table 1, 14 handbook notches (radius 4 to 10 units) x 30 angles, mean / scatter of the error: element size 1: -26 % / 20 %; 1/2: -15 % / 14 %; 1/3: -9.5 % / 11 %; 1/6: -3.3 % / 7 %. The conventional reading: -23 % down to -8 % with a scatter of 20 % that never shrinks. So the published method reads LOW by the same amounts we measured, and needs a notch radius of tens of elements for 5 %. Soft (grey) boundaries read about 20 % high. His designs are held to 5 elements of member and 1 of inner radius. Loaded boundaries: not treated. A curvature-shaped carry: not in the literature read; ours has no published check.
+- Guldberg, Hollister, Charras 1998 (doi:10.1115/1.2798314): a voxel cantilever. Section-average von Mises error by elements across: about 45 % at 2, 15 to 20 % at 3 to 4, 8 % at 5, under 4 % from 7; low at low resolution (stiffening). They recommend at least 3 to 4 across in bending. Boundary values OSCILLATE around the exact; averaging 3 neighbouring boundary elements smooths them.
+- Charras, Guldberg 2000: the boundary filter is a plain mean of a boundary element with the boundary elements sharing 2 nodes, boundary only. Maximum von Mises error at element centres: unfiltered about 75 to 95 % (does not fall with refinement), filtered about 45 % at 10 across and 30 % at 20 to 25; it helps only above 5 across. A filter over the whole model does not work.
+- Sharma, Maute 2018 (doi:10.1007/s00158-017-1833-y): with exactly integrated cut elements, stress in small slivers still over-reads; converges to the body-fitted answer only with a ghost penalty on the solve AND a stabilised smoothing of the stress; plain averaging does not converge. In 3D on coarse meshes interior points miss surface peaks. Loaded cut faces: not treated.
+- da Silva, Beck, Sigmund 2019 (doi:10.1016/j.cma.2018.10.020): on 0/1 voxels a plate with a hole reads 3.0 (exact 3) on a coarse mesh and 3.5 to 4.1 on a FINE one, oscillating with a period of one element: refinement makes a staircase worse. Their cure is a grey layer one element wide with a relaxed stress law calibrated for SIMP p = 3; body-fitted checks then within 5 % (fine) to 12 % (coarse). It would have to be calibrated again for any other law.
+
+**B. Changing the solve**
+- Kabel, Merkert, Schneider 2015: the "laminate" composite voxel is proven for TWO SOLID phases and for average properties (about 10 x smaller error); a void phase is not treated (it breaks the method's condition; a residual stiffness would be needed), and against pore-like contrast above about 50 the plain volume-fraction rule (our E x fill) did BETTER. The voxel becomes anisotropic (the single reference element matrix is lost); their solver ran 5 to 36 x slower. No local-stress figure. DROPPED as a lead for material against air.
+- Simo, Rifai 1990: enhanced strains condensed per element; exact bending deflection with one element through the thickness when undistorted; no locking to nu 0.4999. For identical cubes the condensed matrix is one matrix times E (reader), so the regular-grid solver keeps its shape. The paper works 2D only (the 3D modes come from elsewhere) and does not validate SURFACE stress: that would have to be read from the enhanced strain at the face and measured by us.
+- Dong 2001: structural stress = membrane + bending from equilibrium across the thickness; for solids he integrates the stresses over the section (the nodal-force form is given for shells); the same value for element sizes from 0.16 t to 2 t; not checked against exact answers; needs an identifiable thickness direction; non-monotonic profiles need elements under t / 2.
+- Cormier et al. 1999: sub-modelling at area ratios of 2000:1 and more; DISPLACEMENT boundary values at nodes with CUBIC SPLINES between; global errors of 1.2 to 100 % at the peak brought to 2.0 % mean, 2.6 % worst, at about 100 x less computing; needs three global grids and the check that the sub-model's answer is the same from the medium and the fine global grid (a two-grid check would have passed an answer 40 % low). 2D only.
+
+**C. What strength to compare with (the theory of critical distances)**
+- Taylor 2006 (the review he found in place of the book; a full substitute): Point Method = the stress at L / 2 from the hot spot; Line Method = the average over 2 L; L = (1 / pi)(Kc / sigma_u)^2. In brittle polymers the strength to use is an inherent strength sigma_0 ABOVE the tensile strength, so mild notches (Kt below sigma_0 / sigma_u) do no harm; features much smaller than L lose their notch effect.
+- Susmel, Taylor 2008: the stress is the MAXIMUM PRINCIPAL stress (under mixed loading, the normal stress on the plane where it is largest), compared with sigma_0, and L is defined with sigma_0. PMMA: sigma_0 = 113.9 MPa against a tensile strength of 67 (1.7 x), L = 0.108 mm. Within about 20 % on notches of radius 0.2 to 1.2 mm; at a blunt 4 mm notch (Kt 1.4) up to 43 % on the UNSAFE side: for Kt below about 2 use the plain maximum-principal-stress check. Neither paper gives a size for a volume average (the "1.54 L" figure is not in them), nor a rule for members thinner than L, nor a mesh size.
+- Dul, Fambri, Pegoretti 2021 (doi:10.1007/s11665-021-05635-1): a high-temperature polyamide (grade not stated as PA6), neat and with 15 % carbon fibre, printed at 0.4 mm nozzle, tested DRY. Neat: flat 71 MPa yield, upright 26 MPa (0.36 of flat); apparent toughness 5.6 flat, 1.8 upright (not valid K_Ic). L from these (reader's arithmetic): about 1.9 mm flat, 1.5 mm upright; low trust (not PA6, dry, invalid toughness, very ductile).
+
+**WHAT IT MEANS FOR STAGE 2 (mine; for the reviewer)**
+1. The size form reads VON MISES over a BALL; the theory it rests on reads MAXIMUM PRINCIPAL stress at a point L / 2 in or along a line 2 L, against an inherent strength that comes paired with L. The ball and von Mises are not what was validated: to be reconciled (measure the ball against the Point Method on the known shapes, and decide the stress quantity).
+2. Members under L thick (most of ours with PLA's 2.4 to 4.6 mm): the theory is silent; the consistent reading is that the notch effect fades and the NET-SECTION stress (with bending) against the tensile strength governs; take the worse of the two checks.
+3. The surface carry is the published method (Svärd) with the same low reading; our true-surface target and the curvature shape go beyond it and are unverified outside our own tests. Add an average ALONG the surface over a few points (Charras, Guldberg) against the staircase oscillation.
+4. Thin members in bending: the literature's floor is 3 to 5 elements for a section AVERAGE, not a surface value; A-06 stands. The two leads that could lower it are the enhanced-strain cube and section-force stress; the laminate voxel is not one.
+5. Loaded cut faces: no paper read treats them. The straight line there is our own measured best.
+6. Upright printing in nylon keeps about a third of the flat strength in this one paper: the across-layer check matters more for nylon than for PLA.
+
+## Graded voxels as an add-on: the fourteen papers the maintainer fetched (2026-11-27 evening), READ by one reader in place (pages read: nine in full, five nearly; "(reader)" = its inference). A SIDE PIECE; research only; nothing built.
+
+**The two-way loop (non-intrusive global-local coupling), as the papers give it**
+- Gosselet, Blanchard, Allix, Guguin 2018 (doi:10.1186/s40323-018-0097-4): global solve with an extra interface load p; fine box solved with the global displacement on its boundary; residual r = -(fine reaction + p - coarse reaction of the zone), where the coarse reaction needs NO solve (the coarse operator applied over the zone); p += r. Converges if the coarse model of the zone is STIFFER than the fine one (sufficient). Interface conjugate gradients converge without that condition. The coarse zone may be made stiffer on purpose: the converged answer does not change. Non-matching interface: displacements down by T, reactions up by T transposed. Linear example (a holed blade, fine softer), to 1e-5: plain 11 iterations, CG 6, Aitken 7, SR1 8.
+- Gendre, Allix, Gosselet, Comte 2009 (doi:10.1007/s00466-009-0372-9): one-way sub-modelling was 10 % off in displacement and 5 % in stress; the loop to 0.1 %: 7 iterations plain, 3 with SR1 (2D); 3D (500 000 global unknowns): 7 plain, 2 with SR1. Converges for local softening; if it converges it reaches the full model's answer.
+- Whitcomb 1991 (doi:10.1016/0045-7949(91)90334-I): a hole: 6 iterations to 1e-7; one-way Kt 2.12 against 2.79 iterated (the zoom alone 24 % LOW). Local STIFFENING: 11 iterations at 2 x, 122 at 2.75 x, diverges at 3 x; with relaxation 0.5: 8 to 20.
+- Duval, Passieux, Salaün, Guinard 2016 (review): "as soon as the local model is stiffer than the zone it replaces, the algorithm diverges" without help; Aitken and quasi-Newton cure it (a deliberately stiffer patch: plain diverged, Aitken about 100, quasi-Newton 17). A thicker patch converges faster (1 to 10 coarse layers: plain 700 to 90, quasi-Newton 18 to 12). Six patches at once: quasi-Newton 13, Aitken 17. Patches may re-define supports and loads.
+- Liu, Sun, Fan 2014: non-matching interfaces with T and its transpose (energy-preserving); 3 to 5 iterations with Aitken to 0.1 %, 9 to 12 without; stress error then 0.03 to 0.05 %.
+
+**The same idea inside multigrid (FAC, local defect correction)**
+- McCormick, Thomas 1986 and McCormick 1984: composite-grid cycle = coarse solve of the restricted composite residual, correction, local fine solve; no overlap needed; proven convergent for symmetric positive definite problems with a Galerkin coarse operator; BOTH solves may be inexact and it still converges (Theorem 4); measured factors 0.04 to 0.47; refinement ratio 2.
+- Hackbusch 1984; Anthonissen, Mattheij, ten Thije Boonkkamp 2003: local defect correction with a small overlap converges at O(H^2) per iteration (factors 1e-3 to 1e-6; "one iteration is enough in practice"), O(H) with none; proven for Poisson with the same operator in the patch.
+
+**Second group**: a published adaptive (hanging-node) multigrid topology optimiser coarsens VOID regions rather than refining raisers (2 to 6 x faster; Herrero-Pérez 2023); 3D adaptive stress-constrained optimisation used 3.5 million elements against 102 million uniform, with no stress-accuracy comparison (Salazar de Troya, Tortorelli 2020); the sparse narrow-band optimiser stores 4 x 4 x 8 blocks, Galerkin coarse levels, 128 bytes a node, 2.5 to 3.1 x faster than dense (Liu et al. 2018); the incompatible-modes element: one-element cantilever 9.0 (plain) against 100.0 (exact and incompatible) (Taylor, Beresford, Wilson 1976).
+
+**What it means for an add-on driver beside our solver (mine, from the reader's synthesis)**
+1. Our measured case (the coarse grid about 20 % too STIFF) is the favourable one: the papers' sufficient condition holds, and softening examples settle in about 6 iterations plain, 3 to 8 accelerated. Plan on 3 to 8 global solves a box, warm-started.
+2. Use acceleration from the first version (Aitken is the simplest; interface CG is unconditional). Where exact fills soften cut voxels the box can locally be the stiffer one: the cure the papers give is to make the coarse voxels under the box full on purpose (the answer is unchanged).
+3. No overlap; box faces on coarse voxel faces, 2 to 3 coarse voxels from the feature; displacements down by trilinear interpolation, reactions up by its transpose; the coarse reaction is one operator application over the box's voxels.
+4. The one-way zoom alone is the loop's first pass and reads LOW: 5 to 24 % in the papers' examples.
+5. NOT covered by any of them: voxel models with cut or all-or-nothing voxels; trilinear voxels at h : h/2 on a matrix-free multigrid solver; a box face that cuts a thin wall, a support or a loaded face; inexact solves in this loop; topology-optimisation sensitivities through it. All to be measured.
+

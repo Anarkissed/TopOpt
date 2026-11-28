@@ -87,6 +87,10 @@ struct SimpParams {
   // not enter the tensor. A frozen voxel's design density never moves, so no
   // updater reads it; a Mode 2 beta step reads exactly this.
   const std::vector<double>* lattice_relative_density = nullptr;
+  // E-01 (TO rebuild stage 5): the solver settings the run was configured with
+  // (SimpOptions::solver_settings), handed to every solve made with these params;
+  // nullptr = the global switches, as before.
+  const SolverSettings* solver_settings = nullptr;
 
 
 };
@@ -1133,6 +1137,11 @@ struct SimpOptions {
   // the identical system to the same tolerance. OPT-IN: leaving this at the
   // default keeps Gate-V2 and every existing caller unchanged. See SolverKind.
   SolverKind solver = SolverKind::JacobiCG;
+  // E-01 (TO rebuild stage 5): the run's solver settings as ONE value. Filled by
+  // configure_production_options (and the CLI's overrides after it); the run's
+  // SimpParams point at it. use_solver_settings == false = the global switches.
+  SolverSettings solver_settings;
+  bool use_solver_settings = false;
   // Iteration cap. For the OC / projected paths this is the convergence
   // criterion paired with `change_tol` (unchanged). For MMA it is the raised
   // SAFETY CAP behind objective-plateau termination (handoff 086-mma-plateau):
@@ -1773,7 +1782,17 @@ struct SimpOptimizeResult {
   // a rung rejection needs to say how far the solve missed (both 0 when not set).
   bool non_convergent = false;
   int non_convergent_iteration = 0;
+  // THE CONNECTION RULE (TOPOPT_CONNECTION=support): WHY the trajectory stopped, when
+  // the optimiser knows. -1 = not said (the caller decides from the solver's counter,
+  // fea_matfree_load_unheld_count); 0 = a real non-convergence; 1 = an unheld load
+  // (a loaded piece reaching no support), after any step-backs were used up. An
+  // optimiser that steps back MUST set it: a rung that stepped back and then failed
+  // for a real non-convergence has made the counter grow without ending on it.
+  int stop_cause_load_unheld = -1;
   double non_convergent_residual = 0.0;
+  // The CG tolerance the failing solve was run at (the loose trajectory one or the
+  // tight certification one), so a refusal can say which it missed (0 = not set).
+  double non_convergent_tolerance = 0.0;
   // --- ACTIVE DOMAIN outcome (active-domain phase 1) -----------------------
   // `active_domain_band` is the band width this run ACTUALLY ran with (0 = the
   // feature was off; a negative request has already been resolved to its auto

@@ -6,9 +6,11 @@
 // simp_optimize / simp_compliance (Eigen), so it is gated on Eigen in CMake
 // alongside simp.cpp.
 
+#include "topopt/to_stage_switch.hpp"  // TO rebuild stage 1
 #include "topopt/pipeline.hpp"
 #include "topopt/plsm.hpp"
 
+#include <optional>
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
@@ -144,6 +146,29 @@ std::vector<NodalLoad> masked_self_weight_loads(const VoxelGrid& grid,
   for (std::size_t idx = 0; idx < mask.size(); ++idx)
     if (mask[idx] == MaskValue::FrozenVoid) weighed.tags[idx] = VoxelTag::Empty;
   return self_weight_loads(weighed, density, gravity, direction);
+}
+
+// The SAME weight as masked_self_weight_loads, said per voxel (the connection
+// rule's caller change, TO rebuild stage 5): force[e] = gravity x density x voxel
+// volume on every voxel that function weighs (solid by tag, not FrozenVoid), else
+// 0. The solve is handed this (FeaBodyLoadScope) so that a loose piece's own
+// weight can leave the solve with it; it only ever subtracts it. THE ONE RULE:
+// the two functions weigh exactly the same voxels.
+std::vector<double> masked_self_weight_voxel_force(const VoxelGrid& grid,
+                                                   const DesignMask& mask,
+                                                   double density, double gravity) {
+  if (mask.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "masked_self_weight_voxel_force: mask size != grid.voxel_count()");
+  const double per_voxel = gravity * density * grid.voxel_volume();
+  std::vector<double> force(grid.voxel_count(), 0.0);
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        const std::size_t idx = grid.index(i, j, k);
+        if (grid.solid(i, j, k) && mask[idx] != MaskValue::FrozenVoid) force[idx] = per_voxel;
+      }
+  return force;
 }
 
 // CORE LIST item 42 B — THE BRIDGE HOLDS ITSELF (the reviewer's values of 2026-10-25
@@ -950,6 +975,66 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   const VoxelGrid& G = domain.grid;
   const std::vector<DirichletBC>& B = domain.bcs;
 
+  // TO rebuild stage 2, TOPOPT_STRENGTH=surface only: THE STRESS VIEW the margin probe
+  // and the certificate solve and read stress on (the reviewer's ruling: drawn-face
+  // fills in the loop, never fill^3). A copy of G and of the design in which
+  //  - a voxel whose centre is inside the DRAWN part (not Empty in the part grid),
+  //    not Load or Fixture, holds min(design, drawn fill);
+  //  - a voxel Empty in G that the drawn faces cut (fill >= kStressMaterialFloor)
+  //    beside printed material (a 6-neighbour >= 0.5) gets an element at its fill.
+  // The part grid sits in G at domain.offset_*; G's voxels outside the part grid's
+  // extent are left as they are. Mass, grams, V3 and the files stay on the design
+  // itself (analyze_fixed_design's stress_view). Null in every other mode.
+  const bool drawn_view_on = strength_mode() == StrengthMode::Surface &&
+                             !options.drawn_fill.empty() &&
+                             options.drawn_fill.size() == grid.voxel_count();
+  bool drawn_view_said = false;
+  auto drawn_stress_view = [&](const std::vector<double>& rho_d) -> std::unique_ptr<StressView> {
+    if (!drawn_view_on || rho_d.size() != G.voxel_count()) return nullptr;
+    auto sv = std::make_unique<StressView>();
+    sv->grid = G;
+    sv->density = rho_d;
+    std::size_t lowered = 0, added = 0;
+    for (int kp = 0; kp < grid.nz; ++kp)
+      for (int jp = 0; jp < grid.ny; ++jp)
+        for (int ip = 0; ip < grid.nx; ++ip) {
+          const int i = ip + domain.offset_i, j = jp + domain.offset_j, k = kp + domain.offset_k;
+          if (i < 0 || j < 0 || k < 0 || i >= G.nx || j >= G.ny || k >= G.nz) continue;
+          const std::size_t p = grid.index(ip, jp, kp), g = G.index(i, j, k);
+          const double f = options.drawn_fill[p];
+          const VoxelTag tg = G.tags[g];
+          if (grid.tags[p] != VoxelTag::Empty) {
+            if (tg == VoxelTag::Empty || tg == VoxelTag::Load || tg == VoxelTag::Fixture) continue;
+            if (f < rho_d[g]) {
+              sv->density[g] = f;
+              ++lowered;
+            }
+          } else if (tg == VoxelTag::Empty && f >= kStressMaterialFloor) {
+            const int di[6] = {1, -1, 0, 0, 0, 0}, dj[6] = {0, 0, 1, -1, 0, 0}, dk[6] = {0, 0, 0, 0, 1, -1};
+            bool beside = false;
+            for (int q = 0; q < 6 && !beside; ++q) {
+              const int a = i + di[q], b = j + dj[q], c = k + dk[q];
+              if (a < 0 || b < 0 || c < 0 || a >= G.nx || b >= G.ny || c >= G.nz) continue;
+              const std::size_t u = G.index(a, b, c);
+              beside = G.tags[u] != VoxelTag::Empty && rho_d[u] >= 0.5;
+            }
+            if (beside) {
+              sv->grid.tags[g] = VoxelTag::Interior;
+              sv->density[g] = f;
+              ++added;
+            }
+          }
+        }
+    if (!drawn_view_said) {
+      drawn_view_said = true;
+      std::fprintf(stderr,
+                   "[drawn fill] stress view: %zu voxel(s) lowered to their drawn fill, %zu "
+                   "sliver voxel(s) added\n",
+                   lowered, added);
+    }
+    return sv;
+  };
+
   // Handoff 127 (Amendment 2): start this run's multigrid stagnation latch fresh,
   // on the (single) thread that will issue every solve below — the warm-start
   // pre-solve, the ladder rungs, and the recovery solves. The latch is sticky
@@ -978,6 +1063,25 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // load this run certified under" is reconstructed, never re-derived.
   const std::vector<NodalLoad> loads =
       design_domain_loads(domain, options, material.density_g_cm3);
+
+  // THE CONNECTION RULE (to_stage_switch.hpp, TOPOPT_CONNECTION=support; unset =
+  // today's bytes). Held for the whole run: every solve below counts a piece as
+  // held only when it reaches a support. In the self-weight mode the solve is
+  // also told each voxel's weight, so a loose piece leaves with its own weight;
+  // with an external load case nothing is registered, so every load is an applied
+  // load and a loose piece that carries one refuses the version (FeaLoadUnheld).
+  std::vector<double> body_voxel_force;
+  std::optional<FeaAnchorBySupportOnly> held_by_support_only;
+  std::optional<FeaBodyLoadScope> body_load_scope;
+  if (to_connection_rule_on()) {
+    held_by_support_only.emplace();
+    if (options.external_loads.empty()) {
+      body_voxel_force = masked_self_weight_voxel_force(
+          domain.grid, design_domain_mask(domain, options), material.density_g_cm3,
+          options.gravity);
+      body_load_scope.emplace(body_voxel_force, normalized(options.gravity_direction));
+    }
+  }
 
   // The reported / analysed build direction is the build-plate normal — "which
   // way is up on the plate", a DIFFERENT question from "which way is down in
@@ -1012,6 +1116,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 
   // Material -> SIMP params (penalty p = 3 per ARCHITECTURE §4).
   SimpParams params;
+  // E-01 (TO rebuild stage 5): every solve of the run gets the run's settings.
+  if (options.simp.use_solver_settings) params.solver_settings = &options.simp.solver_settings;
   params.youngs_modulus = material.youngs_modulus_mpa;
   params.poisson = material.poisson;
   params.penalty = 3.0;
@@ -1793,7 +1899,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // statement "every rung's solves converged". Called exactly once per loop iteration,
   // beside the matching result.rung_infeasible.push_back.
   auto record_rung_convergence = [&](bool non_convergent, int iteration,
-                                     double residual) {
+                                     double residual, double tolerance = 0.0) {
+    // The tolerance the failed solve ran at (0 = not recorded: the reader falls
+    // back to the configured one). Aligned with the three vectors below.
+    result.rung_non_convergent_tolerance.push_back(tolerance);
     result.rung_non_convergent.push_back(non_convergent ? 1 : 0);
     result.rung_non_convergent_iteration.push_back(iteration);
     result.rung_non_convergent_residual.push_back(residual);
@@ -2122,6 +2231,17 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     }
 
     MinimizePlasticVariant variant;
+    // The connection rule: did a solve of THIS rung refuse an unheld load?
+    const long long load_unheld_before = fea_matfree_load_unheld_count();
+    // The optimiser's own word when it gave one (it must, if it steps back: a rung
+    // that stepped back and later failed for a real non-convergence has made the
+    // counter grow without ending on it; TOSurface's catch, 2026-11-27); else the
+    // solver's counter since the rung began.
+    const auto rung_load_unheld = [&]() {
+      if (variant.optimization.stop_cause_load_unheld >= 0)
+        return variant.optimization.stop_cause_load_unheld == 1;
+      return fea_matfree_load_unheld_count() > load_unheld_before;
+    };
     variant.requested_volume_fraction = vf;
     // CORE LIST item 40 — the line carries its ask and the clamp verdict; both are
     // emitted only if some rung of this run saturates (`request_reported`, set
@@ -2220,14 +2340,28 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
           PlsmMarginProbe mp;
           const auto t0 = std::chrono::steady_clock::now();
           mp.load_path_ok = load_path_connected(G, density, kIso);
+          const std::unique_ptr<StressView> probe_view = drawn_stress_view(density);
           const FixedDesignAnalysis a = analyze_fixed_design(
               G, params, density, B, loads, material, build_dir, kCertTol,
               opt.cg_max_iterations, opt.solver, options.margin_stop, knockdown,
               mp.load_path_ok, part_solid, /*lattice=*/nullptr,
               /*score_build_orientation=*/false,
               /*build_direction_inferred=*/false,
-              /*auto_apply_build_orientation=*/false, kIso);
+              /*auto_apply_build_orientation=*/false, kIso,
+              /*gate_on_strut_strength=*/false, /*knobs=*/nullptr, probe_view.get());
           mp.margin = a.margin.worst_case;
+          if (to_stage1_on() && a.max_von_mises > 0.0 &&
+              a.von_mises_field.size() == G.tags.size()) {
+            // Stage 1 (ledger P-15): the margin without the load and anchor voxels,
+            // by the ratio of the two stress peaks over the printed voxels.
+            double own = 0.0;
+            for (std::size_t v = 0; v < G.tags.size(); ++v) {
+              if (G.tags[v] == VoxelTag::Load || G.tags[v] == VoxelTag::Fixture) continue;
+              if (density[v] < kIso) continue;
+              own = std::max(own, a.von_mises_field[v]);
+            }
+            if (own > 0.0) mp.design_margin = a.margin.worst_case * a.max_von_mises / own;
+          }
           mp.non_convergent = a.non_convergent;
           mp.wall_s = std::chrono::duration<double>(
                           std::chrono::steady_clock::now() - t0)
@@ -2617,7 +2751,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       vr.printed_fraction = report_fraction(printed_fraction);
       vr.accepted = false;
       vr.margin_required = options.margin_stop;
-      vr.rejection_reason = kRungNonConvergentReason;
+      vr.rejection_reason =
+          rung_load_unheld() ? kLoadUnheldReason : kRungNonConvergentReason;
       measure_added_material(variant.optimization.physical_density, vr,
                              growth_target_saturated);
       // Every other field stays default-constructed — NOT measurements. The
@@ -2625,9 +2760,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 
       const int nc_iter = variant.optimization.non_convergent_iteration;
       const double nc_resid = variant.optimization.non_convergent_residual;
+      const double nc_tol = variant.optimization.non_convergent_tolerance;
       result.evaluated.push_back(std::move(variant));
       result.rung_infeasible.push_back(0);
-      record_rung_convergence(true, nc_iter, nc_resid);
+      record_rung_convergence(true, nc_iter, nc_resid, nc_tol);
       record_draft_rung(draft_k, draft_gap, draft_escalated, draft_probe_flip, draft_probe_cg, draft_probe_tightmove);  // sentinel: non-convergent
       result.report.rejected.push_back(result.evaluated.back().report);
       assert(result.evaluated.size() <= ladder.size() &&
@@ -2906,6 +3042,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     assert(opt.cg_tolerance == kCertTol &&
            "draft quality: recovery/certification solve must use the tight "
            "tolerance");
+    const std::unique_ptr<StressView> cert_view = drawn_stress_view(rho);
     auto certify = [&](const std::vector<DirichletBC>& cert_bcs,
                        const std::vector<NodalLoad>& cert_loads) {
       return analyze_fixed_design(
@@ -2947,7 +3084,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
         // ★ §1(c): gate on the measured strut bound over the latticed region, not
         // only on the solid region's margin. Armed only when this run actually
         // latticed something, so bar L1 stands everywhere else.
-        fl_latticed_voxels > 0 && options.frozen_lattice_gate_on_strut_strength);
+        fl_latticed_voxels > 0 && options.frozen_lattice_gate_on_strut_strength,
+        /*knobs=*/nullptr,
+        // TOPOPT_STRENGTH=surface: the stress on the drawn faces' fills (null otherwise).
+        cert_view.get());
     };
     // LOAD SCENARIOS (the reviewer's overnight ruling of 2026-10-26 03:45): every
     // scenario is certified on this rung's design; the WORST governs (its analysis is
@@ -2957,6 +3097,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     std::vector<ScenarioReport> scenario_reports;
     std::vector<ScenarioFields> scenario_fields;  // every scenario's own (the views)
     std::string unheld_scenario;
+    // The certification solve's own unheld load is judged from HERE, not from the
+    // rung's start: the trajectory may have stepped back (the counter grew) and then
+    // finished well.
+    const long long load_unheld_before_cert = fea_matfree_load_unheld_count();
     FixedDesignAnalysis fda;
     if (run_scenarios.empty()) {
       fda = certify(B, loads);
@@ -3011,7 +3155,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       vr.printed_fraction = report_fraction(printed_fraction_nc);
       vr.accepted = false;
       vr.margin_required = options.margin_stop;
-      vr.rejection_reason = kRungNonConvergentReason;
+      vr.rejection_reason =
+          fea_matfree_load_unheld_count() > load_unheld_before_cert
+              ? kLoadUnheldReason
+              : kRungNonConvergentReason;
       measure_added_material(rho, vr, growth_target_saturated);
       // No margin, stress, orientation or settings — the certification never
       // completed. The rejection_reason is the flag that says so.

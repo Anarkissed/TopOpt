@@ -321,6 +321,14 @@ FinishRecheck recheck_file(const TriangleMesh& m, const TriangleMesh& raw, const
   const std::vector<char> occ = file_occupancy(m, sg), occ0 = file_occupancy(raw, sg);
   fb.recheck_ran = true;
   fb.margin = a.analysis.margin_effective;
+  // Interim (to_stage_switch.hpp, TOPOPT_SHOWN=lower): never show, or judge on,
+  // more than the loop certified. `fb.margin_before` is the certificate where the
+  // caller has set it (the run's finish); 0 = not set, nothing changes.
+  if (shown_margin_lower_on() && fb.margin_before > 0.0 && fb.margin_before < fb.margin) {
+    std::fprintf(stderr, "[shown] the re-check reads %.4g, the loop certified %.4g: the lower one is shown\n",
+                 fb.margin, fb.margin_before);
+    fb.margin = fb.margin_before;
+  }
   // ANY material in a Keep clear refuses (ruling 2026-11-03 19:55), each voxel confirmed
   // on the file and outside the part's own solid.
   fb.keep_clear_voxels = file_keep_clear_exact(m, sg, occ, clearance, exclude, part);
@@ -421,6 +429,21 @@ VersionFinish finish_and_recheck(const MinimizePlasticVariant& v, const JobDescr
     // Mass from the files themselves: the finished one, and the unfinished export.
     fb.mass_grams = density_g_cm3 * fb.volume_after_mm3 / 1000.0;
     fb.mass_before_grams = density_g_cm3 * fb.volume_before_mm3 / 1000.0;
+    // TO rebuild stage 2 (ledger M-07; the maintainer: "Never the solid unless the
+    // user set infill to 100%"): the grams he is shown are the grams printed at his
+    // walls and infill. The file's own volume gives the solid grams, as above; the
+    // share of it that is really printed comes from the re-check's wall-and-core
+    // model of this same file (printed_mass.hpp). At 100 % infill the share is 1.
+    if (to_stage2_on() && out.analysis.voxel_mass_solid_grams > 0.0 &&
+        out.analysis.voxel_mass_grams > 0.0) {
+      const double share = out.analysis.voxel_mass_grams / out.analysis.voxel_mass_solid_grams;
+      std::fprintf(stderr,
+                   "[finish] version vf %.2f: printed grams %.2f of %.2f solid (share %.3f at "
+                   "the job's walls and infill)\n",
+                   v.requested_volume_fraction, share * fb.mass_grams, fb.mass_grams, share);
+      fb.mass_grams *= share;
+      fb.mass_before_grams *= share;
+    }
     return finish_verdict_reason(
         recheck_file(m, raw, sg, clearance, nullptr, out.analysis, margin_required, fb,
                      fin.part));
@@ -792,6 +815,17 @@ std::shared_ptr<const ClearanceVoxelMask> region_lattice_mask(
   m->origin = grid.origin;
   m->inside.assign(grid.voxel_count(), 0);
   const int layers = region_depth_layers(depth_mm, grid.spacing);
+  if (to_stage1_on()) {
+    // TO rebuild stage 1: the protection is frozen by true distance in mm, so the
+    // lattice region is too, through the SAME function (mask_region_by_stage), and
+    // bar R5 stays structural. The voxel path below is untouched.
+    DesignMask frozen = make_active_mask(grid);
+    mask_region_by_stage(grid, model, region, MaskValue::FrozenSolid, layers, depth_mm,
+                         frozen);
+    for (std::size_t idx = 0; idx < frozen.size() && idx < m->inside.size(); ++idx)
+      if (frozen[idx] == MaskValue::FrozenSolid) m->inside[idx] = 1;
+    return m;
+  }
   const std::vector<int> members =
       region_member_voxels(grid, model, region, layers);
   for (int idx : cut_voxels(grid, members, region.cuts))

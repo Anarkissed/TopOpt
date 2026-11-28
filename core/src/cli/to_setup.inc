@@ -135,9 +135,11 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
     grid = voxelize(model.mesh, job.resolution);
     std::size_t tagged = 0;
     for (const int f : S.fixture_face_ids)
-      tagged += model_is_mesh
-                    ? tag_mesh_face(grid, model, f, VoxelTag::Fixture)
-                    : tag_step_face(grid, model, f, VoxelTag::Fixture);
+      tagged += to_stage1_on()
+                    ? tag_face_by_stage(grid, model, f, VoxelTag::Fixture)
+                    : model_is_mesh
+                        ? tag_mesh_face(grid, model, f, VoxelTag::Fixture)
+                        : tag_step_face(grid, model, f, VoxelTag::Fixture);
     if (tagged == 0)
       throw JobError("fixture faces tagged no voxels (resolution too coarse "
                      "for the selected faces?)");
@@ -261,6 +263,32 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
     // job that asked for three threads gets three here too rather than the
     // hardware's full count (which is what "he needs his machine" means).
     options.plsm.threads = production_matfree_thread_count();
+  }
+  // TO rebuild stage 2: the size the deciding stress is read over, from the job's
+  // material (half the lowest published length; 0 where nothing is published).
+  // Set LAST: the production load case replaces the whole options value above.
+  if (strength_mode() == StrengthMode::Size || strength_mode() == StrengthMode::Surface)
+    options.stress_reading_mm = reading_size_for_job_mm(job.material);
+  // TO rebuild stage 2, TOPOPT_STRENGTH=surface only: the drawn part's fill per voxel
+  // of this part grid, for the loop's stress view (pipeline.hpp, drawn_fill). Set
+  // after the production load case has replaced the options.
+  if (strength_mode() == StrengthMode::Surface) {
+    if (model.mesh.triangles.empty()) {
+      std::fprintf(stderr, "[drawn fill] no mesh: none\n");
+    } else {
+      options.drawn_fill = file_fill_fractions(model.mesh, grid, 8);
+      std::size_t cut = 0, outside = 0;
+      for (std::size_t i = 0; i < options.drawn_fill.size(); ++i) {
+        const double f = options.drawn_fill[i];
+        if (!(f > 0.0 && f < 1.0)) continue;
+        ++cut;
+        if (grid.tags[i] == VoxelTag::Empty) ++outside;
+      }
+      std::fprintf(stderr,
+                   "[drawn fill] %zu voxel(s) cut by the drawn faces, %zu of them with their "
+                   "centre outside the part\n",
+                   cut, outside);
+    }
   }
   return S;
 }
