@@ -172,7 +172,7 @@ public enum ResultsChecks {
                               printing: ResultsPrinting? = nil) -> [ResultsCheck] {
         guard let tab else { return [] }
         var out: [ResultsCheck] = []
-        if let a = answer, a.governing != nil {
+        if let a = answer, a.governing != nil || a.organic != nil {
             out.append(a.check())   // ★ notes25 C3 (4): "Not strong enough · Holds 1.34× · needs 1.5×", its place lit
         } else if let m = margin, m > 0 {
             let built = safetyMargin.map { " · built for \(Int(($0 * 100).rounded()))%" } ?? ""
@@ -186,7 +186,7 @@ public enum ResultsChecks {
         }
         // ★ his ruling 11-17 ("Yes, but only in the structural lattice stage"): the struts must pass too — said right under the
         // solid's line, the file made either way
-        if answer?.governing == nil, let s = struts, let line = s.strutsLine {
+        if answer?.governing == nil, answer?.organic == nil, let s = struts, let line = s.strutsLine {
             out.append(ResultsCheck(kind: s.strutsPass ? .ok : .warn,
                                     title: s.strutsPass ? "Struts strong enough" : s.strutNoRule ? "Struts not checked" : "Struts not strong enough",
                                     detail: line, tab: .strength))

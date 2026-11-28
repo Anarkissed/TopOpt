@@ -150,6 +150,8 @@ public struct LatticeFileFacts: Equatable, Sendable {
     /// ★ his 11-25 (print resolutions when exporting): the report's three levels, each with its resolution line and size; nil
     /// for a report that has none (an Organic file, or one made before them).
     public var resolutions: PrintResolutionFacts? = nil
+    /// ★ A1: the file carries the break check's own answer (`strength_answer`); the rod check's counts are not shown as the answer.
+    public var answerFile = false
 
     /// A Lattice run's report (it has `layout` and `mesh`), else nil.
     public static func decode(_ r: [String: Any]) -> LatticeFileFacts? {
@@ -181,8 +183,8 @@ public struct LatticeFileFacts: Equatable, Sendable {
             passesAtInfill: (solid["passes_at_infill_percent"] as? NSNumber)?.intValue,
             loadOnStruts: (frame["load_share"] as? NSNumber)?.doubleValue,
             strengthening: strengthening(r[LatticeFileButton.strengthenKey] as? [String: Any]),
-            strutsShort: (struts["under_safety"] as? NSNumber)?.intValue,
-            resolutions: PrintResolutionFacts.decode(r))
+            strutsShort: OrganicStrengthAnswer.decode(report: r) != nil ? nil : (struts["under_safety"] as? NSNumber)?.intValue,
+            resolutions: PrintResolutionFacts.decode(r), answerFile: OrganicStrengthAnswer.decode(report: r) != nil)
     }
 
     static func strengthening(_ o: [String: Any]?) -> Strengthening? {
@@ -228,10 +230,10 @@ public struct LatticeFileFacts: Equatable, Sendable {
         // (the per-round "thickened" sum counted a strut once per round, and "past your thickest" mixed two rounds: gone)
         if let g = strengthening, g.rounds > 0 {
             let more = g.changes   // ★ notes27 F2: the same words as Details' "Strengthened"
-            let short = strutsShort.map { $0 > 0 ? Self.count($0, "strut") + " still short" : "Every strut holds" }
+            let short = answerFile ? nil : strutsShort.map { $0 > 0 ? Self.count($0, "strut") + " still short" : "Every strut holds" }
             out.append(ResultsCheck(kind: g.passing ? .ok : .warn,
                                     title: "Strengthened \u{00B7} " + Self.count(g.rounds, "round"),
-                                    detail: g.passing ? "Weak struts thickened until they hold" : (short ?? "Some struts are still short"),
+                                    detail: answerFile ? "Struts thickened" : g.passing ? "Weak struts thickened until they hold" : (short ?? "Some struts are still short"),   // ★ A1: the verdict is the break check's
                                     more: more.isEmpty ? nil : more.joined(separator: " \u{00B7} "), tab: .strength))
         }
         let size = fileBytes > 0 ? " \u{00B7} " + Self.bytes(fileBytes) : ""

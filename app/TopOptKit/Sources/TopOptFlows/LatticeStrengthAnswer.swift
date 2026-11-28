@@ -67,9 +67,13 @@ public struct LatticeStrengthAnswer: Equatable, Sendable {
     /// ★ 362 (11-26): the printer's wall (the cover a Solid finish lays), when the page knows it — the Checks line then names
     /// only the fixes the wizard offers (LatticeReview's depth rule); nil: unknown (no Solid named when core gave the depth).
     public var solidWallMM: Double? = nil
+    /// ★ A1: the Organic file's own answer (`strength_answer`, from the break check); nil for any other file. When it is set it
+    /// IS the answer: the rod check's numbers above are empty and are never shown.
+    public var organic: OrganicStrengthAnswer? = nil
 
     /// ★ THE "how strong" number: the smaller of the two.
     public var governing: Double? {
+        if let o = organic { return o.number }
         switch (strutMargin, solidMargin) {
         case let (s?, d?): return Swift.min(s, d)
         case let (s?, nil): return s
@@ -79,23 +83,31 @@ public struct LatticeStrengthAnswer: Equatable, Sendable {
     }
     /// What governs it: the struts when their margin is the smaller.
     public var governs: Governs? {
+        if organic != nil { return nil }
         guard let g = governing else { return nil }
         if let s = strutMargin, s <= g { return .strut }
         return .solid
     }
     /// ★ THE "where it gives first": the weakest strut when struts govern, else the solid's weakest voxel.
     public var place: SIMD3<Double>? {
+        if let o = organic { return o.place }
         switch governs {
         case .strut?: return weakest.first?.at ?? solidWeakest
         case .solid?: return solidWeakest ?? weakest.first?.at
         case nil: return nil
         }
     }
-    public var holds: Bool { bareVines == nil && (governing ?? 0) >= required - 1e-9 }
+    public var holds: Bool { if let o = organic { return o.accepted }; return bareVines == nil && (governing ?? 0) >= required - 1e-9 }
 
     /// A print file's report (`lattice_file.json`: `layout`, `mesh` and a `strength` block with a margin), else nil.
     public static func decode(report r: [String: Any]) -> LatticeStrengthAnswer? {
         guard r["layout"] is [String: Any], r["mesh"] is [String: Any], let s = r["strength"] as? [String: Any] else { return nil }
+        // ★ A1: an Organic file with the break check's answer: that verdict, and none of the rod check's numbers
+        if let o = OrganicStrengthAnswer.decode(report: r) {
+            return LatticeStrengthAnswer(strutMargin: nil, solidMargin: nil, required: o.passLine ?? 1.5, weakest: [],
+                                         strutsShort: nil, strutsJudged: nil, solidPassesAtInfill: nil, loadShare: nil,
+                                         solidWeakest: nil, bareVines: nil, organic: o)
+        }
         func n(_ v: Any?) -> Double? { (v as? NSNumber)?.doubleValue }
         func p(_ v: Any?) -> SIMD3<Double>? {
             guard let a = v as? [NSNumber], a.count == 3 else { return nil }
@@ -127,11 +139,18 @@ public struct LatticeStrengthAnswer: Equatable, Sendable {
 
     /// "Holds 1.34× · needs 1.5×" — the Checks line's sub-line.
     public var checkLine: String {
-        "Holds " + StrengthWords.x(governing ?? 0) + " \u{00B7} needs " + StrengthWords.need(required)
+        if let o = organic { return o.checkLine }
+        return "Holds " + StrengthWords.x(governing ?? 0) + " \u{00B7} needs " + StrengthWords.need(required)
     }
 
     /// The Checks panel's ONE strength line (★ C3 (4): it replaces both the solid's and the struts' lines).
     public func check() -> ResultsCheck {
+        // ★ A1: the break check's verdict (pass, fail, not proven, not checked); its reason in the line, thin parts behind the (i)
+        if let o = organic {
+            return ResultsCheck(kind: o.accepted ? .ok : .warn, title: o.title, detail: o.checkLine,
+                                places: o.place.map { [$0] } ?? [],
+                                more: o.place == nil ? nil : "Where it gives way first is lit on the part", tab: .strength, info: o.info)
+        }
         // ★ notes30: a load on bare vines — what lands where and the fix (no margin: the check refused to judge it), the place
         // lit on the part, core's sentence behind the (i)
         if let b = bareVines {
@@ -153,6 +172,21 @@ public struct LatticeStrengthAnswer: Equatable, Sendable {
         var r: [ResultsDetailRow] = []
         func add(_ l: String, _ v: String?, info: String? = nil) {
             if let v, !v.isEmpty { r.append(ResultsDetailRow(label: l, value: v, info: info)) }
+        }
+        if let o = organic {
+            // ★ A1: the verdict, why (when it is not a pass), a number only where the verdict carries one, then the posts step
+            add("Strength", o.title, info: o.info)
+            if !o.reasonLine.isEmpty { add("Why", o.reasonLine) }
+            if let m = o.number {
+                add(o.kind == .pass ? "Holds" : "Breaks at",
+                    StrengthWords.x(m) + " your load" + (loadKg > 0 ? " (" + StrengthWords.load(m * loadKg, unit) + ")" : ""))
+            }
+            if let l = o.passLine { add("Needs", StrengthWords.need(l) + " your load" + (loadKg > 0 ? " (" + StrengthWords.load(l * loadKg, unit) + ")" : "")) }
+            add("Plastic", plastic)
+            if let n = o.postsStrengthened, n > 0 {
+                add("Posts strengthened", "\(n)", info: o.stillShort.isEmpty ? nil : o.stillShort.joined(separator: " "))
+            }
+            return r
         }
         if let b = bareVines {
             // ★ notes30: the check refused to judge it — no "Holds" number; what lands where, core's sentence behind the (i)

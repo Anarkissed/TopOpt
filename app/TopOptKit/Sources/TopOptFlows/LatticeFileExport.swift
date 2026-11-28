@@ -353,7 +353,11 @@ public struct LatticeFileReport: Equatable, Sendable {
         return LatticeFileReport(ok: o["ok"] as? Bool ?? false, why: o["why"] as? String ?? "", bars: l["bars"] as? Int ?? 0,
                                  plasticMM3: m["mm3"] as? Double ?? 0, partMM3: m["part_mm3"] as? Double ?? 0,
                                  clean: p["clean"] as? Bool ?? false, posts: (p["posts"] as? [Any])?.count ?? 0,
-                                 strength: (o["strength"] as? [String: Any]).map(LatticeFileStrength.init(block:)),
+                                 strength: (o["strength"] as? [String: Any]).map {
+                                     var f = LatticeFileStrength(block: $0)
+                                     f.organic = OrganicStrengthAnswer.decode(report: o)   // ★ A1
+                                     return f
+                                 },
                                  file: file, slicerSupports: o["slicer_supports"] as? String,
                                  weaveMesh: o["weave_mesh"] as? String)
     }
@@ -413,6 +417,9 @@ public struct LatticeFileStrength: Equatable, Sendable {
     public var strutMargin: Double?
     /// This lattice type has no strut rule (`strut.uncertified`; its `strut.margin_*` are null).
     public var strutNoRule: Bool
+    /// ★ A1: the break check's own answer for an Organic file (`strength_answer`); when set, `line` says it and the rod check's
+    /// numbers are not shown.
+    public var organic: OrganicStrengthAnswer? = nil
 
     /// ★ Why a "fail" failed (LatticeReview 11-17): a load on OPEN lattice (cut cells, cells that lost a left-out bar) has no
     /// load path whatever the solid's margin — the old open-finish rule.
@@ -507,6 +514,7 @@ public struct LatticeFileStrength: Equatable, Sendable {
 
     /// One plain line: whether the latticed part is strong enough for his loads at his safety margin.
     public var line: String {
+        if let o = organic { return o.checkLine.isEmpty ? o.title : o.title + " \u{00B7} " + o.checkLine }
         if notCertified { return "Strength not checked: " + Self.reason(notCertifiedReason) }
         let mass = massGrams > 0 ? String(format: " · %.0f g", massGrams) : ""
         let margin = Self.x(marginWorstCase)
@@ -1143,11 +1151,12 @@ public enum LatticeFileButton {
             o[SolidMarginVoxels.reportKey] = solid.json
             changed = true
         }
-        if let d = strutMargins, !d.isEmpty, d.count % 4 == 0 {
+        // ★ A1: a file with the break check's answer keeps no strut colouring (the rod check's margins are not its answer)
+        if o["strength_answer"] == nil, let d = strutMargins, !d.isEmpty, d.count % 4 == 0 {
             o[PrintFileParts.marginsKey] = d.base64EncodedString()   // per bar, the layout's order
             changed = true
         }
-        if let d = bars, PrintFileParts.parseBars(d) != nil {
+        if o["strength_answer"] == nil, let d = bars, PrintFileParts.parseBars(d) != nil {
             o[PrintFileParts.barsKey] = d.base64EncodedString()   // ★ notes27 F1: each bar's ends and width, the same order
             changed = true
         }

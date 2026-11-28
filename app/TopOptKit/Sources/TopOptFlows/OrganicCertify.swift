@@ -90,6 +90,8 @@ public enum OrganicCertify {
     /// app's `organic_strengthen`); `infillNow` the print settings' infill.
     public static func issues(report: [String: Any], infillNow: Int) -> [Issue] {
         guard let s = report["strength"] as? [String: Any] else { return [] }
+        // ★ A1: a file with the break check's own answer has no rod-check pop-ups; its verdict is on the Checks line
+        if report["strength_answer"] is [String: Any] { return [] }
         let verdict = s["verdict"] as? String ?? ((s["accepted"] as? Bool ?? true) ? "pass" : "fail")
         guard verdict != "pass" else { return [] }
         let reason = s["fail_reason"] as? String
