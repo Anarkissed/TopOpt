@@ -23,9 +23,12 @@ RunFinish make_run_finish(const JobDescription& job, const MinimizePlasticOption
   RunFinish f;
   const double outer = o.wall_line_width_outer_mm > 0.0 ? o.wall_line_width_outer_mm
                                                          : o.wall_line_width_mm;
-  f.ctx.min_thickness_mm = outer > 0.0 ? 2.0 * outer : 0.0;
+  // Stage 4, piece "wall" (to_stage_switch.hpp): a solid part's smallest wall is ONE
+  // line (the maintainer's ruling of 2026-11-26); unset, today's two.
+  const int wall_lines = stage4_on("wall") ? 1 : 2;
+  f.ctx.min_thickness_mm = outer > 0.0 ? wall_lines * outer : 0.0;
   char src[96];
-  std::snprintf(src, sizeof src, "2 \u00D7 outer wall line width (%.2f mm)", outer);
+  std::snprintf(src, sizeof src, "%d \u00D7 outer wall line width (%.2f mm)", wall_lines, outer);
   f.ctx.min_thickness_source = src;
   f.ctx.cell_mm = sg.spacing / static_cast<double>(std::max(1, job.output.smooth_factor));
   f.ctx.grid = &sg;

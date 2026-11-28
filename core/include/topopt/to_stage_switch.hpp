@@ -95,6 +95,29 @@ inline bool shown_margin_lower_on() {
   return v != nullptr && std::string(v) == "lower";
 }
 
+// STAGE 4, RULES INSIDE THE OPTIMISER (started 2026-11-27 by the maintainer's word).
+// TOPOPT_STAGE4 is a comma-separated list of the stage's pieces to turn on, or
+// "all": each piece sits behind its own name until the stage's gate passes.
+//   wall : a SOLID part's smallest wall is ONE outer line width (his ruling of
+//          2026-11-26; two lines is the lattice's rule), where today's finish
+//          holds two.
+// Unset = today's bytes.
+inline bool stage4_on(const char* piece) {
+  const char* v = std::getenv("TOPOPT_STAGE4");
+  if (v == nullptr) return false;
+  const std::string s(v), want(piece);
+  if (s == "all") return true;
+  std::size_t from = 0;
+  while (from <= s.size()) {
+    const std::size_t to = s.find(',', from);
+    const std::string item = s.substr(from, to == std::string::npos ? std::string::npos : to - from);
+    if (item == want) return true;
+    if (to == std::string::npos) break;
+    from = to + 1;
+  }
+  return false;
+}
+
 // THE CONNECTION RULE (stage 5; the reviewer's ruling of 2026-11-26, maintainer-
 // approved): TOPOPT_CONNECTION=support makes a piece of the design count as held
 // only when it reaches a SUPPORT (a fixed face). A loose piece that carries only

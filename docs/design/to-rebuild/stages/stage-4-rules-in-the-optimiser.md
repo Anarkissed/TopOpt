@@ -47,3 +47,17 @@ G: thinnest wall at least ONE line (0.45 mm) for a solid part (the test still sa
 For the reviewer: (a) "smallest wall = one line" against "a member needs 8 voxels through to be read": a one-line wall is about one voxel at today's resolutions; either the resolution rises with the thinnest member, or thin walls are a stated limit of the strength number (stage 2's close); (b) the split into 4a and 4b; (c) tests G and I as corrected above.
 For the maintainer, later: the overhang angle; who chooses the orientation.
 For #362: the plain lines the user sees for a sealed pocket and for "too thin for this resolution".
+
+## Results
+
+### 4a piece 1, `TOPOPT_STAGE4=wall`: a solid part's smallest wall is ONE line (2026-11-28 02:25; the 15 mm sample bracket, res 48, 0.45 mm line; built and run outside the lock)
+
+| version | unset (floor 0.9 mm = 2 lines): thin spots fixed / left; grams before -> after | `wall` (floor 0.45 mm = 1 line) |
+|---|---|---|
+| 0.68 | 1 / 2 left; 0.5777 -> 0.5833 | 3 / 0 left; 0.5777 -> 0.5788 |
+| 0.52 | 3 / 1 left; 0.4807 -> 0.4847 | 1 / 0 left; 0.4807 -> 0.4816 |
+| 0.38 | 1 / 2 left; 0.3952 -> 0.4022 | 4 / 0 left; 0.3952 -> 0.3957 |
+| 0.26 | 0 / 2 left; 0.3219 -> 0.3334 | 2 / 0 left; 0.3219 -> 0.3239 |
+
+With the two-line floor every version is left with one or two thin spots the finish cannot thicken ("would grow outside your part": the spot is 0.31 mm and would have to reach 0.9); with the one-line floor every thin spot is brought to 0.45 mm and NONE is left, and the finish adds a fifth to a tenth of the plastic it added before. Margins are unchanged to the third digit; four versions accepted both ways. UNSET: the four files are the same bytes as today. Test G reads 0.45 mm for a solid part from here. The lattice's two-line rule is not touched (this floor is the solid body's finish).
+
