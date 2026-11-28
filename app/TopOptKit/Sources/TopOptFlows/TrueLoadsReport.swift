@@ -103,7 +103,8 @@ public struct TrueLoadsReport: Equatable, Sendable {
         if let d = r["drawn_part"] as? [String: Any] {
             t.drawnPart = DrawnPart(printedGrams: num(d["printed_grams"]), solidGrams: num(d["solid_grams"]))
         }
-        let refused = (r["rejected_variants"] as? [[String: Any]] ?? []) + (r["variants"] as? [[String: Any]] ?? [])
+        // a refused version is a report-only row (core never accepts one whose load reaches no anchor)
+        let refused = r["rejected_variants"] as? [[String: Any]] ?? []
         t.noPathVolumeFractions = refused.filter { ($0["rejection_reason"] as? String) == noPathReason }
             .map { num($0["volume_fraction"]) }
         return t
