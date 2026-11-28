@@ -166,10 +166,21 @@ int main() {
             "§0a: the deeper drag freezes more voxel LAYERS");
       CHECK(a.depth_effective_mm > 0 && b.depth_effective_mm > 0,
             "§0a: and each states what those layers actually reach in mm");
-      // The effective depth is layers x spacing — the number that made 5 mm of
-      // protection into 5.115 mm on the maintainer's grid.
-      CHECK(std::abs(a.depth_effective_mm - a.depth_voxels * s.grid.spacing) < 1e-9,
-            "§0a: effective = layers x spacing, exactly");
+      // THE FACE FORM (TO rebuild stage 1, drawn-face loads ON from release 25):
+      // a protection is measured in mm from the DRAWN face, no longer rounded to
+      // whole voxel layers, so what it reaches is the depth asked, exactly. The
+      // voxel form read "effective = layers x spacing" — the rounding that made
+      // 5 mm of protection into 5.115 mm on the maintainer's grid; that rounding
+      // is what the face path removes, and the report must still say what the
+      // slab really reaches.
+      std::printf("§0a: face %d requested %.6g mm, effective %.6g mm, %d layers; "
+                  "face %d requested %.6g mm, effective %.6g mm, %d layers (spacing %.6g mm)\n",
+                  a.face_id, a.depth_requested_mm, a.depth_effective_mm, a.depth_voxels,
+                  b.face_id, b.depth_requested_mm, b.depth_effective_mm, b.depth_voxels,
+                  s.grid.spacing);
+      CHECK(std::abs(a.depth_effective_mm - a.depth_requested_mm) < 1e-9 &&
+                std::abs(b.depth_effective_mm - b.depth_requested_mm) < 1e-9,
+            "§0a: effective = the depth asked, in mm from the drawn face, exactly");
     }
   }
 
